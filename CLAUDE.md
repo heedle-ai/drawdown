@@ -7,8 +7,8 @@ weft (algebra) → warp (object store) → shuttle (execution) → drawdown (UI)
 
 1. **Keep the wiki current.** Any change that affects how a developer
    installs, builds, tests, uses or understands this repo updates the wiki
-   in the same piece of work: https://github.com/heddle/drawdown/wiki
-   (git: `https://github.com/heddle/drawdown.wiki.git`). Code, README and wiki
+   in the same piece of work: https://github.com/heedle-ai/drawdown/wiki
+   (git: `https://github.com/heedle-ai/drawdown.wiki.git`). Code, README and wiki
    must never disagree. If the wiki can't be updated, say so explicitly.
 2. **Wiki quality bar.** Every command is copy-pasteable and has been run.
    Every code snippet compiles and is checked by a test; prefer quoting a
