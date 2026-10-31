@@ -6,10 +6,12 @@ weft (algebra) → warp (object store) → shuttle (execution) → drawdown (UI)
 ## Rules for every change
 
 1. **Keep the wiki current.** Any change that affects how a developer
-   installs, builds, tests, uses or understands this repo updates the wiki
-   in the same piece of work: https://github.com/heedle-ai/drawdown/wiki
-   (git: `https://github.com/heedle-ai/drawdown.wiki.git`). Code, README and wiki
-   must never disagree. If the wiki can't be updated, say so explicitly.
+   installs, builds, tests, uses or understands this repo updates
+   `docs/wiki/` in the same commit or PR. That folder is the source of truth;
+   `.github/workflows/wiki.yml` mirrors it to
+   https://github.com/heedle-ai/drawdown/wiki on every push to `main`. Never edit
+   the wiki on GitHub directly: the next sync overwrites it. Code, README and
+   wiki must never disagree.
 2. **Wiki quality bar.** Every command is copy-pasteable and has been run.
    Every code snippet compiles and is checked by a test; prefer quoting a
    Go `Example` test with an `// Output:` comment. State required versions.
