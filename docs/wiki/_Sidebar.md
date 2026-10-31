@@ -9,3 +9,4 @@
 - [warp](https://github.com/heedle-ai/warp/wiki)
 - [shuttle](https://github.com/heedle-ai/shuttle/wiki)
 - [drawdown](https://github.com/heedle-ai/drawdown/wiki)
+- [loom](https://github.com/heedle-ai/loom/wiki)

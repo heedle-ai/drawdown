@@ -1,14 +1,3 @@
 # drawdown
 
-heedle-ai's UI. In weaving, a drawdown is the drawn picture of how the cloth will
-look. Here it shows what the system knows and how it came to know it.
-
-**Status:** placeholder. Stack not chosen yet.
-
-## Scope
-
-- Browse [warp](https://github.com/heedle-ai/warp) commits, trees and refs
-- Diff two commits by evidence, claims and outcomes, not just text
-- Trace a conclusion back through its provenance to its source objects
-- Link each commit to its Temporal execution; Temporal's own UI covers runs,
-  retries and history
+How to view what heedle-ai knows and how it came to know it. Today that's documentation: every run is a Git commit in a warp store, so `git log`, `git show`, `git diff` and Temporal's Web UI are the viewers. See the **[wiki](https://github.com/heedle-ai/drawdown/wiki)**.

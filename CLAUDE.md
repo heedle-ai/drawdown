@@ -1,6 +1,6 @@
 # drawdown
 
-heedle-ai's UI for commits, diffs and provenance. Part of heedle-ai:
+How to view heedle-ai's runs, history and provenance. Part of heedle-ai:
 weft (algebra) → draft (language) → shuttle (execution) → warp (object store) → drawdown (UI);
 loom runs them together.
 
@@ -35,7 +35,7 @@ why the existing tool can't do it.
 
 ## Repo-specific
 
-- Read-only over warp to start. Execution details link out to Temporal's Web
-  UI rather than being rebuilt here.
-- The stack isn't chosen yet; record the decision and its reasons in the wiki
-  when it is.
+- drawdown is documentation of how to view heedle-ai data with existing
+  tools (git, Temporal's Web UI). Every documented command must be run
+  against a real store before it's published.
+- Building a custom UI is new code: ask the owner first, per the first rule.
