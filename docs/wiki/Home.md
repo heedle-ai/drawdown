@@ -1,21 +1,29 @@
-**drawdown** is how you view what heedle-ai knows and how it came to know it.
+**drawdown** is heedle-ai's web UI. Write a [draft](https://github.com/heedle-ai/draft/wiki) program, run it on Temporal through [loom](https://github.com/heedle-ai/loom/wiki), and browse every run's record in [warp](https://github.com/heedle-ai/warp/wiki).
 
-Under heedle-ai's first rule (reuse battle-tested tools, never rewrite them), drawdown is currently **documentation, not code**. Everything below works today with tools you already have, because every [loom](https://github.com/heedle-ai/loom/wiki) run is a Git commit in a [warp](https://github.com/heedle-ai/warp/wiki) store, linked to a Temporal execution.
+[[/images/new-run.png|alt=Writing a program: live compile check and plan graph]]
 
-## Views available today
+| Page | What it shows |
+|---|---|
+| **New run** | An editor that compiles as you type: errors with line and column, or the plan as a graph. Example programs to load. A Run button |
+| **Runs** | Every run, newest first: status from Temporal, the program, timing, and its warp commit. Refreshes every 2 seconds |
+| **Run detail** | Status, workflow and run IDs, a link into Temporal's Web UI, the program, the plan graph and every node's output |
+| **Compare** | A diff between this run and the previous run of the same program, or the record before it. Shows exactly which evidence changed |
 
-| View | Tool | Command |
-|---|---|---|
-| History of runs | `git log` | `git --git-dir ~/heedle-store.git log --format='%h %s%n%(trailers:only,unfold)' refs/loom/runs` |
-| One run's contents | `git ls-tree`, `git show` | `git --git-dir ~/heedle-store.git ls-tree -r --name-only refs/loom/runs` |
-| A program or an output | `git show` | `git --git-dir ~/heedle-store.git show refs/loom/runs:outputs/n2` |
-| What changed between runs | `git diff` | `git --git-dir ~/heedle-store.git diff --stat refs/loom/runs~1 refs/loom/runs` |
-| Integrity | `git fsck` | `git --git-dir ~/heedle-store.git fsck --strict` |
-| Execution: timings, retries, event history | Temporal Web UI | http://localhost:8233, searching for the commit's `Shuttle-Workflow` trailer |
-| Browsing in a web page | GitHub | `git --git-dir ~/heedle-store.git push <private remote> refs/loom/runs` (**private** repositories only) |
+drawdown only reads and submits. It never edits history; every run goes through loom's workflow, so it's recorded and retried like any other.
 
-These commands are run against a real store in [loom → Getting Started](https://github.com/heedle-ai/loom/wiki/Getting-Started#5-inspect-runs-with-git).
+## Pages
 
-## Not built: a dedicated UI
+- [Getting Started](Getting-Started): run it and try the hello world in the browser
+- [How It Works](How-It-Works): the API, where each piece of data comes from, and the page's libraries
+- [Contributing](Contributing)
 
-A provenance view (which conclusions depend on which sources) needs data warp doesn't record yet, and a UI for it would be new code. Under the first rule, building one is a decision for the project owner, made when the existing tools stop being enough.
+## Where drawdown fits
+
+| Repo | Role |
+|---|---|
+| [weft](https://github.com/heedle-ai/weft/wiki) | Composition algebra |
+| [draft](https://github.com/heedle-ai/draft/wiki) | Language: s-expressions that compile to shuttle plans |
+| [shuttle](https://github.com/heedle-ai/shuttle/wiki) | Durable execution on Temporal |
+| [warp](https://github.com/heedle-ai/warp/wiki) | Content-addressed store |
+| **drawdown** | Web UI (this repo) |
+| [loom](https://github.com/heedle-ai/loom/wiki) | Runs them together: compile, execute, record |

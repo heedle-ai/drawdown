@@ -1,0 +1,76 @@
+## 1. Install and clone
+
+```bash
+brew install go git temporal          # macOS; on Linux see loom's Getting Started
+mkdir -p ~/src/heedle-ai && cd ~/src/heedle-ai
+for r in weft draft shuttle warp loom drawdown; do git clone https://github.com/heedle-ai/$r.git; done
+```
+
+## 2. Start Temporal and drawdown
+
+Terminal 1:
+
+```bash
+temporal server start-dev
+```
+
+Terminal 2:
+
+```bash
+cd ~/src/heedle-ai/drawdown
+go run ./cmd/drawdown -store ~/heedle-store.git
+```
+
+```text
+drawdown on http://127.0.0.1:8090 (store /Users/you/heedle-store.git, queue "loom", worker true)
+```
+
+Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the same process, so these two terminals are all you need. The worker knows draft's `echo` and the hello world's `source` and `assess` commands.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-store` | (required) | warp store directory; created if missing |
+| `-listen` | `127.0.0.1:8090` | Address to serve on. drawdown has no login, so keep it on localhost |
+| `-address` | `localhost:7233` | Temporal frontend |
+| `-temporal-ui` | `http://localhost:8233` | Temporal Web UI, for links |
+| `-queue` | `loom` | Task queue for runs; the list shows only runs on this queue |
+| `-namespace` | `default` | Temporal namespace, also used for links into Temporal's Web UI |
+| `-hosts` | (none) | Extra host names the UI answers to, comma-separated. `localhost` and loopback addresses always work; any other `Host` header is refused |
+| `-ref` | `refs/loom/runs` | warp ref runs are recorded on |
+| `-worker` | `true` | Also run a loom worker. Set `false` if you run `loom worker` separately. If Temporal is down at startup, the UI still starts and shows recorded history; restart once Temporal is up to run programs |
+| `-sources` | loom's `examples/hello/sources` | Folder the `source` command reads |
+
+## 3. Try the hello world
+
+1. Click **Example: shipment**. The plan appears as a graph: three sources feeding one assessment.
+2. Click **Run**. The run page shows *Running*, then *Completed*, with each output. The conclusion is *SUPPORTED, for: factory, weather*.
+
+   [[/images/run-detail.png|alt=A completed run: status, plan graph and outputs]]
+
+3. The storm passes. In `~/src/heedle-ai/loom`:
+
+   ```bash
+   printf 'on-time\nStorm has passed; the port reopened this morning.\n' > examples/hello/sources/weather.txt
+   ```
+
+4. Back on the main page, click **Run** again, then **vs. previous run of this program**. The diff shows exactly the weather evidence and the conclusion changing, and nothing else:
+
+   [[/images/diff.png|alt=Diff between two runs: only the weather source and the conclusion changed]]
+
+5. Click **Open in Temporal Web UI** on any run to see its full execution history there.
+
+Restore the sources afterwards with `git -C ~/src/heedle-ai/loom checkout examples/hello/sources`.
+
+## Your own programs
+
+Type any program using `echo`, `source` or `assess`. Errors show as you type, with line and column; **Run** is enabled only when the program compiles. To add commands, see [draft → Adding Commands](https://github.com/heedle-ai/draft/wiki/Adding-Commands), and register them in `cmd/drawdown/main.go` for both the registry and the worker.
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `connect to Temporal at localhost:7233` | The dev server isn't running |
+| A run stays *Running* | No worker on the queue: drawdown was started with `-worker=false` and no `loom worker` is running |
+| "Temporal: …" error above the runs list | Temporal is unreachable; recorded runs are still listed, with status *Recorded*. Runs that failed aren't recorded, so they only appear while Temporal can list them |
+| `host not allowed` | You opened the UI by a host name other than localhost or a loopback address; add it with `-hosts` |
+| Blank page | The page loads React and its libraries from cdn.jsdelivr.net; check your network |
