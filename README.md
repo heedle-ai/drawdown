@@ -1,6 +1,6 @@
 # drawdown
 
-heddle's UI. In weaving, a drawdown is the drawn picture of how the cloth will
+heedle-ai's UI. In weaving, a drawdown is the drawn picture of how the cloth will
 look. Here it shows what the system knows and how it came to know it.
 
 **Status:** placeholder. Stack not chosen yet.

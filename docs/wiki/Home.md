@@ -1,4 +1,4 @@
-**drawdown** will be heddle's UI: a way to see what the system knows and how it came to know it.
+**drawdown** will be heedle-ai's UI: a way to see what the system knows and how it came to know it.
 
 > **Status: Planned.** No code yet, and no stack has been chosen. When one is, the decision and the reasons for it will be recorded here.
 

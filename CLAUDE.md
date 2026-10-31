@@ -1,7 +1,17 @@
 # drawdown
 
-heddle's UI for commits, diffs and provenance. Part of heddle:
-weft (algebra) → warp (object store) → shuttle (execution) → drawdown (UI).
+heedle-ai's UI for commits, diffs and provenance. Part of heedle-ai:
+weft (algebra) → draft (language) → shuttle (execution) → warp (object store) → drawdown (UI);
+loom runs them together.
+
+## The first rule: reuse, never rewrite
+
+Build on battle-tested tools (Git, Temporal, the Go standard library and
+other long-proven software) through their public interfaces. Add on top of
+them; never fork, patch, mutate or reimplement them. Prefer the real tool to
+a reimplementation of it (for example the `git` CLI over a Go port of Git).
+If a task seems to need a rewrite, stop and ask the owner first, explaining
+why the existing tool can't do it.
 
 ## Rules for every change
 
