@@ -1,6 +1,6 @@
 # drawdown
 
-How to view heedle-ai's runs, history and provenance. Part of heedle-ai:
+heedle-ai's web UI: write, run and browse programs and their records. Part of heedle-ai:
 weft (algebra) → draft (language) → shuttle (execution) → warp (object store) → drawdown (UI);
 loom runs them together.
 
@@ -35,7 +35,16 @@ why the existing tool can't do it.
 
 ## Repo-specific
 
-- drawdown is documentation of how to view heedle-ai data with existing
-  tools (git, Temporal's Web UI). Every documented command must be run
-  against a real store before it's published.
-- Building a custom UI is new code: ask the owner first, per the first rule.
+- **Read and submit only.** The UI never edits history: it compiles with
+  draft, submits through loom, and reads Temporal and warp. All writes go
+  through loom's workflow.
+- **No build step.** The page is `static/index.html` plus `static/app.js`:
+  React 18 (UMD), htm, mermaid and diff2html from jsDelivr, each pinned to
+  an exact version with a Subresource Integrity hash. To upgrade a library,
+  change the version and recompute its hash from the npm package file.
+- **Never put unescaped data in HTML.** React escapes text; mermaid runs with
+  `securityLevel: "strict"`; diff2html escapes diff content.
+- **Every API behaviour has a test** in `server_test.go`, using a fake
+  Temporal that really runs plans in Temporal's test suite.
+- `go.mod` replaces the heedle-ai modules with `../` checkouts until they
+  are published; clone all repos as siblings.
