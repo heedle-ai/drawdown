@@ -1,22 +1,21 @@
-**drawdown** will be heedle-ai's UI: a way to see what the system knows and how it came to know it.
+**drawdown** is how you view what heedle-ai knows and how it came to know it.
 
-> **Status: Planned.** No code yet, and no stack has been chosen. When one is, the decision and the reasons for it will be recorded here.
+Under heedle-ai's first rule (reuse battle-tested tools, never rewrite them), drawdown is currently **documentation, not code**. Everything below works today with tools you already have, because every [loom](https://github.com/heedle-ai/loom/wiki) run is a Git commit in a [warp](https://github.com/heedle-ai/warp/wiki) store, linked to a Temporal execution.
 
-## Scope
+## Views available today
 
-| View | Shows |
-|---|---|
-| Refs and history | Branches, and the commit graph behind each one |
-| Commit | Root tree, inputs and outputs, and a link to the Temporal execution that produced it |
-| Diff | What changed between two commits: evidence, claims and outcomes, not just text |
-| Provenance | Trace any conclusion back to its sources, and see which conclusions depend on a source |
+| View | Tool | Command |
+|---|---|---|
+| History of runs | `git log` | `git --git-dir ~/heedle-store.git log --format='%h %s%n%(trailers:only,unfold)' refs/loom/runs` |
+| One run's contents | `git ls-tree`, `git show` | `git --git-dir ~/heedle-store.git ls-tree -r --name-only refs/loom/runs` |
+| A program or an output | `git show` | `git --git-dir ~/heedle-store.git show refs/loom/runs:outputs/n2` |
+| What changed between runs | `git diff` | `git --git-dir ~/heedle-store.git diff --stat refs/loom/runs~1 refs/loom/runs` |
+| Integrity | `git fsck` | `git --git-dir ~/heedle-store.git fsck --strict` |
+| Execution: timings, retries, event history | Temporal Web UI | http://localhost:8233, searching for the commit's `Shuttle-Workflow` trailer |
+| Browsing in a web page | GitHub | `git --git-dir ~/heedle-store.git push <private remote> refs/loom/runs` (**private** repositories only) |
 
-## Out of scope
+These commands are run against a real store in [loom → Getting Started](https://github.com/heedle-ai/loom/wiki/Getting-Started#5-inspect-runs-with-git).
 
-- **Execution details** (retries, timings, event history). Temporal's Web UI already shows these, so drawdown links to it rather than rebuilding it.
-- **Writing to warp.** drawdown starts read-only. Changes like promoting a ref or resolving a merge go through shuttle workflows, so they're recorded and can be retried.
+## Not built: a dedicated UI
 
-## Depends on
-
-- [warp](https://github.com/heedle-ai/warp/wiki) milestone 1 (the store) for anything to show
-- [warp](https://github.com/heedle-ai/warp/wiki) milestone 3 (provenance) for the provenance view
+A provenance view (which conclusions depend on which sources) needs data warp doesn't record yet, and a UI for it would be new code. Under the first rule, building one is a decision for the project owner, made when the existing tools stop being enough.
