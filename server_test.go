@@ -18,6 +18,7 @@ import (
 
 	"go.temporal.io/sdk/testsuite"
 
+	"github.com/heedle-ai/draft"
 	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
@@ -45,6 +46,10 @@ func (f *fakeTemporal) Live(_ context.Context, wf string) ([]drawdown.LiveFrame,
 }
 
 func (f *fakeTemporal) Submit(ctx context.Context, in loom.RunInput) (string, string, error) {
+	// Real Temporal only starts the workflow here; a worker runs and records
+	// it later. The fake does both now, so it mustn't be bound by the
+	// server's Temporal timeout (DRAW-18).
+	ctx = context.WithoutCancel(ctx)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var suite testsuite.WorkflowTestSuite
@@ -138,6 +143,31 @@ func (w *world) call(method, path string, body any) (int, map[string]any, string
 	return res.StatusCode, m, string(raw)
 }
 
+// submit starts a run of program on the default history and fails the
+// test unless it is accepted.
+func (w *world) submit(program string) {
+	w.t.Helper()
+	if code, _, raw := w.call("POST", "/api/runs", map[string]string{"program": program}); code != 202 {
+		w.t.Fatalf("submit %s: %d %s", program, code, raw)
+	}
+}
+
+// TestInv_FakeRecordsOutsideTheTimeout: the fake Temporal runs and records
+// a submitted program itself, which real Temporal leaves to a worker, so it
+// must finish even when the server's Temporal timeout has expired.
+func TestInv_FakeRecordsOutsideTheTimeout(t *testing.T) {
+	w := newWorld(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	p, err := draft.Compile(context.Background(), shipment.Registry(), draft.Source(`(echo "a")`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := w.fake.Submit(ctx, loom.RunInput{Program: `(echo "a")`, Plan: p, Ref: loom.DefaultRef}); err != nil {
+		t.Errorf("submit with an expired context: %v", err)
+	}
+}
+
 func TestCompile(t *testing.T) {
 	w := newWorld(t)
 	code, m, _ := w.call("POST", "/api/compile", map[string]string{"program": shipment.Program})
@@ -165,7 +195,10 @@ func TestSubmitListDetailDiff(t *testing.T) {
 		t.Fatalf("submit: %d %v", code, first)
 	}
 	os.WriteFile(filepath.Join(w.sources, "weather.txt"), []byte("on-time\nStorm has passed.\n"), 0o644)
-	_, second, _ := w.call("POST", "/api/runs", map[string]string{"program": shipment.Program})
+	code, second, raw := w.call("POST", "/api/runs", map[string]string{"program": shipment.Program})
+	if code != 202 {
+		t.Fatalf("second submit: %d %s", code, raw)
+	}
 	if first["workflowId"] != second["workflowId"] || first["runId"] == second["runId"] {
 		t.Fatalf("same program should share a workflow ID, not a run ID: %v %v", first, second)
 	}
@@ -203,7 +236,7 @@ func TestSubmitListDetailDiff(t *testing.T) {
 
 func TestList_WhenTemporalIsDown_ShowsRecords(t *testing.T) {
 	w := newWorld(t)
-	w.call("POST", "/api/runs", map[string]string{"program": `(echo "a")`})
+	w.submit(`(echo "a")`)
 	w.fake.down = true
 	_, list, _ := w.call("GET", "/api/runs", nil)
 	runs := list["runs"].([]any)
@@ -270,7 +303,9 @@ func TestGuard_RefusesCrossSiteAndRebinding(t *testing.T) {
 func TestList_IsBoundedAndRecordedRowsHaveNoDuration(t *testing.T) {
 	w := newWorld(t)
 	for i := 0; i < drawdown.ListLimit+5; i++ {
-		w.call("POST", "/api/runs", map[string]string{"program": fmt.Sprintf(`(echo "%d")`, i)})
+		if code, _, raw := w.call("POST", "/api/runs", map[string]string{"program": fmt.Sprintf(`(echo "%d")`, i)}); code != 202 {
+			t.Fatalf("submit %d: %d %s", i, code, raw)
+		}
 	}
 	w.fake.down = true
 	start := time.Now()
@@ -291,7 +326,7 @@ func TestList_IsBoundedAndRecordedRowsHaveNoDuration(t *testing.T) {
 
 func TestDetail_ReportsTemporalErrorWhenNoRecord(t *testing.T) {
 	w := newWorld(t)
-	w.call("POST", "/api/runs", map[string]string{"program": `(echo "a")`})
+	w.submit(`(echo "a")`)
 	code, m, _ := w.call("GET", "/api/runs/loom-x/run-404", nil)
 	if code != 404 || !strings.Contains(m["error"].(string), "Temporal: not found") {
 		t.Errorf("detail of an unknown run: %d %v", code, m)

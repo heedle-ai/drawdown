@@ -75,7 +75,7 @@ All page content is rendered as text by React, mermaid runs with `securityLevel:
 
 Every response also carries a **Content-Security-Policy**: scripts only from drawdown itself and `cdn.jsdelivr.net`, network requests only to drawdown, no plugins, no framing. If a library were ever compromised past its integrity hash, it still couldn't send your data anywhere else. Inline styles are allowed because mermaid draws with them.
 
-The server reads warp only through the `History` interface (`Resolve`, `Log`, `Tree`, `Blob`, `Parents`, `FindByTrailer`, `Diff`), so it has no way to write history: runs are recorded only by loom's workflow.
+The server reads warp only through the `History` interface (`Resolve`, `Log`, `Tree`, `Blob`, `Blobs`, `Parents`, `FindByTrailer`, `Diff`, `Refs`), so it has no way to write history: runs are recorded only by loom's workflow.
 
 These checks are tested in `TestGuard_RefusesCrossSiteAndRebinding`, `TestPage` (the policy) and `TestInv_UIOnlyReadsHistory`.
 
