@@ -2,6 +2,7 @@ package drawdown
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"regexp"
 
@@ -12,6 +13,7 @@ import (
 	"go.temporal.io/sdk/converter"
 
 	"github.com/heedle-ai/loom"
+	"github.com/heedle-ai/reed"
 )
 
 var queueName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -58,6 +60,32 @@ func (t TemporalClient) Describe(ctx context.Context, workflowID, runID string) 
 		return Execution{}, err
 	}
 	return execution(d.WorkflowExecutionInfo), nil
+}
+
+// Live reads the heartbeat of each browsing step running in the run's plan
+// (its child workflow, "<workflow ID>/plan"): reed heartbeats a Frame.
+func (t TemporalClient) Live(ctx context.Context, workflowID string) ([]LiveFrame, error) {
+	d, err := t.Client.DescribeWorkflowExecution(ctx, workflowID+"/plan", "")
+	if err != nil {
+		return nil, err
+	}
+	var out []LiveFrame
+	for _, a := range d.PendingActivities {
+		if a.GetActivityType().GetName() != reed.ActivityName || a.GetHeartbeatDetails() == nil {
+			continue
+		}
+		var f reed.Frame
+		if converter.GetDefaultDataConverter().FromPayloads(a.GetHeartbeatDetails(), &f) != nil {
+			continue
+		}
+		out = append(out, liveFrame(a.GetActivityId(), a.GetAttempt(), f))
+	}
+	return out, nil
+}
+
+func liveFrame(id string, attempt int32, f reed.Frame) LiveFrame {
+	return LiveFrame{Activity: id, Attempt: attempt, URL: f.URL,
+		Image: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(f.JPEG)}
 }
 
 func execution(info *workflow.WorkflowExecutionInfo) Execution {

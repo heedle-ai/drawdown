@@ -59,6 +59,17 @@ type Temporal interface {
 	Submit(ctx context.Context, in loom.RunInput) (workflowID, runID string, err error)
 	List(ctx context.Context) ([]Execution, error)
 	Describe(ctx context.Context, workflowID, runID string) (Execution, error)
+	// Live returns the latest live frame of each browsing step a run is
+	// executing now: reed heartbeats them to Temporal.
+	Live(ctx context.Context, workflowID string) ([]LiveFrame, error)
+}
+
+// LiveFrame is what a browsing step last showed.
+type LiveFrame struct {
+	Activity string `json:"activity"` // Temporal activity ID
+	Attempt  int32  `json:"attempt"`
+	URL      string `json:"url"`
+	Image    string `json:"image"` // data:image/jpeg;base64,…
 }
 
 // History is the read-only part of a warp store that the UI uses. A
@@ -105,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/diff/{from}/{to}", s.diff)
 	mux.HandleFunc("GET /api/refs", s.refs)
 	mux.HandleFunc("GET /api/beliefs", s.beliefs)
+	mux.HandleFunc("GET /api/live/{workflow}", s.live)
 	return s.guard(mux)
 }
 
@@ -545,6 +557,21 @@ func (s *Server) beliefs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ref": ref, "beliefs": bs})
+}
+
+// live returns the live frames of a run's browsing steps, from Temporal.
+func (s *Server) live(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
+	defer cancel()
+	frames, err := s.Temporal.Live(ctx, r.PathValue("workflow"))
+	if frames == nil {
+		frames = []LiveFrame{}
+	}
+	resp := map[string]any{"frames": frames}
+	if err != nil {
+		resp["temporalError"] = err.Error()
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // readJSON accepts only an application/json body holding exactly one JSON

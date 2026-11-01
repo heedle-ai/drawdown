@@ -38,6 +38,8 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 | `-hosts` | (none) | Extra host names the UI answers to, comma-separated. `localhost` and loopback addresses always work; any other `Host` header is refused |
 | `-ref` | `refs/loom/runs` | warp ref runs are recorded on |
 | `-worker` | `true` | Also run a loom worker. Set `false` if you run `loom worker` separately. If Temporal is down at startup, the UI still starts and shows recorded history; restart once Temporal is up to run programs |
+| `-browser-image` | none | A [reed](https://github.com/heedle-ai/reed/wiki/Getting-Started) browser image ID, for programs that use `browse`. Without it, `browse` steps fail with `BrowserSetup` |
+| `-browser-network` | Podman's default | The Podman network browse pods join |
 | `-sources` | loom's `examples/hello/sources` | Folder the `source` command reads |
 
 ## 3. Try the hello world

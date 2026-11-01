@@ -34,6 +34,14 @@ type fakeTemporal struct {
 	down    bool
 	mu      sync.Mutex
 	execs   []drawdown.Execution
+	live    map[string][]drawdown.LiveFrame
+}
+
+func (f *fakeTemporal) Live(_ context.Context, wf string) ([]drawdown.LiveFrame, error) {
+	if f.down {
+		return nil, errors.New("connection refused")
+	}
+	return f.live[wf], nil
 }
 
 func (f *fakeTemporal) Submit(ctx context.Context, in loom.RunInput) (string, string, error) {
@@ -435,5 +443,23 @@ func TestList_CraftedMergeTrailerDoesNotCrash(t *testing.T) {
 	}
 	if code, _, _ := w.call("GET", "/api/beliefs?ref=refs/loom/crafted", nil); code != 200 {
 		t.Fatalf("beliefs of a record without an index: %d", code)
+	}
+}
+
+// TestLive_ReturnsFramesAndReportsTemporalErrors: the live endpoint passes
+// on the browsing steps' latest frames, and says when Temporal is down.
+func TestLive_ReturnsFramesAndReportsTemporalErrors(t *testing.T) {
+	w := newWorld(t)
+	w.fake.live = map[string][]drawdown.LiveFrame{"wf-1": {{Activity: "5", Attempt: 1, URL: "https://a.example/", Image: "data:image/jpeg;base64,/9g="}}}
+	code, m, _ := w.call("GET", "/api/live/wf-1", nil)
+	if fr := m["frames"].([]any); code != 200 || len(fr) != 1 || fr[0].(map[string]any)["url"] != "https://a.example/" {
+		t.Errorf("%d %v", code, m)
+	}
+	if _, m, _ := w.call("GET", "/api/live/other", nil); len(m["frames"].([]any)) != 0 {
+		t.Errorf("unknown workflow: %v", m)
+	}
+	w.fake.down = true
+	if _, m, _ := w.call("GET", "/api/live/wf-1", nil); m["temporalError"] == nil {
+		t.Errorf("Temporal down: %v", m)
 	}
 }
