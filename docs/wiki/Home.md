@@ -28,6 +28,7 @@ drawdown only reads and submits. It never edits history; every run goes through 
 | [draft](https://github.com/heedle-ai/draft/wiki) | Language: s-expressions that compile to shuttle plans |
 | [shuttle](https://github.com/heedle-ai/shuttle/wiki) | Durable execution on Temporal |
 | [bobbin](https://github.com/heedle-ai/bobbin/wiki) | A fresh Podman container per agent step |
+| [reed](https://github.com/heedle-ai/reed/wiki) | A fresh browser per browsing step, reaching only the hosts its program names |
 | [warp](https://github.com/heedle-ai/warp/wiki) | Content-addressed store |
 | **drawdown** | Web UI (this repo) |
 | [loom](https://github.com/heedle-ai/loom/wiki) | Runs them together: compile, execute, record |

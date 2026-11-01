@@ -4,8 +4,9 @@
 //	go run ./cmd/drawdown -store ~/heedle-store.git
 //
 // then open http://127.0.0.1:8090. By default it also runs a loom worker
-// in the same process, with draft's echo command and the hello world's
-// source and assess commands, so one command is enough to try things out.
+// in the same process, with draft's echo command, the hello world's source
+// and assess commands, and reed's browse (give -browser-image to use it),
+// so one command is enough to try things out.
 package main
 
 import (
@@ -23,6 +24,7 @@ import (
 	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
+	"github.com/heedle-ai/reed"
 	"github.com/heedle-ai/warp"
 )
 
@@ -37,6 +39,8 @@ func main() {
 	ref := flag.String("ref", loom.DefaultRef, "warp ref runs are recorded on")
 	runWorker := flag.Bool("worker", true, "also run a loom worker in this process")
 	sources := flag.String("sources", shipment.SourcesDir(), "directory for the source command's files")
+	browserImage := flag.String("browser-image", "", "reed browser image ID for the browse command (scripts/build-image.sh in heedle-ai/reed)")
+	browserNetwork := flag.String("browser-network", "", "Podman network browse containers join (default: Podman's)")
 	flag.Parse()
 	if *store == "" {
 		log.Fatal("give -store DIR, e.g. -store ~/heedle-store.git")
@@ -58,9 +62,14 @@ func main() {
 	}
 	defer c.Close()
 
+	reg := shipment.Registry()
+	browser := reed.Browser{Image: *browserImage, Network: *browserNetwork}
 	if *runWorker {
-		w := worker.New(c, *queue, worker.Options{})
-		loom.Register(w, s, shipment.Registry())
+		w := worker.New(c, *queue, reed.WorkerOptions(worker.Options{}))
+		if err := reed.Register(reg, w, browser); err != nil {
+			log.Fatal(err)
+		}
+		loom.Register(w, s, reg)
 		shipment.RegisterCommands(w, *sources)
 		// Without Temporal the worker can't start; keep serving the
 		// recorded history, and say why runs won't execute.
@@ -71,10 +80,13 @@ func main() {
 		}
 	}
 
+	if !*runWorker {
+		reg.MustRegister(reed.BuiltinSpec())
+	}
 	srv := &drawdown.Server{
 		Store:      s,
 		Ref:        *ref,
-		Registry:   shipment.Registry(),
+		Registry:   reg,
 		Temporal:   drawdown.TemporalClient{Client: c, Queue: *queue},
 		TemporalUI: *temporalUI,
 		Namespace:  *namespace,

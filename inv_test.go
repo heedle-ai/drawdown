@@ -58,3 +58,31 @@ func TestInv_UIOnlyReadsHistory(t *testing.T) {
 	}
 	var _ drawdown.History = (*warp.Store)(nil) // a real store still fits
 }
+
+// TestInv_AgentTabs checks the page's agent-tab code, which has no Go
+// counterpart: every agent link opens one named tab per agent (so opening
+// it again focuses that tab), names never get rel=noopener (which would
+// stop the reuse), agents nest by dots, and images from outputs and live
+// frames are shown only as JPEG data URLs. The full behaviour is checked
+// by driving the page in Chromium (How It Works, Tested).
+func TestInv_AgentTabs(t *testing.T) {
+	b, err := os.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(b)
+	for _, want := range []string{
+		`const tabName = (ref) => "heedle-agent-" + agentName(ref);`,
+		`return html` + "`" + `<a href=${agentHref(agent)} target=${tabName(agent)}>${children}</a>` + "`" + `;`,
+		`const i = name.lastIndexOf(".");`,
+		`page.screenshot.startsWith("data:image/jpeg;base64,")`,
+		`f.image.startsWith("data:image/jpeg;base64,")`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("static/app.js lacks %s", want)
+		}
+	}
+	if regexp.MustCompile(`target=\$\{tabName[^>]*noopener`).MatchString(js) {
+		t.Error("agent links must not use rel=noopener: the named tab couldn't be reused")
+	}
+}

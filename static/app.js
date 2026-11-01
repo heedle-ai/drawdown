@@ -39,6 +39,130 @@ const took = (a, b) => {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 };
 
+// === Agents: one tab each ==================================================
+// An agent is a ref under refs/loom/. Its sub-agents are the refs that
+// extend its name with a dot: research.web is a sub-agent of research.
+// (Git can't have both refs/loom/research and refs/loom/research/web.)
+
+const AGENT_PREFIX = "refs/loom/";
+const agentName = (ref) => (ref.startsWith(AGENT_PREFIX) ? ref.slice(AGENT_PREFIX.length) : ref);
+const parentRef = (ref) => {
+  const name = agentName(ref);
+  const i = name.lastIndexOf(".");
+  return i < 0 ? null : AGENT_PREFIX + name.slice(0, i);
+};
+const FAMILY = ["#2f5d8a", "#9a6700", "#2e7d32", "#8e3b8e", "#b3471d", "#1f7a7a"];
+const familyColor = (ref) => {
+  const root = agentName(ref).split(".")[0];
+  let h = 0;
+  for (const c of root) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return FAMILY[h % FAMILY.length];
+};
+// Every agent's links open in one named tab per agent: opening an agent
+// again focuses its tab instead of making another.
+const tabName = (ref) => "heedle-agent-" + agentName(ref);
+const agentHref = (ref) => "#/agent/" + encodeURIComponent(ref);
+
+// setTab names this tab and gives it the agent family's colour.
+function setTab(title, color) {
+  document.title = title;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="${color}"/></svg>`;
+  let link = document.querySelector("link[rel=icon]");
+  if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+  link.href = "data:image/svg+xml," + encodeURIComponent(svg);
+}
+
+function AgentLink({ agent, children }) {
+  return html`<a href=${agentHref(agent)} target=${tabName(agent)}>${children}</a>`;
+}
+
+function usePoll(path, every, deps) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let live = true, timer;
+    setData(null);
+    const load = async () => {
+      try { const r = await api(path); if (live) setData(r.data); } catch {}
+      if (live && every) timer = setTimeout(load, every);
+    };
+    load();
+    return () => { live = false; clearTimeout(timer); };
+  }, deps);
+  return data;
+}
+
+// A browse step's output is the page it saw (reed's JSON); show it as one.
+function Output({ text }) {
+  let page = null;
+  try { const p = JSON.parse(text); if (p && p.reed === 1) page = p; } catch {}
+  if (!page) return html`<pre>${text}</pre>`;
+  return html`
+    <div class="page">
+      ${page.screenshot && page.screenshot.startsWith("data:image/jpeg;base64,") &&
+        html`<img src=${page.screenshot} alt=${"Screenshot of " + page.url} />`}
+      <div>
+        <div><strong>${page.title || "(no title)"}</strong></div>
+        <div class="mono muted">${page.url}</div>
+        <div class="muted">Allowed: ${(page.allowed || []).join(", ")} · Blocked requests: ${page.blockedTotal ?? (page.blocked || []).length}</div>
+        <details><summary>Page text</summary><pre>${page.text}</pre></details>
+        ${(page.blocked || []).length > 0 && html`<details><summary>Blocked requests</summary><pre>${page.blocked.join("\n")}</pre></details>`}
+      </div>
+    </div>`;
+}
+
+// The context tree: every agent, nested by name.
+function AgentTree({ refs, current }) {
+  const sorted = [...refs].sort((a, b) => agentName(a).localeCompare(agentName(b)));
+  return html`
+    <ul class="tree" aria-label="Agents">${sorted.map((r) => {
+      const depth = agentName(r).split(".").length - 1;
+      const leaf = agentName(r).split(".").pop();
+      return html`<li key=${r} style=${{ paddingLeft: 8 + depth * 22 + "px" }} class=${r === current ? "current" : ""}>
+        <span class="dot" style=${{ background: familyColor(r) }}></span>
+        <span class="mono">${leaf}</span>
+        <${AgentLink} agent=${r}>Open tab ↗<//>
+      </li>`;
+    })}</ul>`;
+}
+
+// Live view: the latest frame of each browsing step a running run has.
+function LiveView({ workflow }) {
+  const data = usePoll(`/api/live/${encodeURIComponent(workflow)}`, 2000, [workflow]);
+  if (!data || !data.frames || data.frames.length === 0) return null;
+  return html`${data.frames.map((f) => html`
+    <div class="card live" key=${f.activity}>
+      <div class="row"><span class="status Running">● LIVE</span>
+        <span class="mono">${f.url}</span>
+        <span class="muted">attempt ${f.attempt} · view only · updates every few seconds</span></div>
+      ${f.image.startsWith("data:image/jpeg;base64,") && html`<img src=${f.image} alt=${"Live view of " + f.url} />`}
+    </div>`)}`;
+}
+
+function AgentPage({ agent, refs, info }) {
+  useEffect(() => { setTab(agentName(agent).split(".").pop() + " · agent", familyColor(agent)); }, [agent]);
+  const runs = usePoll("/api/runs" + q(agent), 2000, [agent]);
+  const name = agentName(agent).split(".");
+  const parent = parentRef(agent);
+  const children = refs.filter((r) => parentRef(r) === agent);
+  const running = runs && runs.runs ? runs.runs.filter((r) => r.status === "Running") : [];
+  return html`
+    <nav class="crumbs mono" aria-label="Breadcrumb">${name.map((seg, i) => {
+      const ref = AGENT_PREFIX + name.slice(0, i + 1).join(".");
+      return html`<span key=${ref}>${i > 0 && html`<span class="muted"> › </span>`}${i === name.length - 1
+        ? html`<strong>${seg}</strong>` : html`<${AgentLink} agent=${ref}>${seg}<//>`}</span>`;
+    })}</nav>
+    ${running.length > 0 && html`<h2>Running now</h2>${running.map((r) => html`<${LiveView} key=${r.runId} workflow=${r.workflowId} />`)}`}
+    <h2>Beliefs</h2><${Beliefs} history=${agent} />
+    <h2>New run on this agent</h2><${NewRun} info=${info} history=${agent} />
+    <h2>Runs</h2><${Runs} history=${agent} />
+    <h2>Family</h2>
+    <div class="card">
+      <div>Parent: ${parent ? html`<${AgentLink} agent=${parent}>${agentName(parent)}<//>` : html`<span class="muted">none (a root agent)</span>`}</div>
+      <div>Sub-agents: ${children.length ? children.map((c, i) => html`<span key=${c}>${i > 0 && ", "}<${AgentLink} agent=${c}>${agentName(c).split(".").pop()}<//></span>`)
+        : html`<span class="muted">none. Make one with <code>loom branch -from ${agent} -to ${agent}.name</code></span>`}</div>
+    </div>`;
+}
+
 // === Plan graph ============================================================
 
 function mermaidText(plan) {
@@ -173,7 +297,7 @@ function Beliefs({ history: ref }) {
       <tbody>${data.beliefs.map((b) => html`
         <tr key=${b.question}>
           <td><pre>${b.program.trim().slice(0, 200)}</pre></td>
-          <td><pre>${(b.leaves || []).map((id) => b.outputs[id] || "").join("\n").trim()}</pre></td>
+          <td>${(b.leaves || []).map((id) => html`<${Output} key=${id} text=${b.outputs[id] || ""} />`)}</td>
         </tr>`)}
       </tbody>
     </table>`;
@@ -214,6 +338,7 @@ function RunDetail({ workflow, run, history: ref }) {
       ${rec && html`<span class="muted">Record</span><span class="mono">${rec.commit}</span>`}
     </div>
     ${data.data.temporalError && html`<p class="error">Temporal: ${data.data.temporalError}</p>`}
+    ${status === "Running" && html`<${LiveView} workflow=${workflow} />`}
     ${!rec && html`<p class="muted">${status === "Running" ? "Running… the record appears when the run finishes."
       : status === "Completed" ? "Recording…" : "No record: only completed runs are recorded."}</p>`}
     ${rec && html`
@@ -225,7 +350,7 @@ function RunDetail({ workflow, run, history: ref }) {
       <table class="list">
         <thead><tr><th>Node</th><th>Output</th></tr></thead>
         <tbody>${Object.keys(rec.outputs).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map((k) => html`
-          <tr key=${k}><td class="mono">${k}</td><td><pre>${rec.outputs[k]}</pre></td></tr>`)}
+          <tr key=${k}><td class="mono">${k}</td><td><${Output} text=${rec.outputs[k]} /></td></tr>`)}
         </tbody>
       </table>
       <h2>Compare</h2>
@@ -282,24 +407,28 @@ function App() {
     load();
     return () => { live = false; clearTimeout(timer); };
   }, []);
+  useEffect(() => { if (route[0] !== "agent") setTab("drawdown · agents", "#2f5d8a"); }, [route[0]]);
   if (!info) return html`<main><p class="muted">Loading…</p></main>`;
   // A remembered ref that no longer exists falls back to the default.
   const current = refs.includes(ref) ? ref : info.ref;
 
   let body;
-  if (route[0] === "run" && route.length === 3) body = html`<${RunDetail} workflow=${route[1]} run=${route[2]} history=${current} />`;
+  if (route[0] === "agent" && route.length === 2) body = html`<${AgentPage} agent=${route[1]} refs=${refs} info=${info} />`;
+  else if (route[0] === "run" && route.length === 3) body = html`<${RunDetail} workflow=${route[1]} run=${route[2]} history=${current} />`;
   else if (route[0] === "diff" && route.length === 3) body = html`<${Diff} from=${route[1]} to=${route[2]} />`;
-  else body = html`<h2>New run</h2><${NewRun} info=${info} history=${current} />
+  else body = html`<h2>Agents</h2><${AgentTree} refs=${refs.length ? refs : [info.ref]} current=${current} />
+    <h2>New run</h2><${NewRun} info=${info} history=${current} />
     <h2>Beliefs</h2><${Beliefs} history=${current} />
     <h2>Runs</h2><${Runs} history=${current} />`;
 
   return html`
     <header>
       <h1><a href="#/">drawdown</a></h1>
-      <span class="meta">heedle-ai · history${" "}
+      <span class="meta">heedle-ai ·${" "}
+        ${route[0] === "agent" ? html`agent <code>${agentName(route[1])}</code> · <a href="#/">all agents</a> ·${" "}` : html`history${" "}
         <select aria-label="history" value=${current} onChange=${(e) => setRef(e.target.value)}>
           ${(refs.length ? refs : [info.ref]).map((r) => html`<option key=${r} value=${r}>${r}</option>`)}
-        </select> ·${" "}
+        </select> ·${" "}`}
         <a href=${info.temporalUI} target="_blank" rel="noopener">Temporal Web UI ↗</a></span>
     </header>
     <main>${body}</main>`;
