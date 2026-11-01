@@ -37,6 +37,10 @@ jobs:
           path: warp
       - uses: actions/checkout@v4
         with:
+          repository: heedle-ai/bobbin
+          path: bobbin
+      - uses: actions/checkout@v4
+        with:
           repository: heedle-ai/loom
           path: loom
       - uses: actions/setup-go@v5

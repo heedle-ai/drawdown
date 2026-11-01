@@ -62,7 +62,7 @@ func (f *fakeTemporal) Submit(ctx context.Context, in loom.RunInput) (string, st
 	}); err != nil {
 		return "", "", err
 	}
-	f.execs = append(f.execs, drawdown.Execution{WorkflowID: wf, RunID: run, Status: "Completed", Start: start, Close: start.Add(time.Second)})
+	f.execs = append(f.execs, drawdown.Execution{WorkflowID: wf, RunID: run, Status: "Completed", Start: start, Close: start.Add(time.Second), Ref: in.Ref})
 	return wf, run, nil
 }
 
@@ -333,5 +333,107 @@ func TestServeForBrowser(t *testing.T) {
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// TestBranchesMergesAndBeliefs: runs on a branch, a merge back into main,
+// and what the UI shows for each: the refs, each ref's runs, the merge
+// row, and the merged beliefs.
+func TestBranchesMergesAndBeliefs(t *testing.T) {
+	w := newWorld(t)
+	const whatif = "refs/loom/what-if"
+	const slip = "(pipe (source \"factory\") (assess \"production will slip\"))"
+	rec := &loom.Recorder{Store: w.fake.store}
+	if code, _, raw := w.call("POST", "/api/runs", map[string]string{"program": shipment.Program}); code != 202 {
+		t.Fatal(raw)
+	}
+	mainHead, _, _ := w.fake.store.Resolve(context.Background(), loom.DefaultRef)
+	if err := rec.Branch(context.Background(), loom.BranchRecordInput{To: whatif, At: mainHead}); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(w.sources, "factory.txt"), []byte("on-time\nLine 2 repaired.\n"), 0o644)
+	for _, src := range []string{shipment.Program, slip} {
+		if code, _, raw := w.call("POST", "/api/runs", map[string]string{"program": src, "ref": whatif}); code != 202 {
+			t.Fatal(raw)
+		}
+	}
+	if code, _, raw := w.call("POST", "/api/runs", map[string]string{"program": `(echo "main only")`}); code != 202 {
+		t.Fatal(raw)
+	}
+	whatifHead, _, _ := w.fake.store.Resolve(context.Background(), whatif)
+	if _, err := rec.Merge(context.Background(), loom.MergeRecordInput{Into: loom.DefaultRef, Theirs: whatifHead,
+		WorkflowID: "loom-merge-x", RunID: "merge-1", At: time.Unix(1761999999, 0)}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, m, _ := w.call("GET", "/api/refs", nil)
+	if fmt.Sprint(m["refs"]) != "[refs/loom/runs refs/loom/what-if]" || m["default"] != loom.DefaultRef {
+		t.Errorf("refs = %v", m)
+	}
+	_, m, _ = w.call("GET", "/api/runs?ref="+whatif, nil)
+	if runs := m["runs"].([]any); len(runs) != 3 { // the branch's two runs and the run it started from
+		t.Errorf("what-if runs = %d, want 3: %v", len(runs), runs)
+	}
+	_, m, _ = w.call("GET", "/api/runs", nil)
+	var merge map[string]any
+	for _, r := range m["runs"].([]any) {
+		if r.(map[string]any)["status"] == "Merged" {
+			merge = r.(map[string]any)
+		}
+	}
+	if merge == nil || merge["merged"] != string(whatifHead) || merge["parent"] == nil {
+		t.Errorf("no merge row on main: %v", m["runs"])
+	}
+	_, m, _ = w.call("GET", "/api/beliefs", nil)
+	bs := m["beliefs"].([]any)
+	got := map[string]string{}
+	for _, b := range bs {
+		b := b.(map[string]any)
+		outs := b["outputs"].(map[string]any)
+		got[b["program"].(string)] = fmt.Sprint(outs["n3"], outs["n1"], outs["n0"])
+	}
+	if len(got) != 3 || !strings.Contains(got[shipment.Program], "for:     weather\n") ||
+		!strings.Contains(got[slip], "production will slip: NOT SUPPORTED") || !strings.Contains(got[`(echo "main only")`], "main only") {
+		t.Errorf("merged beliefs = %v", got)
+	}
+
+	for _, bad := range []string{"refs/heads/main", "refs/loom/a..b", "HEAD"} {
+		if code, _, _ := w.call("GET", "/api/runs?ref="+bad, nil); code != 400 {
+			t.Errorf("runs?ref=%s: %d, want 400", bad, code)
+		}
+		if code, _, _ := w.call("GET", "/api/beliefs?ref="+bad, nil); code != 400 {
+			t.Errorf("beliefs?ref=%s: %d, want 400", bad, code)
+		}
+		if code, _, _ := w.call("POST", "/api/runs", map[string]string{"program": `(echo "x")`, "ref": bad}); code != 400 {
+			t.Errorf("submit ref %s: %d, want 400", bad, code)
+		}
+	}
+	if code, m, _ := w.call("GET", "/api/beliefs?ref=refs/loom/empty", nil); code != 200 || len(m["beliefs"].([]any)) != 0 {
+		t.Errorf("beliefs of a missing ref: %d %v", code, m)
+	}
+}
+
+// TestList_CraftedMergeTrailerDoesNotCrash: a root commit carrying a
+// Loom-Merge trailer is listed as an ordinary record, never dereferenced as
+// a merge. (Review 4: it crashed the runs list.)
+func TestList_CraftedMergeTrailerDoesNotCrash(t *testing.T) {
+	w := newWorld(t)
+	s := w.fake.store
+	ctx := context.Background()
+	tree, _ := s.PutTree(ctx, nil)
+	c, err := s.Commit(ctx, warp.CommitSpec{Tree: tree, Message: "crafted",
+		Trailers: []warp.Trailer{{Key: loom.TrailerMerge, Value: "x"}},
+		Author:   warp.Signature{Name: "x", Email: "x@x", When: time.Unix(1, 0)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Advance(ctx, "refs/loom/crafted", "", c); err != nil {
+		t.Fatal(err)
+	}
+	if code, m, raw := w.call("GET", "/api/runs?ref=refs/loom/crafted", nil); code != 200 || len(m["runs"].([]any)) != 1 {
+		t.Fatalf("%d %s", code, raw)
+	}
+	if code, _, _ := w.call("GET", "/api/beliefs?ref=refs/loom/crafted", nil); code != 200 {
+		t.Fatalf("beliefs of a record without an index: %d", code)
 	}
 }
