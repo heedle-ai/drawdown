@@ -305,6 +305,9 @@ func TestPage(t *testing.T) {
 		if res.StatusCode != 200 || !strings.Contains(string(b), want) {
 			t.Errorf("GET %s: %d, missing %q", path, res.StatusCode, want)
 		}
+		if csp := res.Header.Get("Content-Security-Policy"); csp != drawdown.ContentSecurityPolicy || !strings.Contains(csp, "script-src 'self' https://cdn.jsdelivr.net;") {
+			t.Errorf("GET %s: Content-Security-Policy = %q", path, csp)
+		}
 	}
 	_, info, _ := w.call("GET", "/api/info", nil)
 	if info["ref"] != loom.DefaultRef || len(info["commands"].([]any)) != 3 {

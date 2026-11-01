@@ -10,6 +10,7 @@ trap 'rm -rf "$work"' EXIT
 fail=0
 n=0
 while read -r url sri; do
+  [ "$url" = BAD ] && { fail=1; continue; }  # the scan below already said why
   if [[ ! $url =~ ^https://cdn\.jsdelivr\.net/npm/((@[^/]+/)?[^@/]+)@([^/]+)/(.*)$ ]]; then
     echo "sri: $url is not a pinned jsDelivr npm URL" >&2; fail=1; continue
   fi
@@ -24,14 +25,33 @@ while read -r url sri; do
     echo "sri: $url: page has $sri, npm package gives $got" >&2; fail=1
   fi
   n=$((n + 1))
-done < <(python3 -c '
-import re
+done < <(python3 - <<'PY'
+import re, sys
+# Every external URL in the page or its script, in any quoting, must be a
+# <script src> or <link href> in index.html that carries an integrity hash
+# and pins an exact x.y.z version. app.js may load nothing external.
 html = open("static/index.html").read()
+js = open("static/app.js").read()
+url = re.compile(r"(?:https?:)?//[A-Za-z0-9.-]+\.[A-Za-z]{2,}[^\s\"'`<>)]*")
+tagged = {}
 for tag in re.findall(r"<(?:script|link)\b[^>]*>", html):
-    url = re.search(r"(?:src|href)=\"(https?://[^\"]+)\"", tag)
-    if url:
-        sri = re.search(r"integrity=\"([^\"]+)\"", tag)
-        print(url.group(1), sri.group(1) if sri else "MISSING")
-')
+    m = re.search(r"\b(?:src|href)\s*=\s*[\"']?((?:https?:)?//[^\"'\s>]+)", tag)
+    if m:
+        sri = re.search(r"\bintegrity\s*=\s*[\"']?([^\"'\s>]+)", tag)
+        tagged[m.group(1)] = sri.group(1) if sri else "MISSING"
+bad = False
+for u in url.findall(html):
+    if u not in tagged and not u.startswith("http://www.w3.org/"):
+        print(f"sri: {u} is loaded or linked outside a <script>/<link> with integrity", file=sys.stderr); bad = True
+for u in url.findall(js):
+    print(f"sri: app.js refers to {u}; load external code only from index.html, with integrity", file=sys.stderr); bad = True
+for u, sri in tagged.items():
+    if not re.match(r"^https://cdn\.jsdelivr\.net/npm/(@[^/]+/)?[^@/]+@\d+\.\d+\.\d+/", u):
+        print(f"sri: {u} must be https://cdn.jsdelivr.net/npm/PKG@X.Y.Z/... (an exact version)", file=sys.stderr); bad = True
+    print(u, sri)
+if bad:
+    print("BAD BAD")
+PY
+)
 [ "$fail" = 0 ] && echo "sri: $n CDN files match their npm packages"
 exit "$fail"

@@ -59,9 +59,22 @@ type Temporal interface {
 	Describe(ctx context.Context, workflowID, runID string) (Execution, error)
 }
 
+// History is the read-only part of a warp store that the UI uses. A
+// *warp.Store satisfies it. The UI never writes: it has no way to commit,
+// store objects or move refs (DRAW-8); all writes go through loom.
+type History interface {
+	Resolve(ctx context.Context, ref string) (warp.ID, bool, error)
+	Log(ctx context.Context, from warp.ID, limit int) ([]warp.CommitInfo, error)
+	Tree(ctx context.Context, id warp.ID) ([]warp.Entry, error)
+	Blob(ctx context.Context, id warp.ID) ([]byte, error)
+	Parents(ctx context.Context, commit warp.ID) (tree warp.ID, parents []warp.ID, err error)
+	FindByTrailer(ctx context.Context, from warp.ID, key, value string) (warp.ID, bool, error)
+	Diff(ctx context.Context, a, b warp.ID) ([]byte, error)
+}
+
 // Server serves the UI and its API.
 type Server struct {
-	Store      *warp.Store
+	Store      History            // read-only; see History
 	Ref        string             // warp ref runs are recorded on
 	Registry   *registry.Registry // commands programs may use
 	Temporal   Temporal
@@ -106,9 +119,20 @@ func (s *Server) guard(next http.Handler) http.Handler {
 				return
 			}
 		}
+		w.Header().Set("Content-Security-Policy", ContentSecurityPolicy)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		next.ServeHTTP(w, r)
 	})
 }
+
+// ContentSecurityPolicy is sent with every response. Scripts come only from
+// this server and the pinned jsDelivr files (each also checked by its
+// integrity hash); the page can talk only to this server, can't be framed,
+// and loads no plugins. Inline styles are allowed because mermaid draws
+// its diagrams with them.
+const ContentSecurityPolicy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; " +
+	"style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src 'self' data:; " +
+	"connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
 func (s *Server) allowedHost(hostport string) bool {
 	host, _, err := net.SplitHostPort(hostport)
