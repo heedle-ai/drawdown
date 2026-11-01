@@ -42,7 +42,11 @@ drawdown has no login. It's meant for your own machine, so it listens on `127.0.
 
 All page content is rendered as text by React, mermaid runs with `securityLevel: "strict"` and graph IDs are positions rather than plan data, and diff2html escapes diff content.
 
-These checks are tested in `TestGuard_RefusesCrossSiteAndRebinding`.
+Every response also carries a **Content-Security-Policy**: scripts only from drawdown itself and `cdn.jsdelivr.net`, network requests only to drawdown, no plugins, no framing. If a library were ever compromised past its integrity hash, it still couldn't send your data anywhere else. Inline styles are allowed because mermaid draws with them.
+
+The server reads warp only through the `History` interface (`Resolve`, `Log`, `Tree`, `Blob`, `Parents`, `FindByTrailer`, `Diff`), so it has no way to write history: runs are recorded only by loom's workflow.
+
+These checks are tested in `TestGuard_RefusesCrossSiteAndRebinding`, `TestPage` (the policy) and `TestInv_UIOnlyReadsHistory`.
 
 ## The page
 

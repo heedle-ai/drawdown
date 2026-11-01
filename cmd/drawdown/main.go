@@ -60,7 +60,7 @@ func main() {
 
 	if *runWorker {
 		w := worker.New(c, *queue, worker.Options{})
-		loom.Register(w, s)
+		loom.Register(w, s, shipment.Registry())
 		shipment.RegisterCommands(w, *sources)
 		// Without Temporal the worker can't start; keep serving the
 		// recorded history, and say why runs won't execute.

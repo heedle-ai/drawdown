@@ -10,7 +10,7 @@
   openssl dgst -sha384 -binary package/umd/react.production.min.js | base64
   ```
 
-  `bash .github/sri.sh` checks every file this way, and runs in CI.
+  `bash .github/sri.sh` checks every file this way, and runs in CI. It also finds every external URL in `index.html` and `app.js`, however it's quoted, and fails unless it's a `<script>` or `<link>` with an integrity hash and an exact `X.Y.Z` version. `app.js` may not refer to any external URL.
 
 - **A mistake isn't fixed until it has a row on [Invariants](Invariants)** and a guard that fails on the old code. CI checks the page against the tests in both directions.
 - **Update this wiki in the same change.** The pages live in `docs/wiki/` and publish on every push to `main`.
