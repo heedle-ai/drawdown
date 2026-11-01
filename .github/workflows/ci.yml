@@ -52,3 +52,10 @@ jobs:
       - name: test
         working-directory: drawdown
         run: go test -race ./...
+      - name: invariants
+        working-directory: drawdown
+        run: bash .github/invariants.sh
+      - name: sri
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: drawdown
+        run: bash .github/sri.sh

@@ -3,6 +3,7 @@
 - [Home](Home)
 - [Getting Started](Getting-Started)
 - [How It Works](How-It-Works)
+- [Invariants](Invariants)
 - [Contributing](Contributing)
 
 **heedle-ai**

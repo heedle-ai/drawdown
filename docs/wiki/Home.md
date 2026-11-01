@@ -9,12 +9,15 @@
 | **Run detail** | Status, workflow and run IDs, a link into Temporal's Web UI, the program, the plan graph and every node's output |
 | **Compare** | A diff between this run and the previous run of the same program, or the record before it. Shows exactly which evidence changed |
 
+[[/images/sources.svg|alt=Where drawdown's data comes from]]
+
 drawdown only reads and submits. It never edits history; every run goes through loom's workflow, so it's recorded and retried like any other.
 
 ## Pages
 
 - [Getting Started](Getting-Started): run it and try the hello world in the browser
 - [How It Works](How-It-Works): the API, where each piece of data comes from, and the page's libraries
+- [Invariants](Invariants): every guarantee, the test or check that guards it, and the mistake it came from
 - [Contributing](Contributing)
 
 ## Where drawdown fits
