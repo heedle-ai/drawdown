@@ -44,6 +44,8 @@ for u in url.findall(html):
     if u not in tagged and not u.startswith("http://www.w3.org/"):
         print(f"sri: {u} is loaded or linked outside a <script>/<link> with integrity", file=sys.stderr); bad = True
 for u in url.findall(js):
+    if u == "http://www.w3.org/2000/svg":
+        continue  # the SVG namespace: an identifier, never fetched
     print(f"sri: app.js refers to {u}; load external code only from index.html, with integrity", file=sys.stderr); bad = True
 for u, sri in tagged.items():
     if not re.match(r"^https://cdn\.jsdelivr\.net/npm/(@[^/]+/)?[^@/]+@\d+\.\d+\.\d+/", u):
