@@ -9,6 +9,7 @@ import (
 	"go.temporal.io/api/workflow/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
 
 	"github.com/heedle-ai/loom"
 )
@@ -70,6 +71,12 @@ func execution(info *workflow.WorkflowExecutionInfo) Execution {
 	}
 	if ts := info.GetCloseTime(); ts != nil {
 		e.Close = ts.AsTime()
+	}
+	if p, ok := info.GetMemo().GetFields()[loom.MemoRef]; ok {
+		var ref string
+		if converter.GetDefaultDataConverter().FromPayload(p, &ref) == nil {
+			e.Ref = ref
+		}
 	}
 	return e
 }

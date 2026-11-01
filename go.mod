@@ -40,6 +40,7 @@ require (
 
 // Until the heedle-ai modules are published, build against sibling checkouts.
 replace (
+	github.com/heedle-ai/bobbin => ../bobbin
 	github.com/heedle-ai/draft => ../draft
 	github.com/heedle-ai/loom => ../loom
 	github.com/heedle-ai/shuttle => ../shuttle

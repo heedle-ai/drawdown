@@ -13,6 +13,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"mime"
 	"net"
@@ -49,6 +50,7 @@ type Execution struct {
 	Status     string    `json:"status"` // Running, Completed, Failed, …
 	Start      time.Time `json:"start"`
 	Close      time.Time `json:"close,omitzero"`
+	Ref        string    `json:"ref,omitempty"` // the ref it records on (loom.MemoRef), if known
 }
 
 // Temporal is what the UI needs from Temporal. TemporalClient implements
@@ -70,12 +72,13 @@ type History interface {
 	Parents(ctx context.Context, commit warp.ID) (tree warp.ID, parents []warp.ID, err error)
 	FindByTrailer(ctx context.Context, from warp.ID, key, value string) (warp.ID, bool, error)
 	Diff(ctx context.Context, a, b warp.ID) ([]byte, error)
+	Refs(ctx context.Context, prefix string) ([]warp.RefInfo, error)
 }
 
 // Server serves the UI and its API.
 type Server struct {
 	Store      History            // read-only; see History
-	Ref        string             // warp ref runs are recorded on
+	Ref        string             // the default ref: runs are recorded on it unless a request names another
 	Registry   *registry.Registry // commands programs may use
 	Temporal   Temporal
 	TemporalUI string            // base URL of Temporal's Web UI, for links
@@ -100,6 +103,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/runs", s.list)
 	mux.HandleFunc("GET /api/runs/{workflow}/{run}", s.detail)
 	mux.HandleFunc("GET /api/diff/{from}/{to}", s.diff)
+	mux.HandleFunc("GET /api/refs", s.refs)
+	mux.HandleFunc("GET /api/beliefs", s.beliefs)
 	return s.guard(mux)
 }
 
@@ -169,6 +174,34 @@ func (s *Server) namespace() string {
 
 type programRequest struct {
 	Program string `json:"program"`
+	Ref     string `json:"ref,omitempty"` // submit only; default Server.Ref
+}
+
+// RefPrefix is where the refs the UI offers live: loom's default ref and
+// branches made next to it.
+const RefPrefix = "refs/loom/"
+
+// ref is the ref a request is about: its "ref" query parameter, or the
+// server's default. It must be a valid ref under RefPrefix.
+func (s *Server) ref(ctx context.Context, name string) (string, error) {
+	if name == "" {
+		return s.Ref, nil
+	}
+	if !strings.HasPrefix(name, RefPrefix) && name != s.Ref {
+		return "", fmt.Errorf("%w: ref %q isn't under %s", warp.ErrInvalid, name, RefPrefix)
+	}
+	if err := warp.CheckRef(ctx, name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// badRef replies 400 for an unusable ref and reports whether it did.
+func badRef(w http.ResponseWriter, err error) bool {
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: err.Error()})
+	}
+	return err != nil
 }
 
 // apiError is an error reply; Line and Col are set for syntax errors.
@@ -215,9 +248,13 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
 		return
 	}
+	ref, err := s.ref(r.Context(), req.Ref)
+	if badRef(w, err) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
 	defer cancel()
-	wf, run, err := s.Temporal.Submit(ctx, loom.RunInput{Program: req.Program, Plan: p, Ref: s.Ref})
+	wf, run, err := s.Temporal.Submit(ctx, loom.RunInput{Program: req.Program, Plan: p, Ref: ref})
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
 		return
@@ -231,6 +268,11 @@ type runRow struct {
 	Execution
 	Commit  warp.ID `json:"commit,omitempty"`
 	Program string  `json:"program,omitempty"`
+	// Merge rows: the commit merged in, the first parent, and how many
+	// conflicting questions were resolved.
+	Merged   warp.ID `json:"merged,omitempty"`
+	Parent   warp.ID `json:"parent,omitempty"`
+	Resolved int     `json:"resolved,omitempty"`
 }
 
 func trailer(c warp.CommitInfo, key string) string {
@@ -242,14 +284,14 @@ func trailer(c warp.CommitInfo, key string) string {
 	return ""
 }
 
-func (s *Server) head(ctx context.Context) (warp.ID, bool, error) {
-	return s.Store.Resolve(ctx, s.Ref)
-}
-
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	ref, err := s.ref(ctx, r.URL.Query().Get("ref"))
+	if badRef(w, err) {
+		return
+	}
 	var recs []warp.CommitInfo
-	head, ok, err := s.head(ctx)
+	head, ok, err := s.Store.Resolve(ctx, ref)
 	if err == nil && ok {
 		recs, err = s.Store.Log(ctx, head, ListLimit)
 	}
@@ -269,6 +311,11 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	rows := []runRow{}
 	seen := map[string]bool{}
 	for _, e := range execs {
+		// Executions for other refs belong to those refs' lists. One
+		// without a ref memo is shown on the default ref.
+		if e.Ref != ref && !(e.Ref == "" && ref == s.Ref) {
+			continue
+		}
 		row := runRow{Execution: e}
 		if c, ok := byRun[e.RunID]; ok {
 			row.Commit = c.ID
@@ -280,6 +327,19 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	// Records Temporal didn't list (retention expired, outside its latest
 	// results, or Temporal unreachable) are still history.
 	for _, c := range recs {
+		if merged := trailer(c, loom.TrailerMerge); merged != "" && len(c.Parents) == 2 {
+			n := 0
+			for _, t := range c.Trailers {
+				if t.Key == loom.TrailerResolve {
+					n++
+				}
+			}
+			rows = append(rows, runRow{
+				Execution: Execution{WorkflowID: trailer(c, loom.TrailerWorkflow), RunID: trailer(c, loom.TrailerRun), Status: "Merged", Start: c.Time},
+				Commit:    c.ID, Merged: warp.ID(merged), Parent: c.Parents[0], Resolved: n,
+			})
+			continue
+		}
 		if run := trailer(c, loom.TrailerRun); !seen[run] {
 			rows = append(rows, runRow{
 				Execution: Execution{WorkflowID: trailer(c, loom.TrailerWorkflow), RunID: run, Status: "Recorded", Start: c.Time},
@@ -350,7 +410,11 @@ func (s *Server) detail(w http.ResponseWriter, r *http.Request) {
 		resp["temporalError"] = terr.Error()
 	}
 
-	rec, found, err := s.findRecord(ctx, wf, run)
+	ref, err := s.ref(ctx, r.URL.Query().Get("ref"))
+	if badRef(w, err) {
+		return
+	}
+	rec, found, err := s.findRecord(ctx, ref, wf, run)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
 		return
@@ -367,8 +431,8 @@ func (s *Server) detail(w http.ResponseWriter, r *http.Request) {
 
 // findRecord finds a run's record by its trailer, letting git search the
 // history (git log --grep), and the previous record of the same workflow.
-func (s *Server) findRecord(ctx context.Context, wf, run string) (record, bool, error) {
-	head, ok, err := s.head(ctx)
+func (s *Server) findRecord(ctx context.Context, ref, wf, run string) (record, bool, error) {
+	head, ok, err := s.Store.Resolve(ctx, ref)
 	if err != nil || !ok {
 		return record{}, false, err
 	}
@@ -435,6 +499,52 @@ func (s *Server) diff(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write(d)
+}
+
+// refs lists the refs the UI offers: every ref under RefPrefix, and the
+// default ref even before it exists.
+func (s *Server) refs(w http.ResponseWriter, r *http.Request) {
+	refs, err := s.Store.Refs(r.Context(), RefPrefix)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
+		return
+	}
+	names := []string{}
+	hasDefault := false
+	for _, ref := range refs {
+		names = append(names, ref.Name)
+		hasDefault = hasDefault || ref.Name == s.Ref
+	}
+	if !hasDefault {
+		names = append([]string{s.Ref}, names...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"refs": names, "default": s.Ref})
+}
+
+// beliefs returns a ref's beliefs index: the latest run of every question
+// asked on its history (loom.Beliefs).
+func (s *Server) beliefs(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ref, err := s.ref(ctx, r.URL.Query().Get("ref"))
+	if badRef(w, err) {
+		return
+	}
+	head, ok, err := s.Store.Resolve(ctx, ref)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
+		return
+	}
+	bs := []loom.Belief{}
+	if ok {
+		if bs, err = loom.Beliefs(ctx, s.Store, head); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
+			return
+		}
+		if bs == nil {
+			bs = []loom.Belief{}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ref": ref, "beliefs": bs})
 }
 
 // readJSON accepts only an application/json body holding exactly one JSON

@@ -21,14 +21,26 @@ All responses are JSON except the diff, which is plain text.
 
 | Method and path | Request | Response |
 |---|---|---|
-| `GET /api/info` | | `ref`, `temporalUI`, `namespace`, `commands`, `examples` |
+| `GET /api/info` | | `ref` (the default history), `temporalUI`, `namespace`, `commands`, `examples` |
+| `GET /api/refs` | | `{"refs": [...], "default"}`: every history under `refs/loom/`, and the default one even before its first run |
+| `GET /api/beliefs?ref=` | | `{"ref", "beliefs": [...]}`: the latest run of every question asked on that history (`loom.Beliefs`), each with `program`, `outputs` and `leaves` |
 | `POST /api/compile` | `{"program": "…"}` | `{"plan": …}`, or `{"error", "line", "col"}` (200 either way; `line` and `col` only for syntax errors) |
-| `POST /api/runs` | `{"program": "…"}` | 202 `{"workflowId", "runId"}`; 422 with the compile error; 502 if Temporal refuses |
-| `GET /api/runs` | | `{"runs": [...]}`, newest first, plus `temporalError` if Temporal is unreachable |
-| `GET /api/runs/{workflow}/{run}` | | `execution` (from Temporal), `record` (from warp: commit, program, plan, outputs, `previous`, `parent`). 404 with Temporal's error if neither knows the run |
+| `POST /api/runs` | `{"program": "…", "ref": "…"}` (`ref` optional) | 202 `{"workflowId", "runId"}`; 422 with the compile error; 502 if Temporal refuses |
+| `GET /api/runs?ref=` | | `{"runs": [...]}`, newest first, plus `temporalError` if Temporal is unreachable. Merge commits are rows with status `Merged`, the commit merged in (`merged`), the first parent (`parent`) and the number of resolved conflicts (`resolved`) |
+| `GET /api/runs/{workflow}/{run}?ref=` | | `execution` (from Temporal), `record` (from warp: commit, program, plan, outputs, `previous`, `parent`). 404 with Temporal's error if neither knows the run |
 | `GET /api/diff/{from}/{to}` | | Unified diff text. 400 unless both are full commit IDs |
 
-Requests are limited to 1 MB, and unknown JSON fields and trailing data are rejected.
+Requests are limited to 1 MB, and unknown JSON fields and trailing data are rejected. Every `ref` (query parameter or body field) is optional and defaults to the server's `-ref`; otherwise it must be a valid ref under `refs/loom/` (400 if not).
+
+## Histories
+
+The header's **history** selector switches between refs: the default one and every [branch](https://github.com/heedle-ai/loom/wiki/Branching-and-Merging) under `refs/loom/`. Runs submitted from the page are recorded on the selected history. Each history shows:
+
+- **Beliefs:** for every question asked on it, the latest answer (the run's leaf outputs).
+- **Runs:** its own records, and Temporal's executions for it. loom's `Submit` stores the ref in each workflow's memo (`loom-ref`), so a running execution appears only on its own history's list; an execution without the memo is shown on the default history.
+- **Merges:** a `Merged` row per merge commit. Clicking it shows the diff from the first parent: the beliefs that came in, and any re-run.
+
+Branching and merging are done with `loom branch` and `loom merge`; the UI only reads and submits.
 
 ## Security
 

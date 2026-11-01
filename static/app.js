@@ -72,7 +72,7 @@ function PlanGraph({ plan }) {
 
 // === New run ===============================================================
 
-function NewRun({ info }) {
+function NewRun({ info, history: ref }) {
   const [program, setProgram] = useState(() => {
     try { return localStorage.getItem("drawdown.program") || ""; } catch { return ""; }
   });
@@ -89,7 +89,7 @@ function NewRun({ info }) {
 
   const run = async () => {
     setBusy(true); setSubmitError("");
-    const r = await api("/api/runs", { program });
+    const r = await api("/api/runs", { program, ref });
     setBusy(false);
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setSubmitError(r.data.error || String(r.data));
@@ -116,28 +116,33 @@ function NewRun({ info }) {
 
 // === Runs list =============================================================
 
-function Runs() {
+const q = (ref) => `?ref=${encodeURIComponent(ref)}`;
+
+function Runs({ history: ref }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     // Poll only after each reply arrives, so slow replies never pile up.
     let live = true, timer;
+    setData(null);
     const load = async () => {
-      try { const r = await api("/api/runs"); if (live) setData(r.data); } catch {}
+      try { const r = await api("/api/runs" + q(ref)); if (live) setData(r.data); } catch {}
       if (live) timer = setTimeout(load, 2000);
     };
     load();
     return () => { live = false; clearTimeout(timer); };
-  }, []);
+  }, [ref]);
   if (!data) return html`<p class="muted">Loading…</p>`;
   return html`
     ${data.temporalError && html`<p class="error">Temporal: ${data.temporalError}</p>`}
     ${data.runs.length === 0 ? html`<p class="muted">No runs yet.</p>` : html`
     <table class="list">
       <thead><tr><th>Status</th><th>Program</th><th>Started</th><th>Took</th><th>Record</th></tr></thead>
-      <tbody>${data.runs.map((r) => html`
-        <tr key=${r.runId} class="click" onClick=${() => go("run", r.workflowId, r.runId)}>
+      <tbody>${(data.runs || []).map((r) => html`
+        <tr key=${r.runId} class="click" onClick=${() => r.merged ? go("diff", r.parent, r.commit) : go("run", r.workflowId, r.runId)}>
           <td><span class=${"status " + r.status}>${r.status}</span></td>
-          <td><pre>${(r.program || r.workflowId).trim().slice(0, 160)}</pre></td>
+          <td>${r.merged
+            ? html`<span>merged <span class="mono">${short(r.merged)}</span>${r.resolved ? ` · ${r.resolved} conflict${r.resolved > 1 ? "s" : ""} resolved` : ""}</span>`
+            : html`<pre>${(r.program || r.workflowId).trim().slice(0, 160)}</pre>`}</td>
           <td>${when(r.start)}</td>
           <td>${took(r.start, r.close)}</td>
           <td class="mono">${short(r.commit)}</td>
@@ -146,14 +151,42 @@ function Runs() {
     </table>`}`;
 }
 
+// === Beliefs ===============================================================
+
+function Beliefs({ history: ref }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let live = true, timer;
+    setData(null);
+    const load = async () => {
+      try { const r = await api("/api/beliefs" + q(ref)); if (live) setData(r.data); } catch {}
+      if (live) timer = setTimeout(load, 4000);
+    };
+    load();
+    return () => { live = false; clearTimeout(timer); };
+  }, [ref]);
+  if (!data) return html`<p class="muted">Loading…</p>`;
+  if (!data.beliefs || data.beliefs.length === 0) return html`<p class="muted">No questions asked on this history yet.</p>`;
+  return html`
+    <table class="list">
+      <thead><tr><th>Question</th><th>Latest answer</th></tr></thead>
+      <tbody>${data.beliefs.map((b) => html`
+        <tr key=${b.question}>
+          <td><pre>${b.program.trim().slice(0, 200)}</pre></td>
+          <td><pre>${(b.leaves || []).map((id) => b.outputs[id] || "").join("\n").trim()}</pre></td>
+        </tr>`)}
+      </tbody>
+    </table>`;
+}
+
 // === Run detail ============================================================
 
-function RunDetail({ workflow, run }) {
+function RunDetail({ workflow, run, history: ref }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     let live = true, timer;
     const load = async () => {
-      const r = await api(`/api/runs/${encodeURIComponent(workflow)}/${encodeURIComponent(run)}`);
+      const r = await api(`/api/runs/${encodeURIComponent(workflow)}/${encodeURIComponent(run)}` + q(ref));
       if (!live) return;
       setData(r);
       // Keep polling only while the run is in progress, or finished but
@@ -163,7 +196,7 @@ function RunDetail({ workflow, run }) {
     };
     load();
     return () => { live = false; clearTimeout(timer); };
-  }, [workflow, run]);
+  }, [workflow, run, ref]);
 
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
@@ -234,18 +267,39 @@ function Diff({ from, to }) {
 function App() {
   const route = useRoute();
   const [info, setInfo] = useState(null);
+  const [refs, setRefs] = useState([]);
+  const [ref, setRefState] = useState(() => {
+    try { return localStorage.getItem("drawdown.ref") || ""; } catch { return ""; }
+  });
+  const setRef = (r) => { setRefState(r); try { localStorage.setItem("drawdown.ref", r); } catch {} };
   useEffect(() => { api("/api/info").then((r) => setInfo(r.data)); }, []);
+  useEffect(() => {
+    let live = true, timer;
+    const load = async () => {
+      try { const r = await api("/api/refs"); if (live && r.ok) setRefs(r.data.refs); } catch {}
+      if (live) timer = setTimeout(load, 5000);
+    };
+    load();
+    return () => { live = false; clearTimeout(timer); };
+  }, []);
   if (!info) return html`<main><p class="muted">Loading…</p></main>`;
+  // A remembered ref that no longer exists falls back to the default.
+  const current = refs.includes(ref) ? ref : info.ref;
 
   let body;
-  if (route[0] === "run" && route.length === 3) body = html`<${RunDetail} workflow=${route[1]} run=${route[2]} />`;
+  if (route[0] === "run" && route.length === 3) body = html`<${RunDetail} workflow=${route[1]} run=${route[2]} history=${current} />`;
   else if (route[0] === "diff" && route.length === 3) body = html`<${Diff} from=${route[1]} to=${route[2]} />`;
-  else body = html`<h2>New run</h2><${NewRun} info=${info} /><h2>Runs</h2><${Runs} />`;
+  else body = html`<h2>New run</h2><${NewRun} info=${info} history=${current} />
+    <h2>Beliefs</h2><${Beliefs} history=${current} />
+    <h2>Runs</h2><${Runs} history=${current} />`;
 
   return html`
     <header>
       <h1><a href="#/">drawdown</a></h1>
-      <span class="meta">heedle-ai · recording on <code>${info.ref}</code> ·${" "}
+      <span class="meta">heedle-ai · history${" "}
+        <select aria-label="history" value=${current} onChange=${(e) => setRef(e.target.value)}>
+          ${(refs.length ? refs : [info.ref]).map((r) => html`<option key=${r} value=${r}>${r}</option>`)}
+        </select> ·${" "}
         <a href=${info.temporalUI} target="_blank" rel="noopener">Temporal Web UI ↗</a></span>
     </header>
     <main>${body}</main>`;
