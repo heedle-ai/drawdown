@@ -1,5 +1,7 @@
 ## Where the data comes from
 
+[[/images/sources.svg|alt=Where drawdown's data comes from]]
+
 | Data | Source | How |
 |---|---|---|
 | Compile check and plan | draft | `draft.Compile` against the server's command registry |
@@ -55,5 +57,6 @@ These checks are tested in `TestGuard_RefusesCrossSiteAndRebinding`.
 
 ## Tested
 
+- [Invariants](Invariants) lists every guarantee and its guard; CI checks it against the code.
 - `server_test.go` covers every endpoint, the security checks, the 200-record bound, and Temporal being down, against a fake Temporal that really runs plans in Temporal's test suite and records them with loom's `Recorder`, so compiles, runs, records and diffs are real.
-- The page was driven in headless Chromium through the whole hello world story: a live syntax error with position, the plan graph, a run, changed evidence, and the diff. The libraries were served from their npm packages, which also checked the integrity hashes. The screenshots on these pages come from that run.
+- The page was driven in headless Chromium through the whole hello world story: a live syntax error with position, the plan graph, a run, changed evidence, and the diff. The libraries were served from their npm packages, which also checked the integrity hashes. The screenshots on these pages come from that run. That browser run isn't in CI; the API behaviour it exercises is.
