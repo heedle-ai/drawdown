@@ -80,6 +80,7 @@ type History interface {
 	Log(ctx context.Context, from warp.ID, limit int) ([]warp.CommitInfo, error)
 	Tree(ctx context.Context, id warp.ID) ([]warp.Entry, error)
 	Blob(ctx context.Context, id warp.ID) ([]byte, error)
+	Blobs(ctx context.Context, ids []warp.ID) ([][]byte, error)
 	Parents(ctx context.Context, commit warp.ID) (tree warp.ID, parents []warp.ID, err error)
 	FindByTrailer(ctx context.Context, from warp.ID, key, value string) (warp.ID, bool, error)
 	Diff(ctx context.Context, a, b warp.ID) ([]byte, error)
