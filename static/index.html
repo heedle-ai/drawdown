@@ -80,6 +80,14 @@
   .file-body { margin:0 14px 12px; max-height:420px; overflow:auto; }
   /* Git names a blob diff's sides by their hashes; the row names the file. */
   .file-body .d2h-file-header { display:none; }
+  .skills { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px; }
+  .skill-card { display:block; color:inherit; text-decoration:none; } .skill-card:hover { border-color:var(--skill); }
+  .skill-card p { margin:10px 0 0; display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+  .skill-card p.muted { display:block; }
+  .skill-cols { display:grid; grid-template-columns:minmax(0, 2fr) minmax(0, 1fr); gap:24px; }
+  @media (max-width: 860px) { .skill-cols { grid-template-columns:1fr; } }
+  .skill-md { white-space:pre-wrap; overflow-wrap:anywhere; max-height:520px; overflow:auto; margin:0; }
+  .versions { padding-left:20px; } .versions li { margin:4px 0; } .versions a[aria-current] { font-weight:700; }
   .registry-file pre { white-space:pre-wrap; overflow-wrap:anywhere; }
   .s-Running.pill::before { animation:pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity:.25; } }

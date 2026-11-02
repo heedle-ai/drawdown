@@ -152,6 +152,40 @@ const DD = (() => {
     return `oras blob fetch --output ${quote(file)} ${repo}@sha256:${sum}`;
   }
 
+  const HEX = /^([0-9a-f]{40}|[0-9a-f]{64})$/;
+  const SKILL_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+  // skillOf is a plan node's skill, {name, version, args}, if it runs one
+  // (treadle's Skill activity, Bound to the skill's name and version);
+  // else null.
+  function skillOf(n) {
+    if (!n || n.activity !== "Skill" || !Array.isArray(n.args) || n.args.length < 2) return null;
+    const [name, version, ...args] = n.args;
+    if (!str(name) || !SKILL_NAME.test(name) || !str(version) || !HEX.test(version)) return null;
+    return { name, version, args };
+  }
+
+  // asSkill is v if it's a skill as the API lists it, with every field
+  // the page reads of the right type; else null.
+  function asSkill(v) {
+    if (!v || typeof v !== "object" || !str(v.name) || !SKILL_NAME.test(v.name) || !str(v.description) || !HEX.test(v.version) || !HEX.test(v.commit)) return null;
+    const s = v.source;
+    if (s !== undefined && (!s || typeof s !== "object" || !str(s.repo) || !opt(s.ref, str) || !opt(s.path, str) || !opt(s.commit, str))) return null;
+    return v;
+  }
+
+  // sourceLink is the web page of the exact folder a skill version was
+  // imported from, for a GitHub repository at a known commit; else null.
+  // Every part is checked, so the link can only point at github.com.
+  function sourceLink(s) {
+    if (!s || !str(s.repo) || !str(s.commit) || !/^[0-9a-f]{40}$/.test(s.commit)) return null;
+    const m = /^https:\/\/github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(s.repo);
+    if (!m) return null;
+    const path = s.path || "";
+    if (path && !/^[A-Za-z0-9_][A-Za-z0-9._-]*(\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/.test(path)) return null;
+    return `https://github.com/${m[1]}/${m[2]}/tree/${s.commit}${path ? "/" + path : ""}`;
+  }
+
   // ancestors are every node id depends on, directly or not.
   function ancestors(plan, id) {
     const req = new Map(((plan && plan.nodes) || []).map((n) => [n.id, n.requires || []]));
@@ -205,6 +239,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, parse, preview, decisions, ancestors, dur, span, tokens };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, parse, preview, decisions, ancestors, dur, span, tokens };
 })();
 if (typeof module !== "undefined") module.exports = DD;

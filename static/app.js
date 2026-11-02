@@ -417,7 +417,11 @@ function mermaidText(plan) {
   // nothing from the plan is parsed as mermaid syntax except quoted labels.
   const nodes = plan.nodes || [];
   const gid = new Map(nodes.map((n, i) => [n.id, `g${i}`]));
-  const label = (n) => [n.id, n.activity, ...(n.args || []).map((a) => JSON.stringify(a))].join(" ");
+  const label = (n) => {
+    const sk = DD.skillOf(n);
+    if (sk) return [n.id, `${sk.name} @${sk.version.slice(0, 7)}`, ...sk.args.map((a) => JSON.stringify(a))].join(" ");
+    return [n.id, n.activity, ...(n.args || []).map((a) => JSON.stringify(a))].join(" ");
+  };
   const safe = (s) => s.replace(/[\\"<>&#;`{}[\]()|]/g, (c) => `#${c.charCodeAt(0)};`);
   const lines = ["graph LR"];
   for (const n of nodes) {
@@ -568,8 +572,11 @@ function GraphViewer({ source, plan, describe, onNode, onClose }) {
 
 function nodeCard(n, step, output) {
   const kind = kindOf(n.activity);
-  return html`<${Card} title=${html`<span class="mono">${n.id}</span> <${KindPill} kind=${kind}>${n.activity}<//>${step && html` <${StatusPill} status=${step.status} />`}`}>
-    <${Field} k="Arguments">${(n.args || []).length ? html`<span class="mono">${n.args.map((a) => JSON.stringify(a)).join(" ")}</span>` : "none"}<//>
+  const sk = DD.skillOf(n);
+  const args = sk ? sk.args : n.args || [];
+  return html`<${Card} title=${html`<span class="mono">${n.id}</span> <${KindPill} kind=${kind}>${sk ? sk.name : n.activity}<//>${step && html` <${StatusPill} status=${step.status} />`}`}>
+    ${sk && html`<${Field} k="Skill"><${SkillBadge} skill=${sk} /><//>`}
+    <${Field} k="Arguments">${args.length ? html`<span class="mono">${args.map((a) => JSON.stringify(a)).join(" ")}</span>` : "none"}<//>
     <${Field} k="Waits for">${(n.requires || []).length ? html`<span class="mono">${n.requires.join(", ")}</span>` : "nothing: starts at once"}<//>
     ${step && html`
       <${Field} k="Attempts">${step.attempts > 1 ? html`<strong>${step.attempts}</strong> (Temporal retried it)` : step.attempts || ""}<//>
@@ -580,6 +587,78 @@ function nodeCard(n, step, output) {
     ${output != null && html`<${Field} k="Output">${bytes(output)}<//>`}
   <//>
   ${output != null && html`<pre>${preview(output).slice(0, 400)}</pre>`}`;
+}
+
+// === Skills ================================================================
+
+// SkillBadge names a skill at the version a plan pins, linking to it.
+function SkillBadge({ skill }) {
+  return html`<a href=${"#/skill/" + encodeURIComponent(skill.name) + "/" + encodeURIComponent(skill.version)}>
+    <${Pill} cls="k-skill" mono>${skill.name} @${skill.version.slice(0, 7)}<//></a>`;
+}
+
+function SkillsPage() {
+  const [data, setData] = useState(null);
+  useEffect(() => { api("/api/skills").then(setData); }, []);
+  if (!data) return html`<p class="muted">Loading…</p>`;
+  if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
+  const skills = (data.data.skills || []).map(DD.asSkill).filter(Boolean);
+  const problems = (data.data.problems || []).filter((p) => typeof p === "string");
+  return html`
+    <h2>Skills</h2>
+    <p class="lede">What steps can do by name: each skill is a folder whose SKILL.md tells Claude how. A program that uses one pins its exact version.</p>
+    ${skills.length === 0 && html`<div class="panel muted">No skills yet. Add one with <code>loom skills -store DIR -import LINK</code> or <code>-add FOLDER</code>.</div>`}
+    <div class="skills">${skills.map((s) => html`
+      <a key=${s.name} class="panel skill-card" href=${"#/skill/" + encodeURIComponent(s.name)}>
+        <div class="pills"><${Pill} cls="k-skill">${s.name}<//><${Pill} cls="k-other" plain mono>@${s.version.slice(0, 7)}<//>
+          ${s.source && html`<${Pill} cls="k-record" plain>imported<//>`}</div>
+        <p>${s.description}</p>
+        <p class="muted mono" style=${{ margin: 0 }}>(${s.name} …)</p>
+      </a>`)}</div>
+    ${problems.length > 0 && html`<h3>Can't be used</h3><div class="panel">${problems.map((p, i) => html`<p key=${i} class="error mono">${p}</p>`)}</div>`}`;
+}
+
+function SkillPage({ name, version }) {
+  const [versions, setVersions] = useState(null);
+  const [detail, setDetail] = useState(null);
+  useEffect(() => { setVersions(null); api(`/api/skills/${encodeURIComponent(name)}`).then(setVersions); }, [name]);
+  const list = versions && versions.ok ? (versions.data.versions || []).map(DD.asSkill).filter(Boolean) : [];
+  const shown = version || (list[0] && list[0].version);
+  useEffect(() => {
+    if (!shown) return;
+    setDetail(null);
+    api(`/api/skills/${encodeURIComponent(name)}/${encodeURIComponent(shown)}`).then(setDetail);
+  }, [name, shown]);
+  if (!versions) return html`<p class="muted">Loading…</p>`;
+  if (!versions.ok) return html`<p class="error">${versions.data.error}</p>`;
+  const cur = list.find((v) => v.version === shown);
+  const link = cur && DD.sourceLink(cur.source);
+  const files = detail && detail.ok ? (detail.data.files || []).filter((f) => f && typeof f.path === "string" && typeof f.size === "number") : [];
+  return html`
+    <p><a href="#/skills">← all skills</a></p>
+    <div class="panel step-hero" style=${{ "--c": "var(--skill)" }}>
+      <div class="pills"><${Pill} cls="k-skill" big>${name}<//>${cur && html`<${Pill} cls="k-other" plain mono>@${cur.version.slice(0, 12)}<//>`}
+        ${cur && version && list[0] && list[0].version !== cur.version && html`<${Pill} cls="s-Failed" plain>not the newest<//>`}</div>
+      ${cur && html`<p>${cur.description}</p>`}
+      ${cur && cur.source && html`<p class="muted">Imported from <span class="mono">${cur.source.repo}${cur.source.path ? " " + cur.source.path : ""}</span>
+        ${cur.source.commit && html` at <span class="mono">${cur.source.commit.slice(0, 12)}</span>`}${link && html` · <a href=${link} target="_blank" rel="noopener noreferrer">view the source ↗</a>`}</p>`}
+    </div>
+    <div class="skill-cols">
+      <section>
+        <h3>SKILL.md</h3>
+        <div class="panel">${!detail ? html`<p class="muted">Loading…</p>` : !detail.ok ? html`<p class="error">${detail.data.error}</p>` : html`<pre class="skill-md">${detail.data.skillMD}</pre>`}</div>
+        <h3>Files</h3>
+        <div class="panel">${files.map((f) => html`<div key=${f.path} class="pills"><code>${f.path}</code><span class="muted">${DD.size(f.size)}</span></div>`)}</div>
+      </section>
+      <section>
+        <h3>Versions</h3>
+        <p class="lede">Newest first. Runs keep the version they were compiled with.</p>
+        <ol class="versions">${list.map((v) => html`
+          <li key=${v.version}><a href=${"#/skill/" + encodeURIComponent(name) + "/" + encodeURIComponent(v.version)} aria-current=${v.version === shown ? "true" : undefined}>
+            <span class="mono">${v.version.slice(0, 12)}</span></a>
+            ${v.source ? html` <span class="muted">from ${v.source.repo.replace(/^https:\/\//, "")}${v.source.commit ? " @" + v.source.commit.slice(0, 7) : ""}</span>` : html` <span class="muted">added from a folder</span>`}</li>`)}</ol>
+      </section>
+    </div>`;
 }
 
 // === New run ===============================================================
@@ -846,7 +925,8 @@ function RunDetail({ workflow, run, history: ref }) {
             <div class="head">
               <a class="mono" href=${"#/step/" + [workflow, run, k].map(encodeURIComponent).join("/")}><strong>${k}</strong></a>
               <${KindPill} kind=${kind}>${n.activity}<//>
-              ${(n.args || []).length > 0 && html`<span class="mono muted">${n.args.map((a) => JSON.stringify(a)).join(" ").slice(0, 120)}</span>`}
+              ${DD.skillOf(n) ? html`<${SkillBadge} skill=${DD.skillOf(n)} /><span class="mono muted">${DD.skillOf(n).args.map((a) => JSON.stringify(a)).join(" ").slice(0, 120)}</span>`
+                : (n.args || []).length > 0 && html`<span class="mono muted">${n.args.map((a) => JSON.stringify(a)).join(" ").slice(0, 120)}</span>`}
               <span style=${{ marginLeft: "auto" }} class="pills">
                 ${s && took(s.started, s.closed) && html`<${Pill} cls="k-other" plain>${took(s.started, s.closed)}<//>`}
                 ${s && s.attempts > 1 && html`<${Pill} cls="s-Failed">${s.attempts} attempts<//>`}
@@ -926,7 +1006,9 @@ function StepPage({ workflow, run, node, history: ref }) {
         ${step && took(step.started, step.closed) && html`<${Pill} cls="k-other" plain>ran ${took(step.started, step.closed)}<//>`}
         <${Pill} cls="k-record" mono>outputs/${node} in ${short(rec.commit)}<//>
       </div>
-      ${(n.args || []).length > 0 && html`<div class="mono" style=${{ marginTop: "10px" }}>${n.args.map((a) => JSON.stringify(a)).join(" ")}</div>`}
+      ${DD.skillOf(n) ? html`<div class="pills" style=${{ marginTop: "10px" }}><span class="muted">follows</span><${SkillBadge} skill=${DD.skillOf(n)} />
+          <span class="mono">${DD.skillOf(n).args.map((a) => JSON.stringify(a)).join(" ")}</span></div>`
+        : (n.args || []).length > 0 && html`<div class="mono" style=${{ marginTop: "10px" }}>${n.args.map((a) => JSON.stringify(a)).join(" ")}</div>`}
     </div>
 
     <div class="flow">
@@ -1151,6 +1233,8 @@ function App() {
   else if (route[0] === "run" && route.length === 3) body = html`<${RunDetail} workflow=${route[1]} run=${route[2]} history=${current} />`;
   else if (route[0] === "step" && route.length === 4) body = html`<${StepPage} key=${route.join("/")} workflow=${route[1]} run=${route[2]} node=${route[3]} history=${current} />`;
   else if (route[0] === "diff" && route.length === 3) body = html`<${Diff} from=${route[1]} to=${route[2]} />`;
+  else if (route[0] === "skills" && route.length === 1) body = html`<${SkillsPage} />`;
+  else if (route[0] === "skill" && (route.length === 2 || route.length === 3)) body = html`<${SkillPage} key=${route.join("/")} name=${route[1]} version=${route[2]} />`;
   else body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;
 
   const dyes = ["source", "assess", "browse", "ask", "record", "container", "echo", "source"];
@@ -1168,6 +1252,7 @@ function App() {
               ${(refs.length ? refs : [info.ref]).map((r) => html`<option key=${r} value=${r}>${agentName(r)}</option>`)}
             </select></label>`}
       <span class="spacer"></span>
+      <a href="#/skills">skills</a>
       <${Pill} cls="k-other" plain>${(info.commands || []).length} commands<//>
       <a href=${info.temporalUI} target="_blank" rel="noopener">Temporal Web UI ↗</a>
     </header>

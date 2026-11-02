@@ -29,6 +29,7 @@ import (
 	"github.com/heedle-ai/draft/sexpr"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/shuttle/plan"
+	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
 )
 
@@ -101,6 +102,9 @@ type Server struct {
 	TemporalUI string            // base URL of Temporal's Web UI, for links
 	Namespace  string            // Temporal namespace, for links
 	Examples   map[string]string // name -> program, offered in the editor
+	// Skills, if set, are the skills the Skills page shows: the store's
+	// own, read only.
+	Skills *treadle.Library
 	// Hosts are the Host header values the server answers to, besides
 	// localhost and loopback addresses. Requests for any other host are
 	// refused, which defeats DNS rebinding.
@@ -125,6 +129,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/beliefs", s.beliefs)
 	mux.HandleFunc("GET /api/live/{workflow}", s.live)
 	mux.HandleFunc("GET /api/steps/{workflow}/{run}", s.steps)
+	mux.HandleFunc("GET /api/skills", s.skills)
+	mux.HandleFunc("GET /api/skills/{name}", s.skill)
+	mux.HandleFunc("GET /api/skills/{name}/{version}", s.skillVersion)
 	return s.guard(mux)
 }
 

@@ -142,3 +142,28 @@ test("files kept in a registry are recognised, and fetched as pirn says", () => 
   assert.equal(DD.fetchCommand("ghcr.io/acme/files", "ab", "my report's.bin"), "oras blob fetch --output 'my report'\\''s.bin' ghcr.io/acme/files@sha256:ab");
   assert.equal(DD.fetchCommand("ghcr.io/acme/files", "ab", "-"), "oras blob fetch --output './-' ghcr.io/acme/files@sha256:ab");
 });
+
+test("skill nodes are recognised, and only real ones", () => {
+  const v = "ab".repeat(20);
+  assert.deepEqual(DD.skillOf({ activity: "Skill", args: ["weather", v, "Boston"] }), { name: "weather", version: v, args: ["Boston"] });
+  for (const bad of [{ activity: "Agent", args: ["weather", v] }, { activity: "Skill", args: ["weather"] }, { activity: "Skill", args: ["Weather", v] },
+    { activity: "Skill", args: ["weather", "HEAD"] }, { activity: "Skill", args: ["../x", v] }, { activity: "Skill" }, null]) {
+    assert.equal(DD.skillOf(bad), null, JSON.stringify(bad));
+  }
+});
+
+test("skills from the API are checked, and source links point only at GitHub", () => {
+  const v = "ab".repeat(20), c = "cd".repeat(20);
+  const ok = { name: "pdf", description: "Reads PDFs.", version: v, commit: v, source: { repo: "https://github.com/anthropics/skills", path: "skills/pdf", commit: c } };
+  assert.ok(DD.asSkill(ok));
+  assert.equal(DD.sourceLink(ok.source), `https://github.com/anthropics/skills/tree/${c}/skills/pdf`);
+  for (const bad of [{ ...ok, name: "X" }, { ...ok, version: "1" }, { ...ok, description: 1 }, { ...ok, source: { repo: 1 } }, { ...ok, source: null }]) {
+    assert.equal(DD.asSkill(bad), null, JSON.stringify(bad));
+  }
+  for (const bad of [{ repo: "https://gitlab.com/a/b", commit: c }, { repo: "javascript:alert(1)//github.com/a/b", commit: c },
+    { repo: "https://github.com/a/b", commit: "main" }, { repo: "https://github.com/a/b", commit: c, path: "../../x" },
+    { repo: "https://github.com/a/b/../../evil", commit: c }, { repo: "https://github.com.evil.example/a/b", commit: c }, null]) {
+    assert.equal(DD.sourceLink(bad), null, JSON.stringify(bad));
+  }
+  assert.equal(DD.sourceLink({ repo: "file:///home/me/skills", commit: c }), null);
+});
