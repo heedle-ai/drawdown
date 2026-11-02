@@ -73,6 +73,13 @@
   .s-Failed, .s-Terminated, .s-TimedOut, .s-Canceled { --c:var(--bad); } .s-Abandoned { --c:var(--muted); } .s-Scheduled { --c:var(--muted); } .s-Unknown { --c:var(--muted); }
   .k-echo { --c:var(--echo); } .k-source { --c:var(--source); } .k-assess { --c:var(--assess); } .k-browse { --c:var(--browse); }
   .k-ask { --c:var(--ask); } .k-agent { --c:var(--agent); } .k-container { --c:var(--container); } .k-record { --c:var(--record); } .k-other { --c:var(--other); }
+  .f-added { --c:var(--ok); } .f-changed { --c:var(--run); } .f-deleted { --c:var(--bad); } .f-same { --c:var(--muted); }
+  .files { padding:4px 0; } .file-row { border-bottom:1px solid var(--line); } .file-row:last-child { border-bottom:0; }
+  .file-head { display:flex; gap:10px; align-items:center; width:100%; text-align:left; background:none; border:0; border-radius:0; padding:8px 14px; }
+  .file-head:disabled { cursor:default; opacity:1; } .file-head code { overflow-wrap:anywhere; flex:1; }
+  .file-body { margin:0 14px 12px; max-height:420px; overflow:auto; }
+  /* Git names a blob diff's sides by their hashes; the row names the file. */
+  .file-body .d2h-file-header { display:none; }
   .s-Running.pill::before { animation:pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity:.25; } }
 

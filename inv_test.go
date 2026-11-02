@@ -116,7 +116,9 @@ func TestInv_AnswersAreShownAsText(t *testing.T) {
 	sinks := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|dangerouslySetInnerHTML|DOMParser|createContextualFragment`).FindAllStringIndex(js, -1)
 	allowed := []string{
 		"if (live && ref.current) ref.current.innerHTML = svg;",
-		`ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: true, matching: "lines", outputFormat: "line-by-line" });`,
+		`ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: true, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });`,
+		// One file's change (warp's DiffBlobs), as it comes from Git.
+		`ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: false, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });`,
 	}
 	if len(sinks) != len(allowed) {
 		t.Errorf("static/app.js inserts HTML in %d places, want only the %d known ones", len(sinks), len(allowed))

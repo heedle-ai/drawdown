@@ -95,3 +95,22 @@ test("pirn's empty lists and counts are accepted", () => {
   assert.ok(a);
   assert.deepEqual(DD.decisions("agent", JSON.stringify(a))[2], ["Commands", "0 run"]);
 });
+
+test("a step's recorded files are checked and summarised", () => {
+  const b = (c) => c.repeat(40);
+  const files = [
+    { path: "new.txt", size: 5, status: "added", blob: b("a") },
+    { path: "report.txt", size: 9, status: "changed", blob: b("b"), before: b("c") },
+    { path: "keep.txt", size: 1, status: "same", blob: b("d"), before: b("d") },
+    { path: "gone.txt", size: 3, status: "deleted", before: b("e") },
+  ];
+  assert.equal(DD.asFiles(files).length, 4);
+  assert.equal(DD.fileSummary(files), "1 added, 1 changed, 1 the same, 1 deleted");
+  for (const bad of [{ path: "x", size: 1, status: "renamed", blob: b("a") }, { path: "x", size: "1", status: "added", blob: b("a") },
+    { path: "x", size: 1, status: "added" }, { path: "x", size: 1, status: "changed", blob: b("a") }, { path: "x", size: 1, status: "deleted", blob: b("a"), before: b("a") },
+    { path: "x", size: 1, status: "added", blob: "../../api" }, { path: 1, size: 1, status: "added", blob: b("a") }, null, "x"]) {
+    assert.deepEqual(DD.asFiles([bad]), [], JSON.stringify(bad));
+  }
+  for (const v of [undefined, null, {}, "x"]) assert.deepEqual(DD.asFiles(v), []);
+  assert.equal(DD.fileSummary([]), "");
+});

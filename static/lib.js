@@ -108,6 +108,27 @@ const DD = (() => {
     return [];
   }
 
+  const STATUSES = ["added", "changed", "same", "deleted"];
+  const blob = (v) => str(v) && /^[0-9a-f]{40,64}$/.test(v);
+
+  // asFiles is a step's recorded files from the API (the record's files
+  // for one node), keeping only well-formed entries: a blob for every
+  // file that exists now, and a before for every one the previous run had.
+  function asFiles(v) {
+    if (!Array.isArray(v)) return [];
+    return v.filter((f) => f && typeof f === "object" && str(f.path) && num(f.size) && STATUSES.includes(f.status) &&
+      (f.status === "deleted" ? !f.blob : blob(f.blob)) && (f.status === "added" ? !f.before : blob(f.before)));
+  }
+
+  // fileSummary counts a step's files by status, for a line like
+  // "1 added, 2 changed, 3 the same".
+  function fileSummary(files) {
+    const n = Object.fromEntries(STATUSES.map((s) => [s, 0]));
+    for (const f of files) n[f.status]++;
+    const words = { added: "added", changed: "changed", same: "the same", deleted: "deleted" };
+    return STATUSES.filter((s) => n[s]).map((s) => `${n[s]} ${words[s]}`).join(", ");
+  }
+
   // ancestors are every node id depends on, directly or not.
   function ancestors(plan, id) {
     const req = new Map(((plan && plan.nodes) || []).map((n) => [n.id, n.requires || []]));
@@ -161,6 +182,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, parse, preview, decisions, ancestors, dur, span, tokens };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, parse, preview, decisions, ancestors, dur, span, tokens };
 })();
 if (typeof module !== "undefined") module.exports = DD;

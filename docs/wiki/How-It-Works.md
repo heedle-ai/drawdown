@@ -17,7 +17,7 @@ A run appears in the list as soon as Temporal knows about it. Once it's recorded
 
 ## API
 
-All responses are JSON except the diff, which is plain text.
+All responses are JSON except the diffs, which are plain text.
 
 | Method and path | Request | Response |
 |---|---|---|
@@ -27,10 +27,11 @@ All responses are JSON except the diff, which is plain text.
 | `POST /api/compile` | `{"program": "…"}` | `{"plan": …}`, or `{"error", "line", "col"}` (200 either way; `line` and `col` only for syntax errors) |
 | `POST /api/runs` | `{"program": "…", "ref": "…"}` (`ref` optional) | 202 `{"workflowId", "runId"}`; 422 with the compile error; 502 if Temporal refuses |
 | `GET /api/runs?ref=` | | `{"runs": [...]}`, newest first, plus `temporalError` if Temporal is unreachable. Merge commits are rows with status `Merged`, the commit merged in (`merged`), the first parent (`parent`) and the number of resolved conflicts (`resolved`) |
-| `GET /api/runs/{workflow}/{run}?ref=` | | `execution` (from Temporal), `record` (from warp: commit, program, plan, outputs, `previous`, `parent`). 404 with Temporal's error if neither knows the run |
+| `GET /api/runs/{workflow}/{run}?ref=` | | `execution` (from Temporal), `record` (from warp: commit, program, plan, outputs, `previous`, `parent`, and `files`: for each step, the files its record holds under `files/<node>/`, each with `path`, `size`, `blob`, `before` and `status` (`added`, `changed`, `same` or `deleted`) against `previous`; at most 500 in all, then `moreFiles`). 404 with Temporal's error if neither knows the run |
 | `GET /api/live/{workflow}` | | `{"frames": [{"activity", "attempt", "url", "image"}]}`: the latest heartbeat frame of each browsing step the run is executing, read with `DescribeWorkflowExecution` on its plan (`<workflow>/plan`); `temporalError` if Temporal is unreachable |
 | `GET /api/steps/{workflow}/{run}` | | `{"steps": [...]}`: each step as Temporal's history records it, in order, then loom's record: `node`, `activity`, `status`, `attempts`, `scheduled`, `started`, `closed`, and the last `failure` (at most 2 KiB). With Temporal unreachable: no steps and `temporalError`, still 200 |
 | `GET /api/diff/{from}/{to}` | | Unified diff text. 400 unless both are full commit IDs |
+| `GET /api/blobdiff/{from}/{to}` | | One file's change: the unified diff of two blobs (warp's `DiffBlobs`), binary content reported but never printed. 400 unless both are full blob IDs |
 
 Requests are limited to 1 MB, and unknown JSON fields and trailing data are rejected. Every `ref` (query parameter or body field) is optional and defaults to the server's `-ref`; otherwise it must be a valid ref under `refs/loom/` (400 if not).
 
@@ -81,6 +82,7 @@ Clicking a step, here or in the drawdown on the home page, opens the **step insp
 - **Ran in:** where it ran and what it could touch: files, network, what it gets and what it leaves. For a container or browse step this is a fresh container, removed afterwards, with nothing mounted. A container step has no network at all; a browse step's limit is Chromium's own settings, on a container that does have a network. `TestInv_InspectorTellsTheTruth` checks these claims against bobbin's and reed's real code.
 - **Decided:** what the step concluded: an assessment's verdict, a page's final URL and refused requests, Claude's model, tokens and citations. And any failure Temporal retried past.
 - **Work**, for an agent step: every command Claude ran in its container, in order, with exit code, time and output; the files it kept from `/work/out`; and every path that changed in the container.
+- **Files**, for a step whose record holds files (an agent's `/work/out`, recorded by loom under `files/<node>/`): each file with its size, marked added, changed, the same or deleted against the previous run of the same program. A changed file opens to its diff; an added text file opens to its contents.
 - **Produced:** its output, where it is in Git (`outputs/<node>` in the run's commit), and the steps it was passed to.
 - **Not shared with this step:** every other step whose output was never given to it, marked as running alongside, running after it, or reaching it only through its parents. What its parents passed on may still include parts of those outputs.
 
