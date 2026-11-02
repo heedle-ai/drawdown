@@ -169,6 +169,44 @@ func (s *Server) changeSkills(w http.ResponseWriter, r *http.Request, in loom.Sk
 	}
 }
 
+// catalog lists the skills in a repository, on a worker, so the page can
+// offer them for import: a GitHub link to a repository, or an https://
+// repository URL, never a folder. Nothing changes; each skill the page
+// then imports goes through importSkill and its trust rules.
+func (s *Server) catalog(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Link   string `json:"link"`
+		Branch string `json:"branch,omitempty"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	src, err := treadle.SourceFor(strings.TrimSpace(req.Link), "", strings.TrimSpace(req.Branch))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	switch {
+	case !strings.HasPrefix(src.Repo, "https://"):
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "the page lists only https:// repositories; list others with loom skills -catalog on the worker"})
+		return
+	case src.Path != "":
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "that's a folder: give the repository's link to browse all its skills, or import this one with Import a link"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), loom.CatalogTimeout+30*time.Second)
+	defer cancel()
+	c, err := s.Temporal.ListSkills(ctx, src)
+	switch {
+	case errors.Is(err, warp.ErrInvalid):
+		writeJSON(w, http.StatusBadRequest, apiError{Error: err.Error()})
+	case err != nil:
+		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, c)
+	}
+}
+
 // importSkill imports a skill from a GitHub link or a repository URL
 // (treadle's SourceFor). Trust rules apply: from an untrusted repository
 // it waits for review.

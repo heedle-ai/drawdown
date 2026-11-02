@@ -267,3 +267,12 @@ test("the calendar's classes are its own, and merges and unknown times aren't ru
   assert.deepEqual(DD.byDay([{ start: "2026-11-02T10:00:00Z", merged: "abc", status: "Recorded" }]), {});
   assert.equal(DD.dayKey("0001-01-01T00:00:00Z"), "");
 });
+
+test("a repository's listing keeps only well-formed entries", () => {
+  const ok = { source: { repo: "https://github.com/anthropics/skills", path: "skills/pdf", commit: "a".repeat(40) }, name: "pdf", description: "Reads PDFs." };
+  const bad = { source: { repo: "https://github.com/x/y", path: "skills/odd" }, problem: "its folder is \"odd\" but its name is \"other\"" };
+  const c = DD.asCatalog({ entries: [ok, bad, null, { name: "x" }, { source: { repo: 7 }, name: "y" }, { source: { repo: "r" } }], omitted: 3 });
+  assert.deepEqual(c, { entries: [ok, bad], omitted: 3 });
+  for (const v of [null, {}, { entries: "x" }, { entries: [], omitted: -1 }, { entries: [], omitted: 1.5 }]) assert.equal(DD.asCatalog(v), null, JSON.stringify(v));
+  assert.deepEqual(DD.asCatalog({ entries: [] }), { entries: [], omitted: 0 });
+});

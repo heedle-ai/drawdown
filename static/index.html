@@ -144,6 +144,16 @@
   .cal-day.cal-on { outline:2px solid var(--ink); outline-offset:1px; cursor:pointer; }
   .cal-day.cal-has:hover, .cal-day.cal-has:focus-visible { transform:scale(1.12); }
   .filter-note { margin:-4px 0 10px; font-size:13.5px; }
+  .catalog { margin-top:12px; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .catalog-head { display:flex; align-items:center; gap:12px; padding:9px 12px; background:var(--sunk); border-bottom:1px solid var(--line); }
+  .catalog-list { list-style:none; margin:0; padding:0; max-height:420px; overflow:auto; }
+  .catalog-list li { display:grid; grid-template-columns:minmax(150px, 220px) minmax(0, 1fr) auto; gap:4px 14px; align-items:baseline; padding:7px 12px; border-top:1px solid var(--line); font-size:13px; }
+  .catalog-list li:first-child { border-top:0; }
+  .catalog-list label { display:flex; gap:8px; align-items:baseline; cursor:pointer; }
+  .catalog-name { font-weight:600; }
+  .catalog-desc { color:var(--muted); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .catalog-bad { opacity:.75; }
+  .catalog-state { justify-self:end; white-space:nowrap; }
   .chain { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .chain-link { display:inline-flex; flex-direction:column; align-items:flex-start; gap:3px; font-size:12px; border:0; background:none; padding:0; color:inherit; font-family:inherit; }
   button.chain-link { cursor:pointer; } button.chain-link:hover .pill { outline:2px solid var(--record); }

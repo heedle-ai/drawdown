@@ -75,6 +75,9 @@ type Temporal interface {
 	// WriteProgram has a worker's Claude write a program for a task
 	// (loom.WriteProgram); nothing runs.
 	WriteProgram(ctx context.Context, description string) (loom.Written, error)
+	// ListSkills lists a repository's skills on a worker
+	// (loom.ListSkills); nothing changes.
+	ListSkills(ctx context.Context, src treadle.Source) (loom.Catalog, error)
 }
 
 // LiveFrame is what a browsing step last showed.
@@ -169,6 +172,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/write", s.writeProgram)
 	mux.HandleFunc("POST /api/skills/create", s.createSkill)
 	mux.HandleFunc("POST /api/skills/import", s.importSkill)
+	mux.HandleFunc("POST /api/skills/catalog", s.catalog)
 	mux.HandleFunc("POST /api/skills/add", s.addSkill)
 	mux.HandleFunc("POST /api/skills/{name}/approve", s.approveSkill)
 	mux.HandleFunc("POST /api/skills/{name}/reject", s.rejectSkill)

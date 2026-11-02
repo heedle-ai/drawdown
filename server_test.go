@@ -42,6 +42,8 @@ type fakeTemporal struct {
 	writes  map[string][]loom.WriteOutcome
 	writer  *loom.Writer
 	create  func(context.Context, string) (map[string][]byte, error)
+	catalog loom.Catalog
+	listed  []treadle.Source
 }
 
 func (f *fakeTemporal) Live(_ context.Context, wf string) ([]drawdown.LiveFrame, error) {
@@ -108,6 +110,17 @@ func (f *fakeTemporal) DecideWrite(_ context.Context, wf string, d loom.WriteDec
 		}
 	}
 	return nil
+}
+
+// ListSkills answers the fake's catalog, keeping what it was asked.
+func (f *fakeTemporal) ListSkills(_ context.Context, src treadle.Source) (loom.Catalog, error) {
+	if f.down {
+		return loom.Catalog{}, errors.New("connection refused")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listed = append(f.listed, src)
+	return f.catalog, nil
 }
 
 // WriteProgram writes with the fake's writer (a stand-in Claude).

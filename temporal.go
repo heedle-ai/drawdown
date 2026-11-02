@@ -39,6 +39,11 @@ func (t TemporalClient) ChangeSkills(ctx context.Context, in loom.SkillsChange) 
 	return loom.ChangeSkills(ctx, t.Client, t.Queue, in)
 }
 
+// ListSkills lists a repository's skills on a worker.
+func (t TemporalClient) ListSkills(ctx context.Context, src treadle.Source) (loom.Catalog, error) {
+	return loom.ListSkills(ctx, t.Client, t.Queue, src)
+}
+
 // Writes asks a run for its writes so far.
 func (t TemporalClient) Writes(ctx context.Context, workflowID string) ([]loom.WriteOutcome, error) {
 	return loom.Writes(ctx, t.Client, workflowID)
