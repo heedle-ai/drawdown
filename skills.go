@@ -1,9 +1,13 @@
 package drawdown
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
 )
@@ -139,4 +143,92 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusBadRequest
 	}
 	writeJSON(w, status, apiError{Error: err.Error()})
+}
+
+// skillsTimeout is how long the page waits for a change: a little longer
+// than loom lets the change take, so a change reported as failed is never
+// made afterwards.
+const skillsTimeout = loom.SkillsTimeout + 30*time.Second
+
+// changeSkills runs one change on a worker and replies with the skill it
+// concerns: 400 with the library's reason for a refusal, 502 if Temporal
+// or the worker failed.
+func (s *Server) changeSkills(w http.ResponseWriter, r *http.Request, in loom.SkillsChange) {
+	ctx, cancel := context.WithTimeout(r.Context(), skillsTimeout)
+	defer cancel()
+	sk, err := s.Temporal.ChangeSkills(ctx, in)
+	switch {
+	case errors.Is(err, warp.ErrInvalid):
+		writeJSON(w, http.StatusBadRequest, apiError{Error: err.Error()})
+	case err != nil:
+		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"skill": sk})
+	}
+}
+
+// importSkill imports a skill from a GitHub link or a repository URL
+// (treadle's SourceFor). Trust rules apply: from an untrusted repository
+// it waits for review.
+func (s *Server) importSkill(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Link   string `json:"link"`
+		Path   string `json:"path,omitempty"`
+		Branch string `json:"branch,omitempty"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	src, err := treadle.SourceFor(strings.TrimSpace(req.Link), strings.TrimSpace(req.Path), strings.TrimSpace(req.Branch))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	// Only from the network: a file:// source would read the worker's
+	// own disk for whoever can reach the page (review 18).
+	if !strings.HasPrefix(src.Repo, "https://") {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "the page imports only from https:// repositories; import others with loom skills -import on the worker"})
+		return
+	}
+	s.changeSkills(w, r, loom.SkillsChange{Op: loom.SkillsImport, Source: &src})
+}
+
+// addSkill adds a folder given by hand (pasted or uploaded): files by
+// path, each base64 in JSON, at most loom.MaxSkillsChangeBytes in all.
+// Like loom skills -add, it needs no review.
+func (s *Server) addSkill(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Files map[string][]byte `json:"files"`
+	}
+	if !readJSONUpTo(w, r, &req, 2*loom.MaxSkillsChangeBytes) {
+		return
+	}
+	s.changeSkills(w, r, loom.SkillsChange{Op: loom.SkillsAdd, Files: req.Files})
+}
+
+// decision is an approval or a rejection of exactly the version a review
+// showed, and for an approval the version its diff was from.
+type decision struct {
+	Version  warp.ID `json:"version"`
+	Replaces warp.ID `json:"replaces,omitempty"`
+}
+
+func (s *Server) approveSkill(w http.ResponseWriter, r *http.Request) {
+	var req decision
+	if !readJSON(w, r, &req) {
+		return
+	}
+	s.changeSkills(w, r, loom.SkillsChange{Op: loom.SkillsApprove, Name: r.PathValue("name"), Version: req.Version, Replaces: req.Replaces})
+}
+
+func (s *Server) rejectSkill(w http.ResponseWriter, r *http.Request) {
+	var req decision
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.Replaces != "" {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "a rejection takes only the version"})
+		return
+	}
+	s.changeSkills(w, r, loom.SkillsChange{Op: loom.SkillsReject, Name: r.PathValue("name"), Version: req.Version})
 }

@@ -597,9 +597,70 @@ function SkillBadge({ skill }) {
     <${Pill} cls="k-skill" mono>${skill.name} @${skill.version.slice(0, 7)}<//></a>`;
 }
 
+// AddSkill imports a skill from a link, or adds one pasted or uploaded.
+// Each runs on a worker (loom's skills workflow); the page never writes.
+// An import from a repository that isn't trusted waits for review.
+function AddSkill({ onDone }) {
+  const [mode, setMode] = useState("import");
+  const [link, setLink] = useState("");
+  const [path, setPath] = useState("");
+  const [branch, setBranch] = useState("");
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const send = async (url, body) => {
+    setBusy(true); setResult(null);
+    const r = await api(url, body);
+    setBusy(false);
+    const sk = r.ok ? DD.asSkill(r.data.skill) : null;
+    setResult(r.ok && sk ? { skill: sk } : { error: (r.data && r.data.error) || String(r.data) });
+    if (r.ok) onDone();
+  };
+  const pick = async (e) => {
+    setResult(null);
+    const picked = await DD.readFolder(Array.from(e.target.files || []), (f) => new Promise((ok, bad) => {
+      const rd = new FileReader();
+      rd.onload = () => ok(String(rd.result).replace(/^data:[^,]*,/, ""));
+      rd.onerror = () => bad(rd.error);
+      rd.readAsDataURL(f);
+    }));
+    if (picked.error) { setFiles(null); setResult({ error: picked.error }); } else setFiles(picked);
+  };
+  const tab = (id, label) => html`<button role="tab" aria-selected=${mode === id} onClick=${() => { setMode(id); setResult(null); }}>${label}</button>`;
+  return html`
+    <div class="panel add-skill">
+      <div class="tabs" role="tablist">${tab("import", "Import a link")}${tab("paste", "Paste a SKILL.md")}${tab("upload", "Upload a folder")}</div>
+      ${mode === "import" && html`
+        <div class="row">
+          <label>GitHub link or repository URL<input type="text" value=${link} onInput=${(e) => setLink(e.target.value)}
+            placeholder="github.com/anthropics/skills/tree/main/skills/pdf" /></label>
+          <label style=${{ flex: "0 1 160px" }}>Folder, for a repository URL<input type="text" value=${path} onInput=${(e) => setPath(e.target.value)} /></label>
+          <label style=${{ flex: "0 1 120px" }}>Branch or tag<input type="text" value=${branch} onInput=${(e) => setBranch(e.target.value)} /></label>
+        </div>
+        <div class="row"><button class="primary" disabled=${busy || !link.trim()} onClick=${() => send("/api/skills/import", { link, path, branch })}>${busy ? "Importing…" : "Import"}</button>
+          <span class="muted">From a repository that isn't trusted, it waits for your review before any program can use it.</span></div>`}
+      ${mode === "paste" && html`
+        <textarea aria-label="SKILL.md" value=${text} onInput=${(e) => setText(e.target.value)} placeholder=${"---\nname: brief\ndescription: Writes a short brief.\n---\nKeep it under 200 words."}></textarea>
+        <div class="row"><button class="primary" disabled=${busy || !text.trim()} onClick=${() => send("/api/skills/add", { files: { "SKILL.md": DD.base64(text) } })}>${busy ? "Adding…" : "Add"}</button>
+          <span class="muted">You wrote it, so it needs no review.</span></div>`}
+      ${mode === "upload" && html`
+        <div class="row"><input type="file" webkitdirectory="" multiple onChange=${pick} aria-label="A skill's folder" /></div>
+        ${files && html`<p class="muted">${files.count} files, ${DD.size(files.bytes)}${files.skipped ? `; ${files.skipped} hidden left out` : ""}.</p>`}
+        <div class="row"><button class="primary" disabled=${busy || !files} onClick=${() => send("/api/skills/add", { files: files.files })}>${busy ? "Adding…" : "Add"}</button>
+          <span class="muted">Up to ${DD.size(DD.MAX_UPLOAD)}; bigger folders with <code>loom skills -add</code>.</span></div>`}
+      ${result && result.error && html`<p class="error">${result.error}</p>`}
+      ${result && result.skill && html`<p>${result.skill.pending
+        ? html`<a href=${"#/review/" + encodeURIComponent(result.skill.name)}>${result.skill.name}</a> is waiting for review.`
+        : html`Added <a href=${"#/skill/" + encodeURIComponent(result.skill.name)}>${result.skill.name}</a> at <span class="mono">@${result.skill.version.slice(0, 7)}</span>; programs can use it now.`}</p>`}
+    </div>`;
+}
+
 function SkillsPage() {
   const [data, setData] = useState(null);
-  useEffect(() => { api("/api/skills").then(setData); }, []);
+  const [tick, setTick] = useState(0);
+  useEffect(() => { api("/api/skills").then(setData); }, [tick]);
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
   const skills = (data.data.skills || []).map(DD.asSkill).filter(Boolean);
@@ -608,8 +669,9 @@ function SkillsPage() {
   return html`
     <h2>Skills</h2>
     <p class="lede">What steps can do by name: each skill is a folder whose SKILL.md tells Claude how. A program that uses one pins its exact version.</p>
-    ${skills.length === 0 && html`<div class="panel muted">No skills yet. Add one with <code>loom skills -store DIR -import LINK</code> or <code>-add FOLDER</code>.</div>`}
-    <div class="skills">${skills.map((s) => html`
+    <${AddSkill} onDone=${() => setTick((t) => t + 1)} />
+    ${skills.length === 0 && html`<div class="panel muted" style=${{ marginTop: "12px" }}>No skills yet. Import, paste or upload one above.</div>`}
+    <div class="skills" style=${{ marginTop: "12px" }}>${skills.map((s) => html`
       <a key=${s.name} class="panel skill-card" href=${"#/skill/" + encodeURIComponent(s.name)}>
         <div class="pills"><${Pill} cls="k-skill">${s.name}<//><${Pill} cls="k-other" plain mono>@${s.version.slice(0, 7)}<//>
           ${s.source && html`<${Pill} cls="k-record" plain>imported<//>`}</div>
@@ -672,6 +734,28 @@ function SkillPage({ name, version }) {
     </div>`;
 }
 
+// Decide approves or rejects exactly the version a review shows (and, to
+// approve, the version its diff is from), on a worker.
+function Decide({ sk, replaces }) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const decide = async (what) => {
+    setBusy(what); setError("");
+    const body = what === "approve" ? { version: sk.version, replaces } : { version: sk.version };
+    const r = await api(`/api/skills/${encodeURIComponent(sk.name)}/${what}`, body);
+    setBusy("");
+    if (!r.ok) { setError((r.data && r.data.error) || String(r.data)); return; }
+    location.hash = what === "approve" ? "#/skill/" + encodeURIComponent(sk.name) + "/" + encodeURIComponent(sk.version) : "#/skills";
+  };
+  return html`
+    <div class="decide">
+      <button class="primary" disabled=${!!busy} onClick=${() => decide("approve")}>${busy === "approve" ? "Approving…" : `Approve @${sk.version.slice(0, 7)}`}</button>
+      <button class="reject" disabled=${!!busy} onClick=${() => decide("reject")}>${busy === "reject" ? "Rejecting…" : "Reject"}</button>
+      <span class="muted">Approving lets programs use exactly what's shown here.</span>
+    </div>
+    ${error && html`<p class="error">${error}</p>`}`;
+}
+
 // ReviewPage is an import waiting for review: what it would add, file by
 // file. Approving or rejecting is loom's; the page shows the commands,
 // which name the exact version shown.
@@ -706,7 +790,8 @@ function ReviewPage({ name }) {
       <p>${replaces ? html`Replaces ${cur ? html`<a class="mono" href=${"#/skill/" + encodeURIComponent(cur.name) + "/" + encodeURIComponent(cur.version)}>@${replaces.slice(0, 12)}</a>` : html`<span class="mono">@${replaces.slice(0, 12)}</span>`}; the diff shows every change to a text file.`
         : "A new skill: the diff shows every text file."} No program can use it until it's approved.</p>
       ${binary.length > 0 && html`<p class="error">Not in the diff, because git takes them for binary: ${binary.map((b, i) => html`<code key=${i}>${b}</code> `)}. Read them yourself before approving.</p>`}
-      <p class="muted">Approve: <code>loom skills -store DIR -approve ${at}${replaces ? " -replacing " + replaces : ""}</code><br />Reject: <code>loom skills -store DIR -reject ${at}</code></p>
+      <${Decide} sk=${sk} replaces=${replaces} />
+      <p class="muted">Or at the terminal: <code>loom skills -store DIR -approve ${at}${replaces ? " -replacing " + replaces : ""}</code> or <code>-reject ${at}</code></p>
     </div>
     <h3>Changes</h3>
     ${diff === null && html`<div class="panel muted">The diff is too large to show here. Print it with <code>loom skills -store DIR -review ${sk.name}</code>.</div>`}

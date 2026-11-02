@@ -65,6 +65,9 @@ type Temporal interface {
 	// Live returns the latest live frame of each browsing step a run is
 	// executing now: reed heartbeats them to Temporal.
 	Live(ctx context.Context, workflowID string) ([]LiveFrame, error)
+	// ChangeSkills runs loom's skills workflow on a worker and waits for
+	// it: the only way the UI changes skills.
+	ChangeSkills(ctx context.Context, in loom.SkillsChange) (treadle.Skill, error)
 }
 
 // LiveFrame is what a browsing step last showed.
@@ -93,6 +96,18 @@ type History interface {
 	Refs(ctx context.Context, prefix string) ([]warp.RefInfo, error)
 }
 
+// Library is the read-only part of a treadle library that the UI uses. A
+// *treadle.Library satisfies it. Like History, it can't write: skills
+// change only through loom's skills workflow on a worker (DRAW-8).
+type Library interface {
+	Skills(ctx context.Context) ([]treadle.Skill, []error, error)
+	Pending(ctx context.Context) ([]treadle.Skill, []error, error)
+	Versions(ctx context.Context, name string) ([]treadle.Skill, error)
+	Folder(ctx context.Context, name string, version warp.ID) (treadle.Skill, []warp.File, []byte, error)
+	Review(ctx context.Context, name string) (treadle.Review, error)
+	AddTo(ctx context.Context, reg *registry.Registry) ([]error, error)
+}
+
 // Server serves the UI and its API.
 type Server struct {
 	Store      History            // read-only; see History
@@ -103,14 +118,23 @@ type Server struct {
 	Namespace  string            // Temporal namespace, for links
 	Examples   map[string]string // name -> program, offered in the editor
 	// Skills, if set, are the skills the Skills page shows: the store's
-	// own, read only.
-	Skills *treadle.Library
+	// own, read only. Changes go to a worker (Temporal.ChangeSkills).
+	Skills Library
+	// Commands, if set with Skills, makes a fresh registry of the commands
+	// that aren't skills; each compile adds the store's newest skills to
+	// it, so a skill added or approved is usable at once. Without it,
+	// Registry is used as it is.
+	Commands func() *registry.Registry
 	// Hosts are the Host header values the server answers to, besides
 	// localhost and loopback addresses. Requests for any other host are
 	// refused, which defeats DNS rebinding.
 	Hosts []string
 
 	programs sync.Map // tree ID -> program text; trees never change
+
+	mu          sync.Mutex
+	commands    *registry.Registry // Commands with the skills, as of commandsKey
+	commandsKey string             // the skills' refs and heads it was built at
 }
 
 // Handler returns the HTTP handler for the UI and API.
@@ -133,6 +157,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills/{name}", s.skill)
 	mux.HandleFunc("GET /api/skills/{name}/{version}", s.skillVersion)
 	mux.HandleFunc("GET /api/skills/{name}/review", s.skillReview)
+	mux.HandleFunc("POST /api/skills/import", s.importSkill)
+	mux.HandleFunc("POST /api/skills/add", s.addSkill)
+	mux.HandleFunc("POST /api/skills/{name}/approve", s.approveSkill)
+	mux.HandleFunc("POST /api/skills/{name}/reject", s.rejectSkill)
 	return s.guard(mux)
 }
 
@@ -186,10 +214,15 @@ func (s *Server) allowedHost(hostport string) bool {
 	return false
 }
 
-func (s *Server) info(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) info(w http.ResponseWriter, r *http.Request) {
+	reg, err := s.registry(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ref": s.Ref, "temporalUI": s.TemporalUI, "namespace": s.namespace(),
-		"commands": s.Registry.Names(), "examples": s.Examples,
+		"commands": reg.Names(), "examples": s.Examples,
 	})
 }
 
@@ -239,8 +272,41 @@ type apiError struct {
 	Col   int    `json:"col,omitempty"`
 }
 
+// registry is the commands a program may use now: Registry, or, with
+// Commands and Skills set, the commands with the store's newest skills.
+// It is rebuilt only when a skill's ref has moved (one git process to
+// tell), so compiling doesn't cost a read of every skill (review 18).
+func (s *Server) registry(ctx context.Context) (*registry.Registry, error) {
+	if s.Commands == nil || s.Skills == nil {
+		return s.Registry, nil
+	}
+	refs, err := s.Store.Refs(ctx, treadle.RefPrefix)
+	if err != nil {
+		return nil, err
+	}
+	var key strings.Builder
+	for _, r := range refs {
+		fmt.Fprintf(&key, "%s %s\n", r.Name, r.Commit)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.commands != nil && s.commandsKey == key.String() {
+		return s.commands, nil
+	}
+	reg := s.Commands()
+	if _, err := s.Skills.AddTo(ctx, reg); err != nil {
+		return nil, err
+	}
+	s.commands, s.commandsKey = reg, key.String()
+	return reg, nil
+}
+
 func (s *Server) compileProgram(ctx context.Context, src string) (plan.Plan, *apiError) {
-	p, err := draft.Compile(ctx, s.Registry, draft.Source(src))
+	reg, err := s.registry(ctx)
+	if err != nil {
+		return plan.Plan{}, &apiError{Error: err.Error()}
+	}
+	p, err := draft.Compile(ctx, reg, draft.Source(src))
 	if err == nil {
 		return p, nil
 	}
@@ -603,11 +669,16 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 // value with known fields, up to 1 MB. Requiring the content type means a
 // plain HTML form on another site can't post to the API.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	return readJSONUpTo(w, r, v, 1<<20)
+}
+
+// readJSONUpTo is readJSON with a body of at most limit bytes.
+func readJSONUpTo(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
 		writeJSON(w, http.StatusUnsupportedMediaType, apiError{Error: "Content-Type must be application/json"})
 		return false
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	dec.DisallowUnknownFields()
 	err := dec.Decode(v)
 	if err == nil && dec.More() {

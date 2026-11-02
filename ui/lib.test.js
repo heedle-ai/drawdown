@@ -174,3 +174,14 @@ test("a review shows invisible characters as code points", () => {
   assert.equal(DD.visible("tab\tline\nemoji 👩\u200d💻 é"), "tab\tline\nemoji 👩\u200d💻 é");
   assert.equal(DD.visible("\u2066x\u2069\ufeff"), "⟨U+2066⟩x⟨U+2069⟩⟨U+FEFF⟩");
 });
+
+test("a picked folder becomes files by path, without hidden ones, within the limit", async () => {
+  const f = (path, size = 3) => ({ webkitRelativePath: path, size });
+  const read = async (x) => "b64:" + x.webkitRelativePath;
+  const got = await DD.readFolder([f("pdf/SKILL.md"), f("pdf/scripts/x.py"), f("pdf/.DS_Store"), f("pdf/.git/HEAD")], read);
+  assert.deepEqual(got.files, { "SKILL.md": "b64:pdf/SKILL.md", "scripts/x.py": "b64:pdf/scripts/x.py" });
+  assert.equal(got.count, 2); assert.equal(got.skipped, 2);
+  assert.match((await DD.readFolder([f("pdf/README.md")], read)).error, /no SKILL.md/);
+  assert.match((await DD.readFolder([f("pdf/SKILL.md"), f("pdf/big.bin", DD.MAX_UPLOAD)], read)).error, /more than/);
+  assert.equal(DD.base64("é ok"), Buffer.from("é ok").toString("base64"));
+});

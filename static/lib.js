@@ -197,6 +197,40 @@ const DD = (() => {
       (c) => "⟨U+" + c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0") + "⟩");
   }
 
+  // MAX_UPLOAD is the most a folder added from the page may hold (loom's
+  // MaxSkillsChangeBytes): a change travels as a workflow's input.
+  const MAX_UPLOAD = 1 << 20;
+
+  // base64 is text's UTF-8 bytes in base64, as Go's JSON reads []byte.
+  function base64(text) {
+    let bin = "";
+    for (const b of new TextEncoder().encode(text)) bin += String.fromCharCode(b);
+    return btoa(bin);
+  }
+
+  // readFolder turns the files of a picked folder into {path: base64},
+  // with paths relative to the folder (its own name dropped) and hidden
+  // files and folders left out, as loom skills -add does; or {error}
+  // when there's nothing to add or it's over MAX_UPLOAD. read(file)
+  // gives a file's base64.
+  async function readFolder(list, read) {
+    const files = {};
+    let count = 0, bytes = 0, skipped = 0;
+    for (const f of list) {
+      const parts = String(f.webkitRelativePath || f.name).split("/").slice(1);
+      if (parts.length === 0 || parts.some((p) => p === "" || p.startsWith("."))) { skipped++; continue; }
+      bytes += f.size + parts.join("/").length; count++;
+      if (bytes > MAX_UPLOAD) return { error: `The folder holds more than ${size(MAX_UPLOAD)}: add it with loom skills -add.` };
+      files[parts.join("/")] = null;
+    }
+    if (!Object.prototype.hasOwnProperty.call(files, "SKILL.md")) return { error: "The folder has no SKILL.md at its top." };
+    for (const f of list) {
+      const p = String(f.webkitRelativePath || f.name).split("/").slice(1).join("/");
+      if (Object.prototype.hasOwnProperty.call(files, p)) files[p] = await read(f);
+    }
+    return { files, count, bytes, skipped };
+  }
+
   // ancestors are every node id depends on, directly or not.
   function ancestors(plan, id) {
     const req = new Map(((plan && plan.nodes) || []).map((n) => [n.id, n.requires || []]));
@@ -250,6 +284,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, parse, preview, decisions, ancestors, dur, span, tokens };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens };
 })();
 if (typeof module !== "undefined") module.exports = DD;

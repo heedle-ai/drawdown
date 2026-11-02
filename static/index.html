@@ -102,6 +102,13 @@
   textarea { width:100%; min-height:150px; font:13.5px/1.6 var(--mono); padding:12px 14px; border:1px solid var(--line);
              border-radius:10px; background:var(--sunk); color:var(--ink); resize:vertical; }
   .error { color:var(--bad); font-family:var(--mono); font-size:12.5px; white-space:pre-wrap; }
+  input[type=text] { font:13.5px var(--mono); padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--sunk); color:var(--ink); min-width:0; }
+  .add-skill .tabs { display:flex; gap:4px; margin-bottom:12px; }
+  .add-skill .tabs button[aria-selected="true"] { border-color:var(--skill); color:var(--ink); font-weight:600; }
+  .add-skill label { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); flex:1 1 220px; }
+  .add-skill textarea { min-height:120px; }
+  .decide { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  button.reject { color:var(--bad); }
   select { font:12.5px var(--mono); padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); }
 
   /* Programs, highlighted */

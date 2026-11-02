@@ -14,6 +14,7 @@ import (
 
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/reed"
+	"github.com/heedle-ai/treadle"
 )
 
 var queueName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -31,6 +32,11 @@ func (t TemporalClient) Submit(ctx context.Context, in loom.RunInput) (string, s
 		return "", "", err
 	}
 	return run.GetID(), run.GetRunID(), nil
+}
+
+// ChangeSkills runs loom's skills workflow and waits for it.
+func (t TemporalClient) ChangeSkills(ctx context.Context, in loom.SkillsChange) (treadle.Skill, error) {
+	return loom.ChangeSkills(ctx, t.Client, t.Queue, in)
 }
 
 // List returns up to 200 executions of loom's RunWorkflow on this task
