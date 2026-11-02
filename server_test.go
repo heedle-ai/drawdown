@@ -21,9 +21,9 @@ import (
 	"github.com/heedle-ai/draft"
 	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
-	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
 	"github.com/heedle-ai/shuttle/plan"
+	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
 )
 
