@@ -47,6 +47,7 @@ func main() {
 	browserNetwork := flag.String("browser-network", "", "Podman network browse containers join (default: Podman's)")
 	askModel := flag.String("ask-model", pirn.DefaultModel, "Claude model ask and agent use (key from ANTHROPIC_API_KEY)")
 	agentImage := flag.String("agent-image", "", "content-pinned image ID agent steps run in (needs /bin/sh)")
+	imageRegistry := flag.String("image-registry", "", "OCI repository (such as ghcr.io/acme/heedle-images) that (image … \"push\") pushes to, with the worker's podman login")
 	agentRegistry := flag.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
 	flag.Parse()
 	if *store == "" {
@@ -80,6 +81,9 @@ func main() {
 		if err := pirn.Register(reg, w, claude); err != nil {
 			log.Fatal(err)
 		}
+		if err := bobbin.RegisterImage(reg, w, bobbin.Runner{}, imageRegistryFor(*imageRegistry)); err != nil {
+			log.Fatal(err)
+		}
 		if err := pirn.RegisterAgent(reg, w, pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry)}); err != nil {
 			log.Fatal(err)
 		}
@@ -98,6 +102,7 @@ func main() {
 		reg.MustRegister(reed.BuiltinSpec())
 		reg.MustRegister(pirn.BuiltinSpec())
 		reg.MustRegister(pirn.AgentBuiltinSpec())
+		reg.MustRegister(bobbin.ImageBuiltinSpec())
 	}
 	srv := &drawdown.Server{
 		Store:      s,
@@ -134,4 +139,13 @@ func registryFor(repo string) *pirn.Registry {
 		return nil
 	}
 	return &pirn.Registry{Repo: repo}
+}
+
+// imageRegistryFor is where (image … "push") pushes, or nil: then such
+// steps fail with ImageSetup.
+func imageRegistryFor(repo string) *bobbin.ImageRegistry {
+	if repo == "" {
+		return nil
+	}
+	return &bobbin.ImageRegistry{Repo: repo}
 }
