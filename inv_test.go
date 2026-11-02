@@ -117,6 +117,8 @@ func TestInv_AnswersAreShownAsText(t *testing.T) {
 	allowed := []string{
 		"if (live && ref.current) ref.current.innerHTML = svg;",
 		`ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: true, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });`,
+		// Clearing a file's diff before showing another: no data.
+		`if (ref.current) ref.current.innerHTML = "";`,
 		// One file's change (warp's DiffBlobs), as it comes from Git.
 		`ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: false, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });`,
 	}
@@ -275,6 +277,26 @@ func TestInv_GraphViewerLeavesLinksAlone(t *testing.T) {
 		`box.addEventListener("wheel", wheel, { passive: false });`,
 		`setTimeout(() => expandRef.current && expandRef.current.focus(), 0);`,
 		"onPointerCancel=${() => { drag.current = null; }}",
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("static/app.js lacks %s", want)
+		}
+	}
+}
+
+// TestInv_StepPageStartsFresh: each step page is keyed by its route, so
+// moving to another step never carries an open file or its diff over, and
+// a file's diff is cleared before another loads. (Review 9: a row with the
+// same path stayed open, showing the previous step's diff.)
+func TestInv_StepPageStartsFresh(t *testing.T) {
+	b, err := os.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"html`<${StepPage} key=${route.join(\"/\")} ",
+		`if (ref.current) ref.current.innerHTML = "";`,
+		"}, [open, f.status, f.before, f.blob, oci]);",
 	} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("static/app.js lacks %s", want)

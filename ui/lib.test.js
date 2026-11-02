@@ -108,9 +108,33 @@ test("a step's recorded files are checked and summarised", () => {
   assert.equal(DD.fileSummary(files), "1 added, 1 changed, 1 the same, 1 deleted");
   for (const bad of [{ path: "x", size: 1, status: "renamed", blob: b("a") }, { path: "x", size: "1", status: "added", blob: b("a") },
     { path: "x", size: 1, status: "added" }, { path: "x", size: 1, status: "changed", blob: b("a") }, { path: "x", size: 1, status: "deleted", blob: b("a"), before: b("a") },
-    { path: "x", size: 1, status: "added", blob: "../../api" }, { path: 1, size: 1, status: "added", blob: b("a") }, null, "x"]) {
+    { path: "x", size: 1, status: "added", blob: "../../api" }, { path: 1, size: 1, status: "added", blob: b("a") }, null, "x",
+    // Review 9: 41 to 63 hex digits were accepted.
+    { path: "x", size: 1, status: "added", blob: "a".repeat(41) }]) {
     assert.deepEqual(DD.asFiles([bad]), [], JSON.stringify(bad));
   }
   for (const v of [undefined, null, {}, "x"]) assert.deepEqual(DD.asFiles(v), []);
   assert.equal(DD.fileSummary([]), "");
+});
+
+test("sizes read in the largest fitting unit", () => {
+  // Review 9: 5 MB read "5120.0 KiB".
+  assert.equal(DD.size(0), "0 B");
+  assert.equal(DD.size(1023), "1023 B");
+  assert.equal(DD.size(1536), "1.5 KiB");
+  assert.equal(DD.size(5 * 1024 * 1024), "5.0 MiB");
+  assert.equal(DD.size(4 * 1024 ** 3), "4.0 GiB");
+  for (const bad of [-1, NaN, undefined, "3"]) assert.equal(DD.size(bad), "");
+});
+
+test("files kept in a registry are recognised, and fetched as pirn says", () => {
+  const sum = "ab".repeat(32);
+  const ok = agentJSON({ files: [{ path: "big.bin", size: 3000000, oci: "ghcr.io/acme/files", sha256: sum }] });
+  assert.equal(DD.parse(ok).agent.files[0].oci, "ghcr.io/acme/files");
+  for (const bad of [{ path: "a", size: 1, oci: "r" }, { path: "a", size: 1, oci: "r", sha256: "AB" }, { path: "a", size: 1, sha256: sum },
+    { path: "a", size: 1, oci: "r", sha256: sum, text: "x" }]) {
+    assert.deepEqual(DD.parse(agentJSON({ files: [bad] })), { text: agentJSON({ files: [bad] }) }, JSON.stringify(bad));
+  }
+  // The same string pirn's TestInv_RegistryIsCheckedBeforeAnyContainer expects.
+  assert.equal(DD.fetchCommand("ghcr.io/acme/files", "ab", "my report's.bin"), "oras blob fetch --output 'my report'\\''s.bin' ghcr.io/acme/files@sha256:ab");
 });
