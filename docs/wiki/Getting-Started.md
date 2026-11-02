@@ -27,7 +27,7 @@ go run ./cmd/drawdown -store ~/heedle-store.git
 drawdown on http://127.0.0.1:8090 (store /Users/you/heedle-store.git, queue "loom", worker true)
 ```
 
-Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the same process, so these two terminals are all you need. The worker knows draft's `echo`, the hello world's `source` and `assess`, reed's `browse` (with `-browser-image`) and pirn's `ask` (with `ANTHROPIC_API_KEY` set; see [Ask Claude](#ask-claude)).
+Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the same process, so these two terminals are all you need. The worker knows draft's `echo`, the hello world's `source` and `assess`, reed's `browse` (with `-browser-image`), and pirn's `ask` and `agent` (with `ANTHROPIC_API_KEY` set, and `-agent-image` for `agent`; see [Ask Claude](#ask-claude)).
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -42,7 +42,8 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 | `-worker` | `true` | Also run a loom worker. Set `false` if you run `loom worker` separately. If Temporal is down at startup, the UI still starts and shows recorded history; restart once Temporal is up to run programs |
 | `-browser-image` | none | A [reed](https://github.com/heedle-ai/reed/wiki/Getting-Started) browser image ID, for programs that use `browse`. Without it, `browse` steps fail with `BrowserSetup` |
 | `-browser-network` | Podman's default | The Podman network browse pods join |
-| `-ask-model` | `claude-sonnet-5-5` | The Claude model `ask` uses. The key comes from `ANTHROPIC_API_KEY` in drawdown's environment; without it, `ask` steps fail with `AskSetup` |
+| `-ask-model` | `claude-sonnet-5-5` | The Claude model `ask` and `agent` use. The key comes from `ANTHROPIC_API_KEY` in drawdown's environment; without it, `ask` steps fail with `AskSetup` and `agent` steps with `AgentSetup` |
+| `-agent-image` | none | A content-pinned image ID with `/bin/sh` that [agent steps](https://github.com/heedle-ai/pirn/wiki/How-It-Works#agent-steps) run in. Without it, `agent` steps fail with `AgentSetup` |
 | `-sources` | loom's `examples/hello/sources` | Folder the `source` command reads |
 
 ## 3. Try the hello world
@@ -87,7 +88,7 @@ The answer shows as text with the model and token counts. Change a source as in 
 
 ## Your own programs
 
-Type any program using `echo`, `source`, `assess`, `ask` or `browse`. Errors show as you type, with line and column; **Run** is enabled only when the program compiles. To add commands, see [draft → Adding Commands](https://github.com/heedle-ai/draft/wiki/Adding-Commands), and register them in `cmd/drawdown/main.go` for both the registry and the worker.
+Type any program using `echo`, `source`, `assess`, `ask`, `agent` or `browse`. Errors show as you type, with line and column; **Run** is enabled only when the program compiles. To add commands, see [draft → Adding Commands](https://github.com/heedle-ai/draft/wiki/Adding-Commands), and register them in `cmd/drawdown/main.go` for both the registry and the worker.
 
 ## Troubleshooting
 

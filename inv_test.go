@@ -104,7 +104,7 @@ func TestInv_AnswersAreShownAsText(t *testing.T) {
 	}
 	js := string(b)
 	for _, want := range []string{
-		"const { answer, page } = DD.parse(text);",
+		"const { agent, answer, page } = DD.parse(text);",
 		"<pre class=\"answer-text\">${answer.text}</pre>",
 		`securityLevel: "strict",`,
 		"const copy = source.cloneNode(true);",
@@ -147,6 +147,9 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 		`Chromium is set to reach only the hosts the program names`,
 		`The container itself is on Podman's network, so this rests on Chromium's own settings`,
 		`with both, the arguments, then \" | \", then the inputs joined with spaces`,
+		`agent: { where: "A fresh Podman container (a bobbin session) for this step alone`,
+		`net: "None for its commands (--network=none). Only the worker talks to the Claude API"`,
+		`no environment variables from the machine or the worker`,
 	} {
 		if !strings.Contains(js, claim) {
 			t.Errorf("static/app.js no longer claims %s", claim)
@@ -154,7 +157,16 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 	}
 	container := strings.Join(bobbin.Spec{Image: strings.Repeat("ab", 32)}.Argv(time.Minute), " ")
 	browser := strings.Join(reed.Browser{Image: strings.Repeat("ab", 32)}.Argv("v", []string{"a.example"}), " ")
-	for name, argv := range map[string]string{"container": container, "browse": browser} {
+	session := strings.Join(bobbin.Spec{Image: strings.Repeat("ab", 32)}.SessionArgv("s", time.Minute), " ")
+	if !strings.Contains(session, "--network=none") {
+		t.Errorf("agent sessions have a network: %s", session)
+	}
+	// pirn starts its session from an image alone: no environment.
+	// (Review 7: DRAW-22 said agent steps had HEEDLE_NODE and HEEDLE_ATTEMPT.)
+	if pirnSrc, err := os.ReadFile("../pirn/agent.go"); err != nil || !strings.Contains(string(pirnSrc), "a.Runner.Start(ctx, bobbin.Spec{Image: a.Image})") || strings.Contains(session, "--env") {
+		t.Errorf("an agent session's environment changed; update the inspector (%v): %s", err, session)
+	}
+	for name, argv := range map[string]string{"container": container, "browse": browser, "agent": session} {
 		if !strings.Contains(argv, "--rm") {
 			t.Errorf("%s step isn't removed afterwards: %s", name, argv)
 		}

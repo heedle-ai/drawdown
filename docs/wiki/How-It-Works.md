@@ -80,6 +80,7 @@ Clicking a step, here or in the drawdown on the home page, opens the **step insp
 - **Given:** exactly what was shared with the step: its parents' outputs, nothing else.
 - **Ran in:** where it ran and what it could touch: files, network, what it gets and what it leaves. For a container or browse step this is a fresh container, removed afterwards, with nothing mounted. A container step has no network at all; a browse step's limit is Chromium's own settings, on a container that does have a network. `TestInv_InspectorTellsTheTruth` checks these claims against bobbin's and reed's real code.
 - **Decided:** what the step concluded: an assessment's verdict, a page's final URL and refused requests, Claude's model, tokens and citations. And any failure Temporal retried past.
+- **Work**, for an agent step: every command Claude ran in its container, in order, with exit code, time and output; the files it kept from `/work/out`; and every path that changed in the container.
 - **Produced:** its output, where it is in Git (`outputs/<node>` in the run's commit), and the steps it was passed to.
 - **Not shared with this step:** every other step whose output was never given to it, marked as running alongside, running after it, or reaching it only through its parents. What its parents passed on may still include parts of those outputs.
 

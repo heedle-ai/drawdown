@@ -53,9 +53,9 @@ const bytes = (s) => { const n = new Blob([s || ""]).size; return n < 1024 ? `${
 
 // === Kinds of step: one dye each ===========================================
 
-const KIND_OF_ACTIVITY = { Echo: "echo", Source: "source", Assess: "assess", Browse: "browse", Ask: "ask", Container: "container", LoomRecord: "record" };
-const KIND_OF_COMMAND = { echo: "echo", source: "source", assess: "assess", browse: "browse", ask: "ask", container: "container" };
-const KIND_LABEL = { echo: "echo", source: "source", assess: "assess", browse: "browse", ask: "ask Claude", container: "container", record: "Git record", other: "step" };
+const KIND_OF_ACTIVITY = { Echo: "echo", Source: "source", Assess: "assess", Browse: "browse", Ask: "ask", Agent: "agent", Container: "container", LoomRecord: "record" };
+const KIND_OF_COMMAND = { echo: "echo", source: "source", assess: "assess", browse: "browse", ask: "ask", agent: "agent", container: "container" };
+const KIND_LABEL = { echo: "echo", source: "source", assess: "assess", browse: "browse", ask: "ask Claude", agent: "Claude agent", container: "container", record: "Git record", other: "step" };
 const kindOf = (activity) => KIND_OF_ACTIVITY[activity] || "other";
 const kindColor = (kind) => css("--" + kind) || css("--other");
 
@@ -172,8 +172,48 @@ function usePoll(path, every, deps) {
 
 // A browse step's output is the page it saw (reed's JSON), and an ask step's
 // is Claude's answer (pirn's JSON); show each as what it is.
+// AgentWork shows what an agent step did: its reply, every command it ran,
+// the files it kept and what changed in its container.
+function AgentWork({ agent: a, part = "all" }) {
+  const failed = a.commands.filter((c) => c.exitCode !== 0 || c.error).length;
+  const groups = { added: [], changed: [], deleted: [] };
+  for (const c of a.changes) groups[c.kind].push(c.path);
+  const summary = part !== "work", work = part !== "summary";
+  return html`
+    <div class="answer agent-work">
+      ${summary && html`<pre class="answer-text">${a.text}</pre>`}
+      ${summary && html`
+      <div class="pills muted">
+        <${Pill} cls="k-agent">${a.model}<//>
+        <${Pill} cls="k-other" plain>${a.turns} turn${a.turns === 1 ? "" : "s"}<//>
+        <${Pill} cls=${failed ? "s-Failed" : "s-Completed"}>${a.commands.length} commands${failed ? `, ${failed} failed` : ""}<//>
+        <${Pill} cls="k-record">${a.files.length} file${a.files.length === 1 ? "" : "s"} kept<//>
+        ${a.inputTokens != null && html`<${Pill} cls="k-other" plain>${a.inputTokens} tokens in, ${a.outputTokens} out<//>`}
+        ${a.stopReason === "max_turns" && html`<${Pill} cls="s-Failed">stopped at the turn limit<//>`}
+        <${Pill} cls="k-container" mono>image ${a.image.replace(/^sha256:/, "").slice(0, 12)}<//>
+      </div>`}
+      ${work && html`<details open=${part === "work" || a.commands.length <= 6}><summary>Commands (${a.commands.length})</summary>
+        <ol class="commands">${a.commands.map((c, i) => html`
+          <li key=${i}>
+            <div class="cmd-line"><span class=${"exit " + (c.exitCode === 0 && !c.error ? "ok" : "bad")}>${c.error ? "!" : c.exitCode}</span>
+              <code>${c.command}</code><span class="muted">${c.ms != null ? dur(c.ms) : ""}</span></div>
+            ${(c.stdout || c.stderr || c.error) && html`<pre class="cmd-out">${c.error ? c.error + "\n" : ""}${c.stdout || ""}${c.stderr ? "\n" + c.stderr : ""}${c.truncated ? "\n[cut]" : ""}</pre>`}
+          </li>`)}</ol>
+      </details>`}
+      ${work && a.files.length > 0 && html`<details open><summary>Files kept from /work/out (${a.files.length})</summary>
+        ${a.files.map((f) => html`<details key=${f.path} class="file"><summary><code>${f.path}</code> <span class="muted">${bytes(f.text ?? f.base64 ?? "")}${f.base64 != null ? ", binary" : ""}</span></summary>
+          ${f.text != null ? html`<pre>${f.text}</pre>` : html`<p class="muted">A binary file of ${f.size} bytes, kept in the record as base64.</p>`}</details>`)}
+      </details>`}
+      ${work && (a.skipped || []).length > 0 && html`<p class="muted">Not kept: ${a.skipped.join("; ")}${a.skippedMore ? `, and ${a.skippedMore} more` : ""}</p>`}
+      ${work && html`<details><summary>Changed in the container (${a.changes.length}${a.moreChanges ? `+${a.moreChanges}` : ""})</summary>
+        ${["added", "changed", "deleted"].filter((k) => groups[k].length).map((k) => html`<div key=${k}><strong>${k}</strong><pre>${groups[k].join("\n")}</pre></div>`)}
+      </details>`}
+    </div>`;
+}
+
 function Output({ text }) {
-  const { answer, page } = DD.parse(text);
+  const { agent, answer, page } = DD.parse(text);
+  if (agent) return html`<${AgentWork} agent=${agent} />`;
   if (answer) return html`
     <div class="answer">
       <pre class="answer-text">${answer.text}</pre>
@@ -546,7 +586,7 @@ function nodeCard(n, step, output) {
 
 const TEMPLATES = {
   echo: '(echo "hello")', source: '(source "weather")', assess: '(assess "the shipment will be late")',
-  browse: '(browse "example.org")', ask: '(ask "Summarize the sources.")', container: '(container "IMAGE-ID" "arg")',
+  browse: '(browse "example.org")', ask: '(ask "Summarize the sources.")', agent: '(agent "Write out/summary.md from the inputs.")', container: '(container "IMAGE-ID" "arg")',
 };
 
 function NewRun({ info, history: ref }) {
@@ -835,6 +875,7 @@ const SANDBOX = {
   assess: { where: "Inside the loom worker's process; no container", fs: "None", net: "None", gets: "Its claim, and every input's verdict", leaves: "SUPPORTED or NOT SUPPORTED, naming the sources for and against" },
   container: { where: "A fresh Podman container from a content-pinned image, removed when the step ends", fs: "A brand-new, empty writable layer over the image. Deleted with the container: no other step ever sees it, and nothing is mounted from the machine", net: "None (--network=none)", gets: "Its inputs as JSON on standard input; its arguments; HEEDLE_NODE and HEEDLE_ATTEMPT in its environment, nothing else from the machine", leaves: "Standard output, bounded, as this step's output" },
   browse: { where: "A fresh Podman container running a fresh Chromium profile, removed when the step ends", fs: "A brand-new browser profile, deleted with the container. Nothing is mounted from the machine", net: "Chromium is set to reach only the hosts the program names, refusing and recording every other request. The container itself is on Podman's network, so this rests on Chromium's own settings", gets: "Its URL and allowed hosts, from the program", leaves: "What the browser saw: URL, title, text, screenshot, blocked requests" },
+  agent: { where: "A fresh Podman container (a bobbin session) for this step alone, from the worker's content-pinned agent image, removed when the step ends; Claude, through Anthropic's SDK, decides each command", fs: "A brand-new, empty writable layer over the image, where its inputs are written to /work/in. Deleted with the container: no other step ever sees it, and nothing is mounted from the machine", net: "None for its commands (--network=none). Only the worker talks to the Claude API", gets: "Its instruction, and its inputs as files in /work/in; no environment variables from the machine or the worker", leaves: "Claude's reply, every command it ran with its output, the files it left in /work/out, and the list of changed paths" },
   ask: { where: "One request to Claude through Anthropic's SDK; no container", fs: "None", net: "Only the Claude API, signed with the worker's key (never recorded)", gets: "Its instruction, and its inputs as cited sources", leaves: "Claude's answer, with the model, stop reason and token counts" },
   record: { where: "loom's worker, writing to the Git store outside every container", fs: "The warp store only", net: "None", gets: "Every step's output", leaves: "One commit" },
   other: { where: "The loom worker", fs: "Whatever this command's implementation allows", net: "Whatever this command's implementation allows", gets: "Its arguments and inputs", leaves: "Its output" },
@@ -870,6 +911,7 @@ function StepPage({ workflow, run, node, history: ref }) {
   const out = rec.outputs[node];
   const link = (id) => "#/step/" + [workflow, run, id].map(encodeURIComponent).join("/");
   const dec = decisions(kind, out);
+  const agentOut = DD.parse(out).agent;
   return html`
     <p><a href=${"#/run/" + encodeURIComponent(workflow) + "/" + encodeURIComponent(run)}>← the whole run</a></p>
     <div class="panel step-hero" style=${{ "--c": kindColor(kind) }}>
@@ -920,7 +962,8 @@ function StepPage({ workflow, run, node, history: ref }) {
       <section>
         <h3>Produced</h3>
         <p class="lede">Recorded in Git, and passed on to the steps that wait for it.</p>
-        <div class="out" style=${{ "--c": kindColor(kind) }}><div class="body">${out == null ? html`<span class="muted">No output recorded.</span>` : html`<${Output} text=${out} />`}</div></div>
+        <div class="out" style=${{ "--c": kindColor(kind) }}><div class="body">${out == null ? html`<span class="muted">No output recorded.</span>`
+          : agentOut ? html`<${AgentWork} agent=${agentOut} part="summary" />` : html`<${Output} text=${out} />`}</div></div>
         <div class="pills" style=${{ marginTop: "10px" }}>
           <span class="muted">Passed to</span>
           ${nodes.filter((x) => (x.requires || []).includes(node)).map((x) => html`<a key=${x.id} href=${link(x.id)}><${KindPill} kind=${kindOf(x.activity)}>${x.id} ${x.activity}<//></a>`)}
@@ -928,6 +971,11 @@ function StepPage({ workflow, run, node, history: ref }) {
         </div>
       </section>
     </div>
+
+    ${agentOut && html`
+      <h3>Work</h3>
+      <p class="lede">Every command Claude ran in the container, in order, then the files it kept and everything that changed.</p>
+      <div class="panel"><${AgentWork} agent=${agentOut} part="work" /></div>`}
 
     <h3>Not shared with this step</h3>
     <p class="lede">These steps' outputs were never given to it. What its parents passed on may still include parts of them${upstream.size > inputs.length ? ", from the steps marked as reaching it through its parents" : ""}. No step sees another's files.</p>

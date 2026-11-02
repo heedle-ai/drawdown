@@ -1,4 +1,4 @@
-// Tests for static/lib.js, run in CI with: node --test ui/
+// Tests for static/lib.js, run in CI with: node --test ui/lib.test.js
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const DD = require("../static/lib.js");
@@ -67,4 +67,31 @@ test("program tokens keep every character", () => {
   for (const src of ['(pipe (echo "a") echo)', '(ask "unterminated', '  ((( )) "\\"" x', "", "é ü\t\n(x)"]) {
     assert.equal(DD.tokens(src).map((t) => t[1]).join(""), src);
   }
+});
+
+const agentJSON = (over) => JSON.stringify(Object.assign({ pirn: 1, agent: 1, model: "claude-sonnet-5-5", text: "Done.", image: "abc", turns: 2,
+  commands: [{ command: "ls", exitCode: 0, stdout: "a", ms: 5 }, { command: "false", exitCode: 1, ms: 2 }],
+  files: [{ path: "out.txt", size: 2, text: "hi" }], changes: [{ kind: "added", path: "/work/out/out.txt" }], inputs: { n0: "in/n0.txt" },
+  stopReason: "end_turn", inputTokens: 20, outputTokens: 6 }, over));
+
+test("agent results are recognised, and only well-formed ones", () => {
+  const ok = agentJSON({});
+  assert.equal(DD.parse(ok).agent.turns, 2);
+  assert.equal(DD.preview(ok), "Done.");
+  assert.deepEqual(DD.decisions("agent", ok), [["Model", "claude-sonnet-5-5"], ["Turns", "2"], ["Commands", "2 run, 1 failed"],
+    ["Files kept", "out.txt"], ["Changed", "1 paths in the container"], ["Tokens", "20 in, 6 out"], ["Stopped", "on its own (end_turn)"]]);
+  for (const bad of [agentJSON({ commands: "x" }), agentJSON({ commands: [{ command: 1, exitCode: 0 }] }), agentJSON({ files: [{ path: "a" }] }),
+    agentJSON({ changes: [{ kind: "added" }] }), agentJSON({ inputs: { n0: 1 } }), agentJSON({ model: "" }), agentJSON({ agent: 2 }),
+    // Review 7: a change kind like __proto__ broke the page's grouping.
+    agentJSON({ changes: [{ kind: "__proto__", path: "/x" }] }), agentJSON({ changes: [{ kind: "renamed", path: "/x" }] }),
+    agentJSON({ skippedMore: "3" }), agentJSON({ moreChanges: {} })]) {
+    assert.deepEqual(DD.parse(bad), { text: bad });
+    assert.doesNotThrow(() => DD.decisions("agent", bad));
+  }
+});
+
+test("pirn's empty lists and counts are accepted", () => {
+  const a = DD.parse(agentJSON({ commands: [], files: [], changes: [], skipped: ["big.bin (too large)"], skippedMore: 4, moreChanges: 2, inputs: {} })).agent;
+  assert.ok(a);
+  assert.deepEqual(DD.decisions("agent", JSON.stringify(a))[2], ["Commands", "0 run"]);
 });

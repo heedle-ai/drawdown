@@ -15,6 +15,22 @@ const DD = (() => {
     return v;
   }
 
+  const KINDS = ["added", "changed", "deleted"];
+  const objs = (v, ok) => Array.isArray(v) && v.every((x) => x && typeof x === "object" && ok(x));
+
+  // asAgent is v if it's an agent step's result (pirn's JSON, agent format
+  // 1), with every field the page reads of the right type; else null.
+  function asAgent(v) {
+    if (!asAnswer(v) || v.agent !== 1 || !str(v.image) || !num(v.turns)) return null;
+    if (!objs(v.commands, (c) => str(c.command) && num(c.exitCode) && opt(c.stdout, str) && opt(c.stderr, str) && opt(c.ms, num) && opt(c.error, str))) return null;
+    if (!objs(v.files, (f) => str(f.path) && num(f.size) && opt(f.text, str) && opt(f.base64, str))) return null;
+    // Only the kinds podman diff reports: the page groups by kind.
+    if (!objs(v.changes, (c) => KINDS.includes(c.kind) && str(c.path)) || !strs(v.skipped)) return null;
+    if (!opt(v.skippedMore, num) || !opt(v.moreChanges, num)) return null;
+    if (!v.inputs || typeof v.inputs !== "object" || !Object.values(v.inputs).every(str)) return null;
+    return v;
+  }
+
   // asPage is v if it's a browse step's page (reed's JSON, format 1), with
   // every field the page reads of the right type; else null.
   function asPage(v) {
@@ -24,12 +40,16 @@ const DD = (() => {
     return v;
   }
 
-  // parse reads a step's output: {answer}, {page}, or {text} for anything
-  // else, including JSON that only looks like an answer or a page.
+  // parse reads a step's output: {agent}, {answer}, {page}, or {text} for
+  // anything else, including JSON that only looks like one of them.
   function parse(text) {
     if (!str(text)) return { text: "" };
     let v;
     try { v = JSON.parse(text); } catch { return { text }; }
+    if (v && v.agent !== undefined) {
+      const agent = asAgent(v);
+      return agent ? { agent } : { text };
+    }
     const answer = asAnswer(v);
     if (answer) return { answer };
     const page = asPage(v);
@@ -40,6 +60,7 @@ const DD = (() => {
   // preview is an output as plain text, for hover cards.
   function preview(text) {
     const o = parse(text);
+    if (o.agent) return o.agent.text;
     if (o.answer) return o.answer.text;
     if (o.page) return `${o.page.title || o.page.url}\n${(o.page.text || "").slice(0, 300)}`;
     return o.text;
@@ -49,6 +70,17 @@ const DD = (() => {
   function decisions(kind, text) {
     if (!str(text)) return [];
     const o = parse(text);
+    if (o.agent) {
+      const a = o.agent;
+      const failed = a.commands.filter((c) => c.exitCode !== 0 || c.error).length;
+      const rows = [["Model", a.model], ["Turns", String(a.turns)],
+        ["Commands", `${a.commands.length} run${failed ? `, ${failed} failed` : ""}`],
+        ["Files kept", a.files.length ? a.files.map((f) => f.path).join(", ") : "none"],
+        ["Changed", `${a.changes.length}${a.moreChanges ? `+${a.moreChanges}` : ""} paths in the container`]];
+      if (num(a.inputTokens) && num(a.outputTokens)) rows.push(["Tokens", `${a.inputTokens} in, ${a.outputTokens} out`]);
+      if (a.stopReason) rows.push(["Stopped", a.stopReason === "max_turns" ? "at the turn limit, without a final reply" : `on its own (${a.stopReason})`]);
+      return rows;
+    }
     if (o.answer) {
       const a = o.answer;
       const rows = [["Model", a.model]];
@@ -129,6 +161,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asPage, parse, preview, decisions, ancestors, dur, span, tokens };
+  return { asAnswer, asAgent, asPage, parse, preview, decisions, ancestors, dur, span, tokens };
 })();
 if (typeof module !== "undefined") module.exports = DD;
