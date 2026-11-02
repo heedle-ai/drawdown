@@ -636,10 +636,16 @@ function AddSkill({ onDone }) {
     }));
     if (picked.error) { setFiles(null); setResult({ error: picked.error }); } else setFiles(picked);
   };
+  const [describe, setDescribe] = useState("");
   const tab = (id, label) => html`<button role="tab" aria-selected=${mode === id} onClick=${() => { setMode(id); setResult(null); }}>${label}</button>`;
   return html`
     <div class="panel add-skill">
-      <div class="tabs" role="tablist">${tab("import", "Import a link")}${tab("paste", "Paste a SKILL.md")}${tab("upload", "Upload a folder")}</div>
+      <div class="tabs" role="tablist">${tab("import", "Import a link")}${tab("paste", "Paste a SKILL.md")}${tab("upload", "Upload a folder")}${tab("create", "Describe a skill")}</div>
+      ${mode === "create" && html`
+        <textarea aria-label="What the skill should do" value=${describe} onInput=${(e) => setDescribe(e.target.value)}
+          placeholder="Sum the second column of a CSV file in the inputs, and report the total."></textarea>
+        <div class="row"><button class="primary" disabled=${busy || !describe.trim()} onClick=${() => send("/api/skills/create", { description: describe })}>${busy ? "Claude is writing it… (a few minutes)" : "Create it"}</button>
+          <span class="muted">Claude writes the skill and a test in a fresh container, runs the test, and the skill waits for your review.</span></div>`}
       ${mode === "import" && html`
         <div class="row">
           <label>GitHub link or repository URL<input type="text" value=${link} onInput=${(e) => setLink(e.target.value)}
@@ -720,6 +726,8 @@ function SkillPage({ name, version }) {
       <div class="pills"><${Pill} cls="k-skill" big>${name}<//>${cur && html`<${Pill} cls="k-other" plain mono>@${cur.version.slice(0, 12)}<//>`}
         ${cur && version && list[0] && list[0].version !== cur.version && html`<${Pill} cls="s-Failed" plain>not the newest<//>`}</div>
       ${cur && html`<p>${cur.description}</p>`}
+      ${cur && cur.connectors && html`<p class="muted">Its steps may use <span class="mono">${cur.connectors}</span> (as far as the worker's connectors allow).</p>`}
+      ${cur && cur.created && html`<p class="muted">Created by Claude from: “${cur.created}”</p>`}
       ${cur && cur.source && html`<p class="muted">Imported from <span class="mono">${cur.source.repo}${cur.source.path ? " " + cur.source.path : ""}</span>
         ${cur.source.commit && html` at <span class="mono">${cur.source.commit.slice(0, 12)}</span>`}${link && html` · <a href=${link} target="_blank" rel="noopener noreferrer">view the source ↗</a>`}</p>`}
     </div>
@@ -737,7 +745,7 @@ function SkillPage({ name, version }) {
           <li key=${v.commit}><a href=${"#/skill/" + encodeURIComponent(name) + "/" + encodeURIComponent(v.version)}
             aria-current=${v.version === shown && list.findIndex((x) => x.version === shown) === i ? "true" : undefined}>
             <span class="mono">${v.version.slice(0, 12)}</span></a>
-            ${v.source ? html` <span class="muted">from ${v.source.repo.replace(/^https:\/\//, "")}${v.source.commit ? " @" + v.source.commit.slice(0, 7) : ""}</span>` : html` <span class="muted">added from a folder</span>`}</li>`)}</ol>
+            ${v.source ? html` <span class="muted">from ${v.source.repo.replace(/^https:\/\//, "")}${v.source.commit ? " @" + v.source.commit.slice(0, 7) : ""}</span>` : v.created ? html` <span class="muted">created by Claude from a description</span>` : html` <span class="muted">added from a folder</span>`}</li>`)}</ol>
       </section>
     </div>`;
 }
@@ -793,6 +801,8 @@ function ReviewPage({ name }) {
       <div class="pills"><${Pill} cls="k-skill" big>${sk.name}<//><${Pill} cls="k-other" plain mono>@${sk.version.slice(0, 12)}<//>
         <${Pill} cls="s-Scheduled" plain>waiting for review<//></div>
       <p>${sk.description}</p>
+      ${sk.created && html`<p class="muted">Created by Claude from: “${sk.created}”. Read its files and its test before approving.</p>`}
+      ${sk.connectors && html`<p class="error">It asks to use the connectors <span class="mono">${sk.connectors}</span>.</p>`}
       ${sk.source && html`<p class="muted">Imported from <span class="mono">${sk.source.repo}${sk.source.path ? " " + sk.source.path : ""}</span>
         ${sk.source.commit && html` at <span class="mono">${sk.source.commit.slice(0, 12)}</span>`}${link && html` · <a href=${link} target="_blank" rel="noopener noreferrer">view the source ↗</a>`}</p>`}
       <p>${replaces ? html`Replaces ${cur ? html`<a class="mono" href=${"#/skill/" + encodeURIComponent(cur.name) + "/" + encodeURIComponent(cur.version)}>@${replaces.slice(0, 12)}</a>` : html`<span class="mono">@${replaces.slice(0, 12)}</span>`}; the diff shows every change to a text file.`
@@ -823,6 +833,39 @@ const TEMPLATES = {
   browse: '(browse "example.org")', ask: '(ask "Summarize the sources.")', agent: '(agent "Write out/summary.md from the inputs.")', container: '(container "IMAGE-ID" "arg")',
   image: '(image "FROM IMAGE@sha256:DIGEST\nCOPY in/n0.txt /n0.txt")',
 };
+
+// Describe has a worker's Claude write a program for a task, from the
+// commands and skills the worker has. The program goes into the editor,
+// where it compiles and shows its plan; nothing runs until Run.
+function Describe({ program, onProgram }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState(null);
+  const write = async () => {
+    setBusy(true); setNote(null);
+    const r = await api("/api/write", { description: text });
+    setBusy(false);
+    if (r.ok && typeof r.data.program === "string") {
+      // Review 20: the program it replaces can be put back.
+      const before = DD.replaced(program, r.data.program);
+      onProgram(r.data.program);
+      setNote({ ok: `Claude wrote this program${r.data.attempts > 1 ? ` (on try ${r.data.attempts})` : ""}. Check its plan below, then Run it.`, before });
+    } else setNote({ error: (r.data && r.data.error) || String(r.data) });
+  };
+  return html`
+    <div class="panel describe">
+      <label for="describe">Describe a task, and Claude writes the program</label>
+      <div class="row" style=${{ marginTop: "6px" }}>
+        <input id="describe" type="text" value=${text} onInput=${(e) => setText(e.target.value)}
+          onKeyDown=${(e) => { if (e.key === "Enter" && text.trim() && !busy) write(); }}
+          placeholder="Read the three shipment sources and tell me if the shipment will be late" style=${{ flex: 1 }} />
+        <button class="primary" disabled=${busy || !text.trim()} onClick=${write}>${busy ? "Writing…" : "Write the program"}</button>
+      </div>
+      ${note && note.ok && html`<p class="muted" style=${{ margin: "8px 0 0" }}>${note.ok}
+        ${note.before && html` <button class="link" onClick=${() => { onProgram(note.before); setNote(null); }}>Put back the program it replaced</button>`}</p>`}
+      ${note && note.error && html`<p class="error" role="alert">${note.error}</p>`}
+    </div>`;
+}
 
 function NewRun({ info, history: ref }) {
   const [program, setProgram] = useState(() => {
@@ -857,6 +900,7 @@ function NewRun({ info, history: ref }) {
   const plan = result && result.ok && result.data.plan ? result.data.plan : null;
   const kinds = plan ? [...new Set((plan.nodes || []).map((n) => kindOf(n.activity)))] : [];
   return html`
+    <${Describe} program=${program} onProgram=${setProgram} />
     <div class="panel">
       <textarea ref=${area} aria-label="program" spellcheck="false" value=${program}
         placeholder='(pipe (par (echo "a") (echo "b")) echo)'

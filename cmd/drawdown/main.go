@@ -111,7 +111,27 @@ func main() {
 		}}, &loom.Recorder{Store: s, Uses: lib.Uses})
 		// Skills change only through a workflow on this worker (drawdown never
 		// writes), never through a program.
-		loom.RegisterSkills(w, lib)
+		loom.RegisterSkills(w, loom.Skills{Library: lib, Create: creator(agent)})
+		// The program writer: Claude with this worker's key, told about
+		// its commands and the store's newest skills.
+		loom.RegisterWriter(w, loom.Writer{Asker: claude, Commands: func(ctx context.Context) (*registry.Registry, []loom.Command, error) {
+			reg := commands()
+			if _, err := lib.AddTo(ctx, reg); err != nil {
+				return nil, nil, err
+			}
+			known := map[string]loom.Command{}
+			for k, v := range loom.BuiltinCommands {
+				known[k] = v
+			}
+			skills, _, err := lib.Skills(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, sk := range skills {
+				known[sk.Name] = loom.Command{Args: "(" + sk.Name + ` "arg" ...)`, About: "A skill: " + sk.Description}
+			}
+			return reg, loom.Commands(reg, known), nil
+		}})
 		shipment.RegisterCommands(w, *sources)
 		// Without Temporal the worker can't start; keep serving the
 		// recorded history, and say why runs won't execute.
@@ -202,4 +222,15 @@ func readConnectors(path string) (pirn.Connectors, error) {
 	}
 	defer f.Close()
 	return pirn.ReadConnectors(f)
+}
+
+// creator creates skills with the worker's agent, if it has an image.
+func creator(a pirn.Agent) func(context.Context, string) (map[string][]byte, error) {
+	if a.Image == "" {
+		return nil
+	}
+	return func(ctx context.Context, description string) (map[string][]byte, error) {
+		files, _, err := treadle.Create(ctx, a.Run, description)
+		return files, err
+	}
 }

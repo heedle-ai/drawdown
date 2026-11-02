@@ -187,6 +187,7 @@ const DD = (() => {
       !opt(v.pending, (b) => typeof b === "boolean")) return null;
     const s = v.source;
     if (s !== undefined && (!s || typeof s !== "object" || !str(s.repo) || !opt(s.ref, str) || !opt(s.path, str) || !opt(s.commit, str))) return null;
+    if (!opt(v.connectors, str) || !opt(v.created, str)) return null;
     return v;
   }
 
@@ -284,6 +285,12 @@ const DD = (() => {
     return { t0, t1: Math.max(t1, t0 + 1) };
   }
 
+  // replaced is the program a written one replaces, worth putting back:
+  // the editor's text unless it was empty or is what was written.
+  function replaced(before, written) {
+    return typeof before === "string" && before.trim() !== "" && before !== written ? before : "";
+  }
+
   // tokens splits a program into strings, parentheses, words and spaces,
   // keeping every character.
   function tokens(src) {
@@ -299,6 +306,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced };
 })();
 if (typeof module !== "undefined") module.exports = DD;

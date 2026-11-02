@@ -107,8 +107,11 @@
   .add-skill .tabs button[aria-selected="true"] { border-color:var(--skill); color:var(--ink); font-weight:600; }
   .add-skill label { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); flex:1 1 220px; }
   .add-skill textarea { min-height:120px; }
+  .describe label { font-weight:600; }
+  .describe input[type=text] { min-width:240px; }
   .decide { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px; }
   button.reject { color:var(--bad); }
+  button.link { border:none; background:none; padding:0; color:var(--source); text-decoration:underline; text-underline-offset:3px; cursor:pointer; font:inherit; }
   select { font:12.5px var(--mono); padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); }
 
   /* Programs, highlighted */
