@@ -24,11 +24,14 @@ import (
 	"go.temporal.io/sdk/worker"
 
 	"github.com/heedle-ai/bobbin"
+	"github.com/heedle-ai/draft/registry"
 	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
 	"github.com/heedle-ai/pirn"
 	"github.com/heedle-ai/reed"
+	"github.com/heedle-ai/shuttle/plan"
+	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
 )
 
@@ -84,10 +87,19 @@ func main() {
 		if err := bobbin.RegisterImage(reg, w, bobbin.Runner{}, imageRegistryFor(*imageRegistry)); err != nil {
 			log.Fatal(err)
 		}
-		if err := pirn.RegisterAgent(reg, w, pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry)}); err != nil {
+		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry)}
+		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
 			log.Fatal(err)
 		}
-		loom.Register(w, s, reg)
+		// Skills are the store's, at their newest when drawdown starts; each
+		// run is checked against, and records, the versions it pins.
+		lib := &treadle.Library{Store: s}
+		if err := treadle.Register(ctx, reg, w, agent, lib); err != nil {
+			log.Fatal(err)
+		}
+		loom.RegisterWith(w, &loom.Checker{Registry: reg, RegistryFor: func(ctx context.Context, p plan.Plan) (*registry.Registry, error) {
+			return lib.Pinned(ctx, commands(), p)
+		}}, &loom.Recorder{Store: s, Uses: lib.Uses})
 		shipment.RegisterCommands(w, *sources)
 		// Without Temporal the worker can't start; keep serving the
 		// recorded history, and say why runs won't execute.
@@ -99,10 +111,10 @@ func main() {
 	}
 
 	if !*runWorker {
-		reg.MustRegister(reed.BuiltinSpec())
-		reg.MustRegister(pirn.BuiltinSpec())
-		reg.MustRegister(pirn.AgentBuiltinSpec())
-		reg.MustRegister(bobbin.ImageBuiltinSpec())
+		reg = commands()
+		if err := (&treadle.Library{Store: s}).AddTo(ctx, reg); err != nil {
+			log.Fatal(err)
+		}
 	}
 	srv := &drawdown.Server{
 		Store:      s,
@@ -148,4 +160,15 @@ func imageRegistryFor(repo string) *bobbin.ImageRegistry {
 		return nil
 	}
 	return &bobbin.ImageRegistry{Repo: repo}
+}
+
+// commands is every command a worker here has, but skills: the hello
+// world's, reed's browse, pirn's ask and agent, and bobbin's image.
+func commands() *registry.Registry {
+	reg := shipment.Registry()
+	reg.MustRegister(reed.BuiltinSpec())
+	reg.MustRegister(pirn.BuiltinSpec())
+	reg.MustRegister(pirn.AgentBuiltinSpec())
+	reg.MustRegister(bobbin.ImageBuiltinSpec())
+	return reg
 }

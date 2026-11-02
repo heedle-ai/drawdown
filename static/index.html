@@ -20,7 +20,7 @@
     --focus:#3b5bdb;
     /* Dyes: one per kind of step. */
     --echo:#8a8778; --source:#3b5bdb; --assess:#c2185b; --browse:#c98f00; --ask:#7a3fe0; --agent:#d4561f;
-    --container:#8d5a2b; --image:#5c8a12; --record:#0f8a6c; --other:#5d6680;
+    --container:#8d5a2b; --image:#5c8a12; --skill:#a1368f; --record:#0f8a6c; --other:#5d6680;
     /* Statuses. */
     --ok:#178a55; --run:#c98f00; --bad:#d23a2b; --rec:#64708a; --merge:#0f8fa8;
     --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -31,7 +31,7 @@
       --paper:#141824; --surface:#1b2130; --sunk:#171c29; --ink:#e6e9f2; --muted:#98a1b8; --line:#2b3346;
       --focus:#8ea6ff;
       --echo:#b3b0a2; --source:#7d95ff; --assess:#f0628f; --browse:#f2c44b; --ask:#b28bff; --agent:#ff8a5c;
-      --container:#c9925d; --image:#a9d94b; --record:#3fcf9f; --other:#98a1b8;
+      --container:#c9925d; --image:#a9d94b; --skill:#e57ad0; --record:#3fcf9f; --other:#98a1b8;
       --ok:#3fcf8a; --run:#f2c44b; --bad:#ff7a6b; --rec:#98a1b8; --merge:#47c6dc;
     }
   }
@@ -72,7 +72,7 @@
   .s-Completed { --c:var(--ok); } .s-Running { --c:var(--run); } .s-Recorded { --c:var(--rec); } .s-Merged { --c:var(--merge); }
   .s-Failed, .s-Terminated, .s-TimedOut, .s-Canceled { --c:var(--bad); } .s-Abandoned { --c:var(--muted); } .s-Scheduled { --c:var(--muted); } .s-Unknown { --c:var(--muted); }
   .k-echo { --c:var(--echo); } .k-source { --c:var(--source); } .k-assess { --c:var(--assess); } .k-browse { --c:var(--browse); }
-  .k-ask { --c:var(--ask); } .k-agent { --c:var(--agent); } .k-container { --c:var(--container); } .k-image { --c:var(--image); } .k-record { --c:var(--record); } .k-other { --c:var(--other); }
+  .k-ask { --c:var(--ask); } .k-agent { --c:var(--agent); } .k-container { --c:var(--container); } .k-image { --c:var(--image); } .k-skill { --c:var(--skill); } .k-record { --c:var(--record); } .k-other { --c:var(--other); }
   .f-added { --c:var(--ok); } .f-changed { --c:var(--run); } .f-deleted { --c:var(--bad); } .f-same { --c:var(--muted); }
   .files { padding:4px 0; } .file-row { border-bottom:1px solid var(--line); } .file-row:last-child { border-bottom:0; }
   .file-head { display:flex; gap:10px; align-items:center; width:100%; text-align:left; background:none; border:0; border-radius:0; padding:8px 14px; }
