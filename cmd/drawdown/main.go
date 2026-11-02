@@ -104,6 +104,9 @@ func main() {
 		loom.RegisterWith(w, &loom.Checker{Registry: reg, RegistryFor: func(ctx context.Context, p plan.Plan) (*registry.Registry, error) {
 			return lib.Pinned(ctx, commands(), p)
 		}}, &loom.Recorder{Store: s, Uses: lib.Uses})
+		// Skills change only through a workflow on this worker (drawdown never
+		// writes), never through a program.
+		loom.RegisterSkills(w, lib)
 		shipment.RegisterCommands(w, *sources)
 		// Without Temporal the worker can't start; keep serving the
 		// recorded history, and say why runs won't execute.
@@ -126,6 +129,7 @@ func main() {
 	}
 	srv := &drawdown.Server{
 		Skills:     &treadle.Library{Store: s},
+		Commands:   commands,
 		Store:      s,
 		Ref:        *ref,
 		Registry:   reg,

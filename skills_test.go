@@ -2,14 +2,22 @@ package drawdown_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/heedle-ai/draft/registry"
+	"github.com/heedle-ai/drawdown"
+	"github.com/heedle-ai/loom"
+	"github.com/heedle-ai/loom/examples/hello/shipment"
 	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
 )
@@ -165,5 +173,139 @@ func TestInv_SkillsPageShowsImportsWaitingForReview(t *testing.T) {
 	}
 	if vs := must(lib.Versions(ctx, "weather")); len(vs) != 1 {
 		t.Errorf("serving the review changed the skill: %+v", vs)
+	}
+}
+
+// TestInv_SkillsChangeThroughAWorker: the Skills page changes skills only
+// by running loom's skills workflow on a worker: an import (waiting for
+// review from an untrusted repository), an approval or rejection of
+// exactly the version reviewed, or a folder added by hand. A refusal is
+// 400 with the library's reason, a worker or Temporal failure 502, and a
+// skill approved here compiles at once, without a restart.
+func TestInv_SkillsChangeThroughAWorker(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	repo := t.TempDir()
+	os.WriteFile(filepath.Join(repo, "SKILL.md"), skillFolder("weather", "v1")["SKILL.md"], 0o644)
+	for _, a := range [][]string{{"init", "-q", "-b", "main"}, {"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "-m", "x"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
+	if code, _, _ := w.call("POST", "/api/compile", map[string]any{"program": `(weather "Boston")`}); code != 200 {
+		t.Fatalf("compile: %d", code)
+	}
+	// Review 18: the page imported from the worker's own disk.
+	if code, _, body := w.call("POST", "/api/skills/import", map[string]any{"link": "file://" + repo}); code != 400 || !strings.Contains(body, "only from https://") {
+		t.Errorf("a file:// import from the page: %d %s", code, body)
+	}
+	p := must((&treadle.Library{Store: w.store}).Import(ctx, treadle.Source{Repo: "file://" + repo}, time.Unix(1700000000, 0)))
+	if !p.Pending {
+		t.Fatalf("not pending: %+v", p)
+	}
+	version := string(p.Version)
+	if _, c, _ := w.call("POST", "/api/compile", map[string]any{"program": `(weather "Boston")`}); c["plan"] != nil {
+		t.Errorf("a skill waiting for review compiled: %v", c)
+	}
+	for path, req := range map[string]any{
+		"/api/skills/weather/approve": map[string]any{"version": strings.Repeat("0", 40)},
+		"/api/skills/nope/approve":    map[string]any{"version": version},
+		"/api/skills/import":          map[string]any{"link": "https://github.com/a/b/tree/main/x", "branch": "v1"},
+		"/api/skills/add":             map[string]any{"files": map[string][]byte{"SKILL.md": []byte("no front matter")}},
+	} {
+		if code, _, body := w.call("POST", path, req); code != 400 {
+			t.Errorf("%s: %d %s", path, code, body)
+		}
+	}
+	if code, _, body := w.call("POST", "/api/skills/weather/reject", map[string]any{"version": version, "replaces": version}); code != 400 {
+		t.Errorf("a rejection with replaces: %d %s", code, body)
+	}
+	if code, _, body := w.call("POST", "/api/skills/weather/approve", map[string]any{"version": version}); code != 200 {
+		t.Fatalf("approve: %d %s", code, body)
+	}
+	if _, c, _ := w.call("POST", "/api/compile", map[string]any{"program": `(weather "Boston")`}); c["plan"] == nil {
+		t.Errorf("an approved skill didn't compile without a restart: %v", c)
+	}
+	if code, _, body := w.call("POST", "/api/skills/weather/reject", map[string]any{"version": version}); code != 400 || !strings.Contains(body, "no import") {
+		t.Errorf("rejecting what's no longer waiting: %d %s", code, body)
+	}
+	code, add, body := w.call("POST", "/api/skills/add", map[string]any{"files": skillFolder("rain", "x")})
+	if code != 200 || add["skill"].(map[string]any)["name"] != "rain" {
+		t.Errorf("add: %d %s", code, body)
+	}
+	big := skillFolder("huge", "x")
+	big["x.bin"] = make([]byte, loom.MaxSkillsChangeBytes)
+	if code, _, _ := w.call("POST", "/api/skills/add", map[string]any{"files": big}); code != 400 && code != 413 {
+		t.Errorf("a folder over the limit: %d", code)
+	}
+	big["x.bin"] = make([]byte, 2*loom.MaxSkillsChangeBytes)
+	if code, _, _ := w.call("POST", "/api/skills/add", map[string]any{"files": big}); code != 400 {
+		t.Errorf("a body over the limit: %d", code)
+	}
+	if vs := must(w.fake.store.Refs(ctx, treadle.RefPrefix)); len(vs) != 2 {
+		t.Errorf("skills %v", vs)
+	}
+	w.fake.down = true
+	if code, _, _ := w.call("POST", "/api/skills/add", map[string]any{"files": skillFolder("snow", "x")}); code != 502 {
+		t.Errorf("with Temporal down: %d", code)
+	}
+}
+
+// TestInv_UploadLimitsAgree: the page's upload limit is loom's limit on a
+// change's files, so the page never offers what the worker refuses.
+func TestInv_UploadLimitsAgree(t *testing.T) {
+	b, err := os.ReadFile("static/lib.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "const MAX_UPLOAD = 1 << 20;"; !strings.Contains(string(b), want) || loom.MaxSkillsChangeBytes != 1<<20 {
+		t.Errorf("lib.js's MAX_UPLOAD and loom.MaxSkillsChangeBytes (%d) disagree", loom.MaxSkillsChangeBytes)
+	}
+}
+
+// counting is a Library that counts how often the skills are read.
+type counting struct {
+	drawdown.Library
+	reads int
+}
+
+func (c *counting) AddTo(ctx context.Context, reg *registry.Registry) ([]error, error) {
+	c.reads++
+	return c.Library.AddTo(ctx, reg)
+}
+
+// TestInv_CompilesReadSkillsOnlyWhenTheyChange: compiling reads the
+// store's skills again only when a skill's ref has moved, so typing in the
+// editor doesn't read every skill each time; a skill added since is still
+// compiled at once. (Review 18: 150 skills made each compile take 5 s.)
+func TestInv_CompilesReadSkillsOnlyWhenTheyChange(t *testing.T) {
+	ctx := context.Background()
+	store := must(warp.Init(ctx, filepath.Join(t.TempDir(), "s.git")))
+	lib := &treadle.Library{Store: store}
+	must(lib.Add(ctx, skillFolder("weather", "v1"), time.Unix(1700000000, 0)))
+	c := &counting{Library: lib}
+	srv := httptest.NewServer((&drawdown.Server{Store: store, Skills: c, Commands: shipment.Registry, Registry: shipment.Registry(), Ref: loom.DefaultRef}).Handler())
+	defer srv.Close()
+	compile := func(src string) bool {
+		res, err := http.Post(srv.URL+"/api/compile", "application/json", strings.NewReader(`{"program": `+strconv.Quote(src)+`}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var out map[string]any
+		json.NewDecoder(res.Body).Decode(&out)
+		return out["plan"] != nil
+	}
+	for i := 0; i < 5; i++ {
+		if !compile(`(weather "Boston")`) {
+			t.Fatal("didn't compile")
+		}
+	}
+	if c.reads != 1 {
+		t.Errorf("5 compiles read the skills %d times, want 1", c.reads)
+	}
+	must(lib.Add(ctx, skillFolder("rain", "v1"), time.Unix(1700000000, 0)))
+	if !compile(`(rain "Boston")`) || c.reads != 2 {
+		t.Errorf("a new skill: reads %d", c.reads)
 	}
 }

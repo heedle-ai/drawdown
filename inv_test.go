@@ -15,6 +15,7 @@ import (
 	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/reed"
 	"github.com/heedle-ai/shuttle/plan"
+	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
 )
 
@@ -62,6 +63,19 @@ func TestInv_UIOnlyReadsHistory(t *testing.T) {
 		t.Errorf("Server.Store is %v, want the read-only drawdown.History", f.Type)
 	}
 	var _ drawdown.History = (*warp.Store)(nil) // a real store still fits
+	// Skills too are read through an interface with no way to change
+	// them: changes go to a worker (Temporal.ChangeSkills).
+	lib := reflect.TypeOf((*drawdown.Library)(nil)).Elem()
+	reads := map[string]bool{"Skills": true, "Pending": true, "Versions": true, "Folder": true, "Review": true, "AddTo": true}
+	for i := 0; i < lib.NumMethod(); i++ {
+		if !reads[lib.Method(i).Name] {
+			t.Errorf("Library has %s, which isn't a known read", lib.Method(i).Name)
+		}
+	}
+	if f, _ := reflect.TypeOf(drawdown.Server{}).FieldByName("Skills"); f.Type != lib {
+		t.Errorf("Server.Skills is %v, want the read-only drawdown.Library", f.Type)
+	}
+	var _ drawdown.Library = (*treadle.Library)(nil)
 }
 
 // TestInv_AgentTabs checks the page's agent-tab code, which has no Go

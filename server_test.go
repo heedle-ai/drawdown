@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/heedle-ai/draft"
@@ -81,6 +82,30 @@ func (f *fakeTemporal) Submit(ctx context.Context, in loom.RunInput) (string, st
 	return wf, run, nil
 }
 
+// ChangeSkills runs loom's skills workflow in Temporal's test suite, on
+// the fake's store, as a worker would.
+func (f *fakeTemporal) ChangeSkills(ctx context.Context, in loom.SkillsChange) (treadle.Skill, error) {
+	if f.down {
+		return treadle.Skill{}, errors.New("connection refused")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	loom.RegisterSkills(env, &treadle.Library{Store: f.store})
+	env.ExecuteWorkflow(loom.SkillsWorkflowName, in)
+	var s treadle.Skill
+	err := env.GetWorkflowError()
+	if err == nil {
+		err = env.GetWorkflowResult(&s)
+	}
+	var app *temporal.ApplicationError
+	if errors.As(err, &app) && app.Type() == loom.SkillsRefused {
+		return treadle.Skill{}, fmt.Errorf("%w: %s", treadle.ErrInvalid, app.Message())
+	}
+	return s, err
+}
+
 func (f *fakeTemporal) Steps(_ context.Context, wf, run string) ([]drawdown.Step, error) {
 	if f.down {
 		return nil, errors.New("connection refused")
@@ -126,7 +151,7 @@ func newWorld(t *testing.T) *world {
 		t.Fatal(err)
 	}
 	fake := &fakeTemporal{store: store, sources: dir}
-	s := &drawdown.Server{Skills: &treadle.Library{Store: store}, Store: store, Ref: loom.DefaultRef, Registry: shipment.Registry(), Temporal: fake,
+	s := &drawdown.Server{Skills: &treadle.Library{Store: store}, Commands: shipment.Registry, Store: store, Ref: loom.DefaultRef, Registry: shipment.Registry(), Temporal: fake,
 		TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
