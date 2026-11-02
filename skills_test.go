@@ -118,3 +118,52 @@ func countGit(t *testing.T) func() int {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return func() int { b, _ := os.ReadFile(log); return strings.Count(string(b), "run") }
 }
+
+// TestInv_SkillsPageShowsImportsWaitingForReview: the Skills API lists
+// imports waiting for review apart from the skills, never as one; the
+// review endpoint gives the import's files, SKILL.md, the version it would
+// replace and its diff from it; with nothing waiting it's 404; the page
+// only reads (nothing it serves approves).
+func TestInv_SkillsPageShowsImportsWaitingForReview(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	lib := &treadle.Library{Store: w.store}
+	at := time.Unix(1700000000, 0)
+	cur := must(lib.Add(ctx, skillFolder("weather", "v1"), at))
+	repo := t.TempDir()
+	for p, c := range skillFolder("weather", "v2") {
+		os.MkdirAll(filepath.Dir(filepath.Join(repo, p)), 0o755)
+		os.WriteFile(filepath.Join(repo, p), c, 0o644)
+	}
+	for _, a := range [][]string{{"init", "-q", "-b", "main"}, {"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "-m", "x"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
+	p := must(lib.Import(ctx, treadle.Source{Repo: "file://" + repo}, at))
+	if !p.Pending {
+		t.Fatalf("not pending: %+v", p)
+	}
+	_, list, _ := w.call("GET", "/api/skills", nil)
+	skills, pending := list["skills"].([]any), list["pending"].([]any)
+	if len(skills) != 1 || skills[0].(map[string]any)["version"] != string(cur.Version) ||
+		len(pending) != 1 || pending[0].(map[string]any)["version"] != string(p.Version) || pending[0].(map[string]any)["pending"] != true {
+		t.Errorf("list = %v", list)
+	}
+	code, rv, _ := w.call("GET", "/api/skills/weather/review", nil)
+	diff, _ := rv["diff"].(string)
+	if code != 200 || rv["current"].(map[string]any)["version"] != string(cur.Version) || len(rv["files"].([]any)) != 2 ||
+		!strings.HasSuffix(rv["skillMD"].(string), "v2") || !strings.Contains(diff, "-v1") || !strings.Contains(diff, "+v2") ||
+		rv["replaces"] != string(cur.Version) || len(rv["binary"].([]any)) != 0 {
+		t.Errorf("review = %d %v", code, rv)
+	}
+	if code, _, _ := w.call("GET", "/api/skills/nope/review", nil); code != 404 {
+		t.Errorf("nothing waiting: %d", code)
+	}
+	if code, _, _ := w.call("POST", "/api/skills/weather/review", map[string]any{}); code < 400 {
+		t.Errorf("POST to a review: %d", code)
+	}
+	if vs := must(lib.Versions(ctx, "weather")); len(vs) != 1 {
+		t.Errorf("serving the review changed the skill: %+v", vs)
+	}
+}

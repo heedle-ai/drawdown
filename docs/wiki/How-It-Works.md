@@ -31,7 +31,8 @@ All responses are JSON except the diffs, which are plain text.
 | `GET /api/live/{workflow}` | | `{"frames": [{"activity", "attempt", "url", "image"}]}`: the latest heartbeat frame of each browsing step the run is executing, read with `DescribeWorkflowExecution` on its plan (`<workflow>/plan`); `temporalError` if Temporal is unreachable |
 | `GET /api/steps/{workflow}/{run}` | | `{"steps": [...]}`: each step as Temporal's history records it, in order, then loom's record: `node`, `activity`, `status`, `attempts`, `scheduled`, `started`, `closed`, and the last `failure` (at most 2 KiB). With Temporal unreachable: no steps and `temporalError`, still 200 |
 | `GET /api/diff/{from}/{to}` | | Unified diff text. 400 unless both are full commit IDs |
-| `GET /api/skills` | | `{"skills": [...], "problems": [...]}`: the newest version of every skill in the store (treadle's `Library.Skills`), each with `name`, `description`, `version`, `commit` and, if imported, `source`; and why any skill can't be used |
+| `GET /api/skills` | | `{"skills": [...], "pending": [...], "problems": [...]}`: the newest version of every skill in the store (treadle's `Library.Skills`), each with `name`, `description`, `version`, `commit` and, if imported, `source`; the imports waiting for review (`Library.Pending`), each with `"pending": true`; and why any skill or import can't be used |
+| `GET /api/skills/{name}/review` | | `{"skill", "replaces", "current", "files": [{"path", "size"}], "skillMD", "diff", "binary"}`: the import of the skill waiting for review (treadle's `Library.Review`), the version it would replace (`replaces` empty and `current` absent for a new skill), its unified diff from it, and the files git takes for binary, which the diff can't show; a diff over `MaxReviewDiff` (1 MiB) is left out, with `diffTooLarge` its size. 404 if nothing is waiting |
 | `GET /api/skills/{name}` | | `{"versions": [...]}`: every version of the skill, newest first. 404 if there's no such skill, 400 for a name a skill can't have |
 | `GET /api/skills/{name}/{version}` | | `{"skill", "files": [{"path", "size"}], "skillMD"}`: one version's files and its `SKILL.md` (treadle's `Library.Folder`), only for a version that was added to that skill and is within pirn's limits (404 if it isn't that skill's, even for another tree in the store; 400 if it's over the limits) |
 | `GET /api/blobdiff/{from}/{to}` | | One file's change: the unified diff of two blobs (warp's `DiffBlobs`), binary content reported but never printed. 400 unless both are full blob IDs; 413 if either is over 1 MiB (`MaxDiffBlob`), naming the `git diff` to run instead. Like `/api/diff`, it serves any object in the store by its full ID |
@@ -95,7 +96,9 @@ The **skills** link opens the Skills page (`#/skills`): every skill the store ke
 
 Wherever a step follows a skill, it says so with a badge naming the skill and the version its plan pins, linking to that version: on the graph (`n1 weather @72ba7cf "Boston"`), in hover cards, in the run's outputs and in the step inspector. A run that pinned an older version opens that version, marked *not the newest*.
 
-The page only reads. Adding skills is `loom skills` for now; doing it from here is **Planned** (roadmap 3.8), as a step the worker runs, since drawdown never writes to the store itself.
+Imports from repositories that aren't trusted wait for review (treadle's [trust levels](https://github.com/heedle-ai/treadle/wiki/How-It-Works#trust-and-review)) and are listed apart, under *Waiting for review*; no program can use one. Its review page (`#/review/<name>`) shows its source, its diff from the version it would replace (every file, for a new skill), any files the diff can't show because git takes them for binary, its `SKILL.md` and files (control and invisible format characters shown as `⟨U+XXXX⟩`), with the `loom skills -approve` and `-reject` commands naming the exact versions shown.
+
+The page only reads. Adding, approving and rejecting skills is `loom skills` for now; doing it from here is **Planned** (roadmap 3.8), as a step the worker runs, since drawdown never writes to the store itself.
 
 ## Security
 

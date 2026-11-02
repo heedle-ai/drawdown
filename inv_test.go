@@ -93,8 +93,8 @@ func TestInv_AgentTabs(t *testing.T) {
 }
 
 // TestInv_AnswersAreShownAsText: an ask step's answer (pirn's JSON) is shown
-// as its text with the model and token counts. The page inserts HTML in
-// exactly two places, both made by a library that sanitizes or escapes what
+// as its text with the model and token counts. The page inserts HTML only
+// in the known places: clearing, or HTML made by a library that sanitizes or escapes what
 // it renders (Mermaid at securityLevel strict, diff2html); model text and
 // page text are always data.
 func TestInv_AnswersAreShownAsText(t *testing.T) {
@@ -121,9 +121,15 @@ func TestInv_AnswersAreShownAsText(t *testing.T) {
 		`if (ref.current) ref.current.innerHTML = "";`,
 		// One file's change (warp's DiffBlobs), as it comes from Git.
 		`ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: false, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });`,
+		// An import waiting for review (warp's DiffTrees), as it comes from Git.
+		`if (diff && ref.current) ref.current.innerHTML = Diff2Html.html(diff, { drawFileList: true, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });`,
 	}
-	if len(sinks) != len(allowed) {
-		t.Errorf("static/app.js inserts HTML in %d places, want only the %d known ones", len(sinks), len(allowed))
+	known := 0
+	for _, a := range allowed {
+		known += strings.Count(js, a)
+	}
+	if len(sinks) != known {
+		t.Errorf("static/app.js inserts HTML in %d places, only %d of them known ones", len(sinks), known)
 	}
 	for _, a := range allowed {
 		if !strings.Contains(js, a) {

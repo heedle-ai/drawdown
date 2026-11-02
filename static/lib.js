@@ -168,7 +168,8 @@ const DD = (() => {
   // asSkill is v if it's a skill as the API lists it, with every field
   // the page reads of the right type; else null.
   function asSkill(v) {
-    if (!v || typeof v !== "object" || !str(v.name) || !SKILL_NAME.test(v.name) || !str(v.description) || !HEX.test(v.version) || !HEX.test(v.commit)) return null;
+    if (!v || typeof v !== "object" || !str(v.name) || !SKILL_NAME.test(v.name) || !str(v.description) || !HEX.test(v.version) || !HEX.test(v.commit) ||
+      !opt(v.pending, (b) => typeof b === "boolean")) return null;
     const s = v.source;
     if (s !== undefined && (!s || typeof s !== "object" || !str(s.repo) || !opt(s.ref, str) || !opt(s.path, str) || !opt(s.commit, str))) return null;
     return v;
@@ -184,6 +185,16 @@ const DD = (() => {
     const path = s.path || "";
     if (path && !/^[A-Za-z0-9_][A-Za-z0-9._-]*(\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/.test(path)) return null;
     return `https://github.com/${m[1]}/${m[2]}/tree/${s.commit}${path ? "/" + path : ""}`;
+  }
+
+  // visible is text with every control character but tabs and line ends,
+  // and every invisible format character (bidirectional overrides,
+  // zero-width spaces) but the zero-width joiner, written as ⟨U+XXXX⟩, so
+  // a review reads as the bytes say (review 17: U+202E reordered text in
+  // the browser).
+  function visible(text) {
+    return String(text).replace(/(?![\t\n\r\u200d])[\p{Cc}\p{Cf}]/gu,
+      (c) => "⟨U+" + c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0") + "⟩");
   }
 
   // ancestors are every node id depends on, directly or not.
@@ -239,6 +250,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, parse, preview, decisions, ancestors, dur, span, tokens };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, parse, preview, decisions, ancestors, dur, span, tokens };
 })();
 if (typeof module !== "undefined") module.exports = DD;

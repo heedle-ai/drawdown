@@ -603,6 +603,7 @@ function SkillsPage() {
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
   const skills = (data.data.skills || []).map(DD.asSkill).filter(Boolean);
+  const pending = (data.data.pending || []).map(DD.asSkill).filter((s) => s && s.pending === true);
   const problems = (data.data.problems || []).filter((p) => typeof p === "string");
   return html`
     <h2>Skills</h2>
@@ -615,6 +616,15 @@ function SkillsPage() {
         <p>${s.description}</p>
         <p class="muted mono" style=${{ margin: 0 }}>(${s.name} …)</p>
       </a>`)}</div>
+    ${pending.length > 0 && html`<h3>Waiting for review</h3>
+      <p class="lede">Imported from repositories that aren't trusted. No program can use one until it's approved.</p>
+      <div class="skills">${pending.map((s) => html`
+        <a key=${s.name} class="panel skill-card" href=${"#/review/" + encodeURIComponent(s.name)}>
+          <div class="pills"><${Pill} cls="k-skill">${s.name}<//><${Pill} cls="k-other" plain mono>@${s.version.slice(0, 7)}<//>
+            <${Pill} cls="s-Scheduled" plain>waiting for review<//></div>
+          <p>${s.description}</p>
+          ${s.source && html`<p class="muted mono" style=${{ margin: 0 }}>from ${s.source.repo.replace(/^https:\/\//, "")}</p>`}
+        </a>`)}</div>`}
     ${problems.length > 0 && html`<h3>Can't be used</h3><div class="panel">${problems.map((p, i) => html`<p key=${i} class="error mono">${p}</p>`)}</div>`}`;
 }
 
@@ -646,7 +656,7 @@ function SkillPage({ name, version }) {
     <div class="skill-cols">
       <section>
         <h3>SKILL.md</h3>
-        <div class="panel">${!detail ? html`<p class="muted">Loading…</p>` : !detail.ok ? html`<p class="error">${detail.data.error}</p>` : html`<pre class="skill-md">${detail.data.skillMD}</pre>`}</div>
+        <div class="panel">${!detail ? html`<p class="muted">Loading…</p>` : !detail.ok ? html`<p class="error">${detail.data.error}</p>` : html`<pre class="skill-md">${DD.visible(detail.data.skillMD)}</pre>`}</div>
         <h3>Files</h3>
         <div class="panel">${files.map((f) => html`<div key=${f.path} class="pills"><code>${f.path}</code><span class="muted">${DD.size(f.size)}</span></div>`)}</div>
       </section>
@@ -658,6 +668,57 @@ function SkillPage({ name, version }) {
             aria-current=${v.version === shown && list.findIndex((x) => x.version === shown) === i ? "true" : undefined}>
             <span class="mono">${v.version.slice(0, 12)}</span></a>
             ${v.source ? html` <span class="muted">from ${v.source.repo.replace(/^https:\/\//, "")}${v.source.commit ? " @" + v.source.commit.slice(0, 7) : ""}</span>` : html` <span class="muted">added from a folder</span>`}</li>`)}</ol>
+      </section>
+    </div>`;
+}
+
+// ReviewPage is an import waiting for review: what it would add, file by
+// file. Approving or rejecting is loom's; the page shows the commands,
+// which name the exact version shown.
+function ReviewPage({ name }) {
+  const [data, setData] = useState(null);
+  const ref = useRef(null);
+  useEffect(() => { setData(null); api(`/api/skills/${encodeURIComponent(name)}/review`).then(setData); }, [name]);
+  const d = data && data.ok ? data.data : null;
+  const sk = d && DD.asSkill(d.skill);
+  const cur = d && d.current !== undefined ? DD.asSkill(d.current) : null;
+  const diff = d && typeof d.diff === "string" ? DD.visible(d.diff) : null;
+  useEffect(() => {
+    if (ref.current) ref.current.innerHTML = "";
+    if (diff && ref.current) ref.current.innerHTML = Diff2Html.html(diff, { drawFileList: true, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });
+  }, [diff]);
+  if (!data) return html`<p class="muted">Loading…</p>`;
+  if (!data.ok) return html`<p><a href="#/skills">← all skills</a></p><p class="error">${data.data.error}</p>`;
+  if (!sk || sk.pending !== true) return html`<p class="error">The review couldn't be read.</p>`;
+  const link = DD.sourceLink(sk.source);
+  const files = (d.files || []).filter((f) => f && typeof f.path === "string" && typeof f.size === "number");
+  const at = `${sk.name}@${sk.version}`;
+  const replaces = typeof d.replaces === "string" && /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(d.replaces) ? d.replaces : "";
+  const binary = (d.binary || []).filter((b) => typeof b === "string");
+  return html`
+    <p><a href="#/skills">← all skills</a></p>
+    <div class="panel step-hero" style=${{ "--c": "var(--skill)" }}>
+      <div class="pills"><${Pill} cls="k-skill" big>${sk.name}<//><${Pill} cls="k-other" plain mono>@${sk.version.slice(0, 12)}<//>
+        <${Pill} cls="s-Scheduled" plain>waiting for review<//></div>
+      <p>${sk.description}</p>
+      ${sk.source && html`<p class="muted">Imported from <span class="mono">${sk.source.repo}${sk.source.path ? " " + sk.source.path : ""}</span>
+        ${sk.source.commit && html` at <span class="mono">${sk.source.commit.slice(0, 12)}</span>`}${link && html` · <a href=${link} target="_blank" rel="noopener noreferrer">view the source ↗</a>`}</p>`}
+      <p>${replaces ? html`Replaces ${cur ? html`<a class="mono" href=${"#/skill/" + encodeURIComponent(cur.name) + "/" + encodeURIComponent(cur.version)}>@${replaces.slice(0, 12)}</a>` : html`<span class="mono">@${replaces.slice(0, 12)}</span>`}; the diff shows every change to a text file.`
+        : "A new skill: the diff shows every text file."} No program can use it until it's approved.</p>
+      ${binary.length > 0 && html`<p class="error">Not in the diff, because git takes them for binary: ${binary.map((b, i) => html`<code key=${i}>${b}</code> `)}. Read them yourself before approving.</p>`}
+      <p class="muted">Approve: <code>loom skills -store DIR -approve ${at}${replaces ? " -replacing " + replaces : ""}</code><br />Reject: <code>loom skills -store DIR -reject ${at}</code></p>
+    </div>
+    <h3>Changes</h3>
+    ${diff === null && html`<div class="panel muted">The diff is too large to show here. Print it with <code>loom skills -store DIR -review ${sk.name}</code>.</div>`}
+    <div class="panel" style=${{ display: diff ? "block" : "none" }}><div ref=${ref}></div></div>
+    <div class="skill-cols">
+      <section>
+        <h3>SKILL.md</h3>
+        <div class="panel"><pre class="skill-md">${typeof d.skillMD === "string" ? DD.visible(d.skillMD) : ""}</pre></div>
+      </section>
+      <section>
+        <h3>Files</h3>
+        <div class="panel">${files.map((f) => html`<div key=${f.path} class="pills"><code>${f.path}</code><span class="muted">${DD.size(f.size)}</span></div>`)}</div>
       </section>
     </div>`;
 }
@@ -1235,6 +1296,7 @@ function App() {
   else if (route[0] === "step" && route.length === 4) body = html`<${StepPage} key=${route.join("/")} workflow=${route[1]} run=${route[2]} node=${route[3]} history=${current} />`;
   else if (route[0] === "diff" && route.length === 3) body = html`<${Diff} from=${route[1]} to=${route[2]} />`;
   else if (route[0] === "skills" && route.length === 1) body = html`<${SkillsPage} />`;
+  else if (route[0] === "review" && route.length === 2) body = html`<${ReviewPage} key=${route[1]} name=${route[1]} />`;
   else if (route[0] === "skill" && (route.length === 2 || route.length === 3)) body = html`<${SkillPage} key=${route.join("/")} name=${route[1]} version=${route[2]} />`;
   else body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;
 

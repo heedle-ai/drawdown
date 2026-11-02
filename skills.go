@@ -34,7 +34,56 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) {
 	if list != nil {
 		out["skills"] = list
 	}
+	pending, bad, err := s.Skills.Pending(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
+		return
+	}
+	for _, e := range bad {
+		problems = append(problems, e.Error())
+	}
+	out["pending"] = []treadle.Skill{}
+	if pending != nil {
+		out["pending"] = pending
+	}
 	out["problems"] = problems
+	writeJSON(w, http.StatusOK, out)
+}
+
+// MaxReviewDiff is the largest diff the review page shows; a bigger one
+// is left out, with the command that prints it.
+const MaxReviewDiff = MaxDiffBlob
+
+// skillReview is the import of a skill waiting for review (treadle's
+// Library.Review): its files, its SKILL.md, the version it would replace
+// and its diff from that version. The page only shows it: approving or
+// rejecting is loom's (loom skills -approve or -reject).
+func (s *Server) skillReview(w http.ResponseWriter, r *http.Request) {
+	if s.Skills == nil {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "no skills here"})
+		return
+	}
+	rv, err := s.Skills.Review(r.Context(), r.PathValue("name"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	files := []skillFile{}
+	for _, f := range rv.Files {
+		files = append(files, skillFile{Path: f.Path, Size: f.Size})
+	}
+	out := map[string]any{"skill": rv.Pending, "files": files, "skillMD": string(rv.SkillMD), "replaces": string(rv.Replaces), "binary": []string{}}
+	if rv.Current != nil {
+		out["current"] = rv.Current
+	}
+	if rv.Binary != nil {
+		out["binary"] = rv.Binary
+	}
+	if len(rv.Diff) <= MaxReviewDiff {
+		out["diff"] = string(rv.Diff)
+	} else {
+		out["diffTooLarge"] = len(rv.Diff)
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
