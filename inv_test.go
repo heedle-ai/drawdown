@@ -157,6 +157,8 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 		`image: { where: "podman build on the worker, from base images pinned to content and already on it: nothing is pulled"`,
 		`net: "None for RUN steps (--network=none). With \"push\", the worker pushes the image with its own login"`,
 		`A fresh build context holding only the Containerfile and in/<node>.txt for each input`,
+		`skill: { where: "A Claude agent step following a skill: a fresh Podman container (a bobbin session) for this step alone`,
+		`holding the skill's folder at the version the plan pins in /work/skill`,
 	} {
 		if !strings.Contains(js, claim) {
 			t.Errorf("static/app.js no longer claims %s", claim)
@@ -171,6 +173,13 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 	}
 	if !strings.Contains(session, "--network=none") {
 		t.Errorf("agent sessions have a network: %s", session)
+	}
+	// treadle's skill steps are pirn's agent steps, with the skill in /work/skill.
+	if src, err := os.ReadFile("../treadle/command.go"); err != nil || !strings.Contains(string(src), "return pirn.Step(ctx, a, pirn.Question{") {
+		t.Errorf("skill steps no longer run as pirn agent steps; update the inspector (%v)", err)
+	}
+	if src, err := os.ReadFile("../pirn/agent.go"); err != nil || !strings.Contains(string(src), `SkillDir = "/work/skill"`) {
+		t.Errorf("skills moved from /work/skill; update the inspector (%v)", err)
 	}
 	// pirn starts its session from an image alone: no environment.
 	// (Review 7: DRAW-22 said agent steps had HEEDLE_NODE and HEEDLE_ATTEMPT.)

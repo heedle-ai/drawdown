@@ -9,6 +9,7 @@ require (
 	github.com/heedle-ai/pirn v0.0.0
 	github.com/heedle-ai/reed v0.0.0
 	github.com/heedle-ai/shuttle v0.0.0
+	github.com/heedle-ai/treadle v0.0.0
 	github.com/heedle-ai/warp v0.0.0
 	github.com/stretchr/testify v1.11.1
 	go.temporal.io/api v1.62.2
@@ -76,6 +77,7 @@ replace (
 	github.com/heedle-ai/pirn => ../pirn
 	github.com/heedle-ai/reed => ../reed
 	github.com/heedle-ai/shuttle => ../shuttle
+	github.com/heedle-ai/treadle => ../treadle
 	github.com/heedle-ai/warp => ../warp
 	github.com/heedle-ai/weft => ../weft
 )
