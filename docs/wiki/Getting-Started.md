@@ -2,10 +2,10 @@
 
 ```bash
 brew install go git gh temporal       # macOS; on Linux see loom's Getting Started
-gh auth login        # once; bobbin and reed are private
+gh auth login        # once; bobbin, reed and pirn are private
 gh auth setup-git    # lets git clone them with your gh login
 mkdir -p ~/src/heedle-ai && cd ~/src/heedle-ai
-for r in weft draft shuttle warp bobbin reed loom drawdown; do git clone https://github.com/heedle-ai/$r.git; done
+for r in weft draft shuttle warp bobbin reed pirn loom drawdown; do git clone https://github.com/heedle-ai/$r.git; done
 ```
 
 ## 2. Start Temporal and drawdown
@@ -27,7 +27,7 @@ go run ./cmd/drawdown -store ~/heedle-store.git
 drawdown on http://127.0.0.1:8090 (store /Users/you/heedle-store.git, queue "loom", worker true)
 ```
 
-Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the same process, so these two terminals are all you need. The worker knows draft's `echo` and the hello world's `source` and `assess` commands.
+Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the same process, so these two terminals are all you need. The worker knows draft's `echo`, the hello world's `source` and `assess`, reed's `browse` (with `-browser-image`) and pirn's `ask` (with `ANTHROPIC_API_KEY` set; see [Ask Claude](#ask-claude)).
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -42,6 +42,7 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 | `-worker` | `true` | Also run a loom worker. Set `false` if you run `loom worker` separately. If Temporal is down at startup, the UI still starts and shows recorded history; restart once Temporal is up to run programs |
 | `-browser-image` | none | A [reed](https://github.com/heedle-ai/reed/wiki/Getting-Started) browser image ID, for programs that use `browse`. Without it, `browse` steps fail with `BrowserSetup` |
 | `-browser-network` | Podman's default | The Podman network browse pods join |
+| `-ask-model` | `claude-sonnet-5-5` | The Claude model `ask` uses. The key comes from `ANTHROPIC_API_KEY` in drawdown's environment; without it, `ask` steps fail with `AskSetup` |
 | `-sources` | loom's `examples/hello/sources` | Folder the `source` command reads |
 
 ## 3. Try the hello world
@@ -49,7 +50,7 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 1. Click **Example: shipment**. The plan appears as a graph: three sources feeding one assessment.
 2. Click **Run**. The run page shows *Running*, then *Completed*, with each output. The conclusion is *SUPPORTED, for: factory, weather*.
 
-   [[/images/run-detail.png|alt=A completed run: status, plan graph and outputs]]
+   [[/images/run-detail.png|alt=A completed run: status, timeline, plan graph and outputs]]
 
 3. The storm passes. In `~/src/heedle-ai/loom`:
 
@@ -65,9 +66,28 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 
 Restore the sources afterwards with `git -C ~/src/heedle-ai/loom checkout examples/hello/sources`.
 
+## Ask Claude
+
+Start drawdown with your Anthropic API key in its environment:
+
+```bash
+cd ~/src/heedle-ai/drawdown
+ANTHROPIC_API_KEY=sk-ant-... go run ./cmd/drawdown -store ~/heedle-store.git
+```
+
+Click **Example: ask**, then **Run**. The three shipment sources are read in parallel, then Claude answers from them:
+
+```lisp
+(pipe
+  (par (source "weather") (source "carrier") (source "factory"))
+  (ask "Will the shipment be late? Answer yes or no first, then explain in two sentences, citing the sources that decide it."))
+```
+
+The answer shows as text with the model and token counts. Change a source as in step 3, run again, and **vs. previous run of this program** shows how the evidence and Claude's answer changed. See [pirn](https://github.com/heedle-ai/pirn/wiki) for what Claude is sent and how errors are handled.
+
 ## Your own programs
 
-Type any program using `echo`, `source` or `assess`. Errors show as you type, with line and column; **Run** is enabled only when the program compiles. To add commands, see [draft → Adding Commands](https://github.com/heedle-ai/draft/wiki/Adding-Commands), and register them in `cmd/drawdown/main.go` for both the registry and the worker.
+Type any program using `echo`, `source`, `assess`, `ask` or `browse`. Errors show as you type, with line and column; **Run** is enabled only when the program compiles. To add commands, see [draft → Adding Commands](https://github.com/heedle-ai/draft/wiki/Adding-Commands), and register them in `cmd/drawdown/main.go` for both the registry and the worker.
 
 ## Troubleshooting
 

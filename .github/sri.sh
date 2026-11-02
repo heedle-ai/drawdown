@@ -29,9 +29,9 @@ done < <(python3 - <<'PY'
 import re, sys
 # Every external URL in the page or its script, in any quoting, must be a
 # <script src> or <link href> in index.html that carries an integrity hash
-# and pins an exact x.y.z version. app.js may load nothing external.
+# and pins an exact x.y.z version. app.js and lib.js may load nothing external.
 html = open("static/index.html").read()
-js = open("static/app.js").read()
+js = open("static/app.js").read() + open("static/lib.js").read()
 url = re.compile(r"(?:https?:)?//[A-Za-z0-9.-]+\.[A-Za-z]{2,}[^\s\"'`<>)]*")
 tagged = {}
 for tag in re.findall(r"<(?:script|link)\b[^>]*>", html):

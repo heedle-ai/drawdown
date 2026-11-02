@@ -5,7 +5,8 @@
 //
 // then open http://127.0.0.1:8090. By default it also runs a loom worker
 // in the same process, with draft's echo command, the hello world's source
-// and assess commands, and reed's browse (give -browser-image to use it),
+// and assess commands, reed's browse (give -browser-image to use it) and
+// pirn's ask (set ANTHROPIC_API_KEY to use it),
 // so one command is enough to try things out.
 package main
 
@@ -15,6 +16,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
+	"github.com/heedle-ai/pirn"
 	"github.com/heedle-ai/reed"
 	"github.com/heedle-ai/warp"
 )
@@ -41,6 +44,7 @@ func main() {
 	sources := flag.String("sources", shipment.SourcesDir(), "directory for the source command's files")
 	browserImage := flag.String("browser-image", "", "reed browser image ID for the browse command (scripts/build-image.sh in heedle-ai/reed)")
 	browserNetwork := flag.String("browser-network", "", "Podman network browse containers join (default: Podman's)")
+	askModel := flag.String("ask-model", pirn.DefaultModel, "Claude model the ask command uses (key from ANTHROPIC_API_KEY)")
 	flag.Parse()
 	if *store == "" {
 		log.Fatal("give -store DIR, e.g. -store ~/heedle-store.git")
@@ -69,6 +73,9 @@ func main() {
 		if err := reed.Register(reg, w, browser); err != nil {
 			log.Fatal(err)
 		}
+		if err := pirn.Register(reg, w, pirn.Claude{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: *askModel}); err != nil {
+			log.Fatal(err)
+		}
 		loom.Register(w, s, reg)
 		shipment.RegisterCommands(w, *sources)
 		// Without Temporal the worker can't start; keep serving the
@@ -82,6 +89,7 @@ func main() {
 
 	if !*runWorker {
 		reg.MustRegister(reed.BuiltinSpec())
+		reg.MustRegister(pirn.BuiltinSpec())
 	}
 	srv := &drawdown.Server{
 		Store:      s,
@@ -93,6 +101,7 @@ func main() {
 		Examples: map[string]string{
 			"shipment": shipment.Program,
 			"echo":     `(pipe (par (echo "a") (echo "b")) echo)`,
+			"ask":      AskExample,
 		},
 	}
 	if *hosts != "" {
@@ -102,3 +111,10 @@ func main() {
 	hs := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(hs.ListenAndServe())
 }
+
+// AskExample is the shipment question answered by Claude instead of fixed
+// rules: the three sources in parallel, then ask. It needs ANTHROPIC_API_KEY
+// where the worker runs.
+const AskExample = `(pipe
+  (par (source "weather") (source "carrier") (source "factory"))
+  (ask "Will the shipment be late? Answer yes or no first, then explain in two sentences, citing the sources that decide it."))`

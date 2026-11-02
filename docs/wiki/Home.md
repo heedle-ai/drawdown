@@ -1,13 +1,15 @@
 **drawdown** is heedle-ai's web UI. Write a [draft](https://github.com/heedle-ai/draft/wiki) program, run it on Temporal through [loom](https://github.com/heedle-ai/loom/wiki), and browse every run's record in [warp](https://github.com/heedle-ai/warp/wiki).
 
-[[/images/new-run.png|alt=Writing a program: live compile check and plan graph]]
+[[/images/new-run.png|alt=drawdown's home page: recent runs woven as columns of coloured squares with a summary of statuses and kinds of step, the agents, and a program being written with its plan graph]]
 
 | Page | What it shows |
 |---|---|
-| **New run** | An editor that compiles as you type: errors with line and column, or the plan as a graph. Example programs to load. A Run button |
-| **Runs** | Every run, newest first: status from Temporal, the program, timing, and its warp commit. Refreshes every 2 seconds |
-| **Run detail** | Status, workflow and run IDs, a link into Temporal's Web UI, the program, the plan graph and every node's output |
-| **Compare** | A diff between this run and the previous run of the same program, or the record before it. Shows exactly which evidence changed |
+| **Drawdown** | Recent runs, woven: one column per run, one square per step, coloured by the kind of step, with the run's status along the top. Hover for details; click a column to open the run, a square to open the step |
+| **New run** | An editor that compiles as you type: errors with line and column, or the plan as a graph. Example programs, and a button per command that inserts it |
+| **Runs** | Every run, newest first: status, the program with its commands coloured, when it started, how long it took relative to the others, and its warp commit |
+| **Run** | Status and IDs, the timeline of every step as Temporal ran it, the plan graph (expandable, every step a link) and each step's output |
+| **Step** | What one step was given, where it ran and what it could touch, what it decided, what it produced, and which steps it never saw |
+| **Compare** | A diff between this run and the previous run of the same program, or the record before it |
 
 [[/images/sources.svg|alt=Where drawdown's data comes from]]
 
@@ -29,6 +31,7 @@ drawdown only reads and submits. It never edits history; every run goes through 
 | [shuttle](https://github.com/heedle-ai/shuttle/wiki) | Durable execution on Temporal |
 | [bobbin](https://github.com/heedle-ai/bobbin/wiki) | A fresh Podman container per agent step |
 | [reed](https://github.com/heedle-ai/reed/wiki) | A fresh browser per browsing step, reaching only the hosts its program names |
+| [pirn](https://github.com/heedle-ai/pirn/wiki) | Claude for agent steps: answers from the step's inputs, recorded with them |
 | [warp](https://github.com/heedle-ai/warp/wiki) | Content-addressed store |
 | **drawdown** | Web UI (this repo) |
 | [loom](https://github.com/heedle-ai/loom/wiki) | Runs them together: compile, execute, record |

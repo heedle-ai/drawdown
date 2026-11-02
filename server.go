@@ -59,6 +59,8 @@ type Temporal interface {
 	Submit(ctx context.Context, in loom.RunInput) (workflowID, runID string, err error)
 	List(ctx context.Context) ([]Execution, error)
 	Describe(ctx context.Context, workflowID, runID string) (Execution, error)
+	// Steps is each activity of a run as Temporal's history records it.
+	Steps(ctx context.Context, workflowID, runID string) ([]Step, error)
 	// Live returns the latest live frame of each browsing step a run is
 	// executing now: reed heartbeats them to Temporal.
 	Live(ctx context.Context, workflowID string) ([]LiveFrame, error)
@@ -118,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/refs", s.refs)
 	mux.HandleFunc("GET /api/beliefs", s.beliefs)
 	mux.HandleFunc("GET /api/live/{workflow}", s.live)
+	mux.HandleFunc("GET /api/steps/{workflow}/{run}", s.steps)
 	return s.guard(mux)
 }
 
@@ -523,15 +526,17 @@ func (s *Server) refs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := []string{}
+	heads := map[string]warp.ID{}
 	hasDefault := false
 	for _, ref := range refs {
 		names = append(names, ref.Name)
+		heads[ref.Name] = ref.Commit
 		hasDefault = hasDefault || ref.Name == s.Ref
 	}
 	if !hasDefault {
 		names = append([]string{s.Ref}, names...)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"refs": names, "default": s.Ref})
+	writeJSON(w, http.StatusOK, map[string]any{"refs": names, "default": s.Ref, "heads": heads})
 }
 
 // beliefs returns a ref's beliefs index: the latest run of every question
@@ -607,4 +612,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// steps returns a run's steps from Temporal's history, for the timeline.
+// Temporal being unreachable is reported, not an error: the run's record
+// is still there.
+func (s *Server) steps(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
+	defer cancel()
+	steps, err := s.Temporal.Steps(ctx, r.PathValue("workflow"), r.PathValue("run"))
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"steps": []Step{}, "temporalError": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
 }

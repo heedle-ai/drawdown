@@ -22,13 +22,14 @@ All responses are JSON except the diff, which is plain text.
 | Method and path | Request | Response |
 |---|---|---|
 | `GET /api/info` | | `ref` (the default history), `temporalUI`, `namespace`, `commands`, `examples` |
-| `GET /api/refs` | | `{"refs": [...], "default"}`: every history under `refs/loom/`, and the default one even before its first run |
+| `GET /api/refs` | | `{"refs": [...], "default", "heads"}`: every history under `refs/loom/`, the default one even before its first run, and each one's head commit |
 | `GET /api/beliefs?ref=` | | `{"ref", "beliefs": [...]}`: the latest run of every question asked on that history (`loom.Beliefs`), each with `program`, `outputs` and `leaves` |
 | `POST /api/compile` | `{"program": "…"}` | `{"plan": …}`, or `{"error", "line", "col"}` (200 either way; `line` and `col` only for syntax errors) |
 | `POST /api/runs` | `{"program": "…", "ref": "…"}` (`ref` optional) | 202 `{"workflowId", "runId"}`; 422 with the compile error; 502 if Temporal refuses |
 | `GET /api/runs?ref=` | | `{"runs": [...]}`, newest first, plus `temporalError` if Temporal is unreachable. Merge commits are rows with status `Merged`, the commit merged in (`merged`), the first parent (`parent`) and the number of resolved conflicts (`resolved`) |
 | `GET /api/runs/{workflow}/{run}?ref=` | | `execution` (from Temporal), `record` (from warp: commit, program, plan, outputs, `previous`, `parent`). 404 with Temporal's error if neither knows the run |
 | `GET /api/live/{workflow}` | | `{"frames": [{"activity", "attempt", "url", "image"}]}`: the latest heartbeat frame of each browsing step the run is executing, read with `DescribeWorkflowExecution` on its plan (`<workflow>/plan`); `temporalError` if Temporal is unreachable |
+| `GET /api/steps/{workflow}/{run}` | | `{"steps": [...]}`: each step as Temporal's history records it, in order, then loom's record: `node`, `activity`, `status`, `attempts`, `scheduled`, `started`, `closed`, and the last `failure` (at most 2 KiB). With Temporal unreachable: no steps and `temporalError`, still 200 |
 | `GET /api/diff/{from}/{to}` | | Unified diff text. 400 unless both are full commit IDs |
 
 Requests are limited to 1 MB, and unknown JSON fields and trailing data are rejected. Every `ref` (query parameter or body field) is optional and defaults to the server's `-ref`; otherwise it must be a valid ref under `refs/loom/` (400 if not).
@@ -45,21 +46,42 @@ Branching and merging are done with `loom branch` and `loom merge`; the UI only 
 
 ## Agents, one tab each
 
-[[/images/agents.png|alt=drawdown's Agents list: research with sub-agents summarise and web, web with sub-agent pricing, and runs, each with an Open tab link]]
+[[/images/agents.png|alt=drawdown's Agents list: runs and its sub-agent web, each with its head commit and an Open tab link]]
 
 Every ref under `refs/loom/` is an **agent**. Its sub-agents are the refs that extend its name with a dot: `research.web` is a sub-agent of `research`, and `research.web.pricing` of `research.web`. (Dots, not slashes: Git can't hold both `refs/loom/research` and `refs/loom/research/web`.) Make a sub-agent by branching: `loom branch -from refs/loom/research -to refs/loom/research.web`. The tree is drawn from the refs every time; drawdown keeps no list of its own.
 
 **Open tab ↗** opens the agent in a browser tab named after it (`target="heedle-agent-research.web.pricing"`), so opening it again, from anywhere, focuses that same tab instead of piling up new ones. Each agent's tab is titled with its name and gets a coloured dot as its icon, one colour per family (the first part of the name). This works in any browser; it needs no extension. (Chrome's tab groups would need one, so they're not used.)
 
-[[/images/agent-tab.png|alt=An agent's tab: breadcrumb research › web › pricing, the live view of its running browse step, its latest belief shown as the recorded page with its screenshot, a new-run box, its runs, and its parent and sub-agents]]
+[[/images/agent-tab.png|alt=An agent's tab: its name, head commit and record count, then its own drawdown of recent runs, its beliefs, a new-run box and its runs]]
 
 An agent's tab (`#/agent/<ref>`) shows:
 
+- **Drawdown:** this agent's recent runs, woven, as on the home page.
 - **Running now:** for each running run, the live view of its browsing steps: the latest frame of each [reed](https://github.com/heedle-ai/reed/wiki) browser, from Temporal, refreshed every 2 seconds. It's view only.
 - **Beliefs, Runs and New run,** for this agent's history. A run submitted here is recorded on this agent.
 - **Family:** its parent and sub-agents, each a link to its own tab.
 
 A browse step's output (reed's JSON) is shown as the page it saw: the screenshot, title, URL, allowlist and blocked requests, with the page text behind a fold. Images from outputs and live frames are shown only if they're JPEG data URLs.
+
+## Runs, steps and the graph
+
+[[/images/run-detail.png|alt=A run's page: status and info pills, the program, the timeline of its steps with a retry badge, the plan graph, and output cards for two web pages and Claude's answer]]
+
+A run's page puts its **timeline** first: one lane per step, read from Temporal's own history (`/api/steps`). A hatched bar is the time a step waited for a worker; a solid bar, the time it ran; moving stripes, a step still running. A red badge counts attempts when Temporal retried a step. When a plan fails, shuttle stops at the first failure; the steps it never heard back from are shown faded as **Abandoned** at the moment the run ended. Hovering a bar shows its timings, attempts, the failure that caused a retry, and the start of its output.
+
+The **plan graph** is drawn small, coloured by the kind of each step. Every step in it opens that step, every arrow shows what it carries, and the expand button opens it full screen to pan, zoom and follow the links:
+
+[[/images/graph.png|alt=The plan graph opened full screen, with zoom, fit and close buttons]]
+
+Clicking a step, here or in the drawdown on the home page, opens the **step inspector** (`#/step/<workflow>/<run>/<node>`):
+
+[[/images/step.png|alt=The step inspector for an ask step: given two web pages, ran as one request to Claude with no files and only the Claude API, decided with model, tokens and citations, produced its answer]]
+
+- **Given:** exactly what was shared with the step: its parents' outputs, nothing else.
+- **Ran in:** where it ran and what it could touch: files, network, what it gets and what it leaves. For a container or browse step this is a fresh container, removed afterwards, with nothing mounted. A container step has no network at all; a browse step's limit is Chromium's own settings, on a container that does have a network. `TestInv_InspectorTellsTheTruth` checks these claims against bobbin's and reed's real code.
+- **Decided:** what the step concluded: an assessment's verdict, a page's final URL and refused requests, Claude's model, tokens and citations. And any failure Temporal retried past.
+- **Produced:** its output, where it is in Git (`outputs/<node>` in the run's commit), and the steps it was passed to.
+- **Not shared with this step:** every other step whose output was never given to it, marked as running alongside, running after it, or reaching it only through its parents. What its parents passed on may still include parts of those outputs.
 
 ## Security
 
@@ -81,7 +103,7 @@ These checks are tested in `TestGuard_RefusesCrossSiteAndRebinding`, `TestPage` 
 
 ## The page
 
-`static/index.html` and `static/app.js`, embedded in the binary. No build step: the libraries load from jsDelivr, each pinned to an exact version with a Subresource Integrity hash, so the browser refuses a file that doesn't match.
+`static/index.html`, `static/lib.js` and `static/app.js`, embedded in the binary. `lib.js` holds the page's pure logic (reading outputs, durations, the timeline's span), which CI tests with Node (`node --test ui/lib.test.js`); every step output is read through its checked parse, so JSON that only looks like a page or an answer is shown as text. No build step: the libraries load from jsDelivr, each pinned to an exact version with a Subresource Integrity hash, so the browser refuses a file that doesn't match.
 
 | Library | Version | Used for |
 |---|---|---|
@@ -90,9 +112,12 @@ These checks are tested in `TestGuard_RefusesCrossSiteAndRebinding`, `TestPage` 
 | mermaid | 10.9.1 | Plan graphs, with `securityLevel: "strict"` |
 | diff2html | 3.4.48 | Diff view |
 
+Its two fonts, Bricolage Grotesque and JetBrains Mono, are served by drawdown itself from `static/fonts`, with their SIL Open Font License files, so the Content-Security-Policy keeps fonts to this server (`TestInv_FontsAreServedHere`).
+
 ## Tested
 
 - [Invariants](Invariants) lists every guarantee and its guard; CI checks it against the code.
 - `server_test.go` covers every endpoint, the security checks, the 200-record bound, and Temporal being down, against a fake Temporal that really runs plans in Temporal's test suite and records them with loom's `Recorder`, so compiles, runs, records and diffs are real.
-- The agent tabs were driven in headless Chromium against real records: reed visited a test site from a real browser in Podman, and its pages and a live frame were served through the fake Temporal. Checked: the tree, the named tab target, that opening an agent twice reuses its tab, each tab's title and icon, the live view, and recorded pages with their blocked requests. The screenshots in Agents come from that run. `TestInv_AgentTabs` checks the tab code in CI.
-- The page was driven in headless Chromium through the whole hello world story: a live syntax error with position, the plan graph, a run, changed evidence, and the diff. The libraries were served from their npm packages, which also checked the integrity hashes. The screenshots on these pages come from that run. That browser run isn't in CI; the API behaviour it exercises is.
+- The agent tabs were driven in headless Chromium against real records: reed visited a test site from a real browser in Podman, and its pages and a live frame were served through the fake Temporal. Checked: the tree, the named tab target, that opening an agent twice reuses its tab, each tab's title and icon, the live view, and recorded pages with their blocked requests. `TestInv_AgentTabs` checks the tab code in CI.
+- The redesigned pages (drawdown, timeline, graph, step inspector) were driven in headless Chromium in light and dark mode against demo records and a stand-in Temporal, with no console errors; the screenshots on these pages come from that run. The API they use is tested in CI (`TestInv_StepsComeFromTemporalHistory`, `TestSteps_ReportsTemporalErrorsWithoutFailing`).
+- The page was first driven in headless Chromium through the whole hello world story: a live syntax error with position, the plan graph, a run, changed evidence, and the diff. The libraries were served from their npm packages, which also checked the integrity hashes. That browser run isn't in CI; the API behaviour it exercises is.

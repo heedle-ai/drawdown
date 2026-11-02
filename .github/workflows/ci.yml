@@ -49,6 +49,13 @@ jobs:
           repository: heedle-ai/reed
           path: reed
           ssh-key: ${{ secrets.REED_DEPLOY_KEY }}
+      - name: private-pirn
+        # read-only deploy key on heedle-ai/pirn
+        uses: actions/checkout@v4
+        with:
+          repository: heedle-ai/pirn
+          path: pirn
+          ssh-key: ${{ secrets.PIRN_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: heedle-ai/loom
@@ -69,6 +76,11 @@ jobs:
       - name: invariants
         working-directory: drawdown
         run: bash .github/invariants.sh
+      - name: ui
+        # The page's pure logic (static/lib.js), with Node's own test runner.
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: drawdown
+        run: node --test ui/lib.test.js
       - name: sri
         if: matrix.os == 'ubuntu-latest'
         working-directory: drawdown

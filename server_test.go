@@ -36,6 +36,7 @@ type fakeTemporal struct {
 	mu      sync.Mutex
 	execs   []drawdown.Execution
 	live    map[string][]drawdown.LiveFrame
+	steps   map[string][]drawdown.Step
 }
 
 func (f *fakeTemporal) Live(_ context.Context, wf string) ([]drawdown.LiveFrame, error) {
@@ -77,6 +78,13 @@ func (f *fakeTemporal) Submit(ctx context.Context, in loom.RunInput) (string, st
 	}
 	f.execs = append(f.execs, drawdown.Execution{WorkflowID: wf, RunID: run, Status: "Completed", Start: start, Close: start.Add(time.Second), Ref: in.Ref})
 	return wf, run, nil
+}
+
+func (f *fakeTemporal) Steps(_ context.Context, wf, run string) ([]drawdown.Step, error) {
+	if f.down {
+		return nil, errors.New("connection refused")
+	}
+	return f.steps[wf+"/"+run], nil
 }
 
 func (f *fakeTemporal) List(context.Context) ([]drawdown.Execution, error) {
@@ -413,6 +421,14 @@ func TestBranchesMergesAndBeliefs(t *testing.T) {
 	if fmt.Sprint(m["refs"]) != "[refs/loom/runs refs/loom/what-if]" || m["default"] != loom.DefaultRef {
 		t.Errorf("refs = %v", m)
 	}
+	// Each agent's head commit comes with it, for the agent list.
+	headOf := func(ref string) string {
+		id, _, _ := w.fake.store.Resolve(context.Background(), ref)
+		return string(id)
+	}
+	if heads, _ := m["heads"].(map[string]any); heads[whatif] != headOf(whatif) || heads[loom.DefaultRef] != headOf(loom.DefaultRef) {
+		t.Errorf("heads = %v", m["heads"])
+	}
 	_, m, _ = w.call("GET", "/api/runs?ref="+whatif, nil)
 	if runs := m["runs"].([]any); len(runs) != 3 { // the branch's two runs and the run it started from
 		t.Errorf("what-if runs = %d, want 3: %v", len(runs), runs)
@@ -496,5 +512,23 @@ func TestLive_ReturnsFramesAndReportsTemporalErrors(t *testing.T) {
 	w.fake.down = true
 	if _, m, _ := w.call("GET", "/api/live/wf-1", nil); m["temporalError"] == nil {
 		t.Errorf("Temporal down: %v", m)
+	}
+}
+
+// TestSteps_ReportsTemporalErrorsWithoutFailing: the timeline's steps come
+// from Temporal; when Temporal is down the endpoint still answers, with
+// no steps and the error, so the run's record stays readable.
+func TestSteps_ReportsTemporalErrorsWithoutFailing(t *testing.T) {
+	w := newWorld(t)
+	w.fake.steps = map[string][]drawdown.Step{"wf/run": {{Node: "n0", Activity: "Echo", Status: "Completed", Attempts: 2}}}
+	code, m, _ := w.call("GET", "/api/steps/wf/run", nil)
+	steps, _ := m["steps"].([]any)
+	if code != 200 || len(steps) != 1 || steps[0].(map[string]any)["attempts"] != 2.0 || m["temporalError"] != nil {
+		t.Errorf("steps: %d %v", code, m)
+	}
+	w.fake.down = true
+	code, m, _ = w.call("GET", "/api/steps/wf/run", nil)
+	if steps, _ := m["steps"].([]any); code != 200 || steps == nil || len(steps) != 0 || !strings.Contains(fmt.Sprint(m["temporalError"]), "connection refused") {
+		t.Errorf("steps with Temporal down: %d %v", code, m)
 	}
 }
