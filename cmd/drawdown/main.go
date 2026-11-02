@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,8 +15,13 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	if err := app.Run(ctx, os.Args[1:], os.Stdout); err != nil {
+	// A second Ctrl-C while shutting down ends the process at once.
+	go func() { <-ctx.Done(); stop() }()
+	err := app.Run(ctx, os.Args[1:], os.Stdout)
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "drawdown:", err)
 		os.Exit(1)
 	}
