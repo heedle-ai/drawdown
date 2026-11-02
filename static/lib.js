@@ -17,6 +17,9 @@ const DD = (() => {
 
   const KINDS = ["added", "changed", "deleted"];
   const SHA256 = /^[0-9a-f]{64}$/;
+  // A registry repository, host/path in lower case with no tag or digest:
+  // pirn's and loom's own pattern, so nothing else reaches a command.
+  const OCI_REPO = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?(\/[a-z0-9]+([._-][a-z0-9]+)*)+$/;
   const objs = (v, ok) => Array.isArray(v) && v.every((x) => x && typeof x === "object" && ok(x));
 
   // asAgent is v if it's an agent step's result (pirn's JSON, agent format
@@ -25,7 +28,7 @@ const DD = (() => {
     if (!asAnswer(v) || v.agent !== 1 || !str(v.image) || !num(v.turns)) return null;
     if (!objs(v.commands, (c) => str(c.command) && num(c.exitCode) && opt(c.stdout, str) && opt(c.stderr, str) && opt(c.ms, num) && opt(c.error, str))) return null;
     if (!objs(v.files, (f) => str(f.path) && num(f.size) && opt(f.text, str) && opt(f.base64, str) &&
-      (f.oci === undefined ? f.sha256 === undefined : str(f.oci) && SHA256.test(f.sha256) && f.text === undefined && f.base64 === undefined))) return null;
+      (f.oci === undefined ? f.sha256 === undefined : str(f.oci) && OCI_REPO.test(f.oci) && SHA256.test(f.sha256) && f.text === undefined && f.base64 === undefined))) return null;
     // Only the kinds podman diff reports: the page groups by kind.
     if (!objs(v.changes, (c) => KINDS.includes(c.kind) && str(c.path)) || !strs(v.skipped)) return null;
     if (!opt(v.skippedMore, num) || !opt(v.moreChanges, num)) return null;
@@ -145,6 +148,7 @@ const DD = (() => {
   // fetchCommand is the command that gets back a file an agent step kept
   // in a registry: pirn's FetchCommand, character for character.
   function fetchCommand(repo, sum, file) {
+    if (file.startsWith("-")) file = "./" + file; // "-" is standard output to oras
     return `oras blob fetch --output ${quote(file)} ${repo}@sha256:${sum}`;
   }
 

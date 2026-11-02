@@ -303,3 +303,26 @@ func TestInv_StepPageStartsFresh(t *testing.T) {
 		}
 	}
 }
+
+// TestInv_RegistryPatternsAgree: pirn (which pushes), loom (which records)
+// and this page (which shows a fetch command) accept exactly the same
+// registry repositories: one pattern, written three times.
+func TestInv_RegistryPatternsAgree(t *testing.T) {
+	read := func(path, re string) string {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := regexp.MustCompile(re).FindSubmatch(b)
+		if m == nil {
+			t.Fatalf("%s: no registry pattern", path)
+		}
+		return string(m[1])
+	}
+	pirn := read("../pirn/registry.go", "repoRef = regexp.MustCompile\\(`([^`]+)`\\)")
+	loom := read("../loom/files.go", "ociRepo   = regexp.MustCompile\\(`([^`]+)`\\)")
+	page := strings.ReplaceAll(read("static/lib.js", `const OCI_REPO = /(.+)/;`), `\/`, "/")
+	if pirn != loom || pirn != page {
+		t.Errorf("registry patterns differ:\npirn %s\nloom %s\npage %s", pirn, loom, page)
+	}
+}
