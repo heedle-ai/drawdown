@@ -174,6 +174,8 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 		`agent: { where: "A fresh Podman container (a bobbin session) for this step alone`,
 		`net: "None for its commands (--network=none). Only the worker talks to the Claude API"`,
 		`no environment variables from the machine or the worker`,
+		`local ones each in its own container with no network`,
+		`every write it queued (run once after the run's steps, never in the step)`,
 		`image: { where: "podman build on the worker, from base images pinned to content and already on it: nothing is pulled"`,
 		`net: "None for RUN steps (--network=none). With \"push\", the worker pushes the image with its own login"`,
 		`A fresh build context holding only the Containerfile and in/<node>.txt for each input`,
@@ -193,6 +195,12 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 	}
 	if !strings.Contains(session, "--network=none") {
 		t.Errorf("agent sessions have a network: %s", session)
+	}
+	// A local connector's server runs in a bobbin session of its own
+	// (with the same --network=none), and writes are only ever queued.
+	if src, err := os.ReadFile("../pirn/mcp.go"); err != nil || !strings.Contains(string(src), "box, err := a.Runner.Start(ctx, bobbin.Spec{Image: c.Image, Secrets: secrets})") ||
+		!strings.Contains(string(src), "res.Writes = append(res.Writes, w)") {
+		t.Errorf("connectors changed; update the inspector (%v)", err)
 	}
 	// treadle's skill steps are pirn's agent steps, with the skill in /work/skill.
 	if src, err := os.ReadFile("../treadle/command.go"); err != nil || !strings.Contains(string(src), "return pirn.Step(ctx, a, pirn.Question{") {

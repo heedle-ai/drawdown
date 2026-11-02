@@ -200,6 +200,14 @@ function AgentWork({ agent: a, part = "all" }) {
             ${(c.stdout || c.stderr || c.error) && html`<pre class="cmd-out">${c.error ? c.error + "\n" : ""}${c.stdout || ""}${c.stderr ? "\n" + c.stderr : ""}${c.truncated ? "\n[cut]" : ""}</pre>`}
           </li>`)}</ol>
       </details>`}
+      ${work && (a.tools || []).length > 0 && html`<details open><summary>Connector calls (${a.tools.length})${a.grant ? html` <span class="muted">granted ${a.grant}</span>` : ""}</summary>
+        <ol class="commands">${a.tools.map((c, i) => html`
+          <li key=${i}>
+            <div class="cmd-line"><span class=${"exit " + (c.isError ? "bad" : "ok")}>${c.write ? "⏸" : c.isError ? "!" : "✓"}</span>
+              <code>${c.connector}/${c.tool}</code><span class="muted">${c.write ? `queued as ${c.write}` : c.remote ? "run by Anthropic's MCP connector" : "run on the worker"}</span></div>
+            <pre class="cmd-out">${DD.visible(c.input)}${c.output ? "\n→ " + DD.visible(c.output) : ""}${c.truncated ? "\n[cut]" : ""}</pre>
+          </li>`)}</ol>
+      </details>`}
       ${work && a.files.length > 0 && html`<details open><summary>Files kept from /work/out (${a.files.length})</summary>
         ${a.files.map((f) => html`<details key=${f.path} class="file"><summary><code>${f.path}</code> <span class="muted">${DD.size(f.size)}${f.oci ? ", in the registry" : f.base64 != null ? ", binary" : ""}</span></summary>
           ${f.oci ? html`<${RegistryFile} f=${f} />` : f.text != null ? html`<pre>${f.text}</pre>` : html`<p class="muted">A binary file of ${f.size} bytes, kept in the record as base64.</p>`}</details>`)}
@@ -991,6 +999,44 @@ function Timeline({ steps, plan, outputs, running, wf, run }) {
     <div class="legend"><span class="muted">Hatched: waiting for a worker. Solid: running. A badge counts attempts when Temporal retried.</span></div>`;
 }
 
+// Writes are a run's queued writes: from its record once it's done, or
+// asked of the run while it runs, so a person can approve or decline the
+// ones that wait. Deciding signals the run; the page never runs a write.
+function Writes({ workflow, recorded, running }) {
+  const [live, setLive] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  useEffect(() => {
+    if (!running) { setLive(null); return; }
+    let on = true;
+    const load = () => api(`/api/writes/${encodeURIComponent(workflow)}`).then((r) => { if (on && r.ok) setLive(r.data.writes); });
+    load();
+    const t = setInterval(load, 3000);
+    return () => { on = false; clearInterval(t); };
+  }, [workflow, running]);
+  const ws = DD.asWrites(recorded || live || []);
+  if (ws.length === 0) return null;
+  const decide = async (w, approve) => {
+    setBusy(w.node + "/" + w.id); setError("");
+    const r = await api(`/api/writes/${encodeURIComponent(workflow)}`, { node: w.node, id: w.id, approve });
+    setBusy("");
+    if (r.ok) setLive(r.data.writes); else setError((r.data && r.data.error) || String(r.data));
+  };
+  return html`
+    <h2>Writes</h2>
+    <p class="lede">What the run's agents asked to change outside it. Each runs once, after the steps, and only once approved if it needs to be.</p>
+    <div class="panel"><ol class="commands">${ws.map((w) => html`
+      <li key=${w.node + w.id}>
+        <div class="cmd-line"><${Pill} cls=${w.status === "done" ? "s-Completed" : ["failed", "refused", "declined", "expired"].includes(w.status) ? "s-Failed" : "s-Scheduled"}>${w.status}<//>
+          <code>${w.connector}/${w.tool}</code><span class="muted mono">${w.node}/${w.id}</span>
+          ${w.status === "waiting" && html`<span style=${{ marginLeft: "auto" }} class="pills">
+            <button class="primary" disabled=${!!busy} onClick=${() => decide(w, true)}>Approve</button>
+            <button class="reject" disabled=${!!busy} onClick=${() => decide(w, false)}>Decline</button></span>`}</div>
+        <pre class="cmd-out">${DD.visible(w.inputText)}${w.output ? "\n→ " + DD.visible(w.output) : ""}${w.error ? "\n" + DD.visible(w.error) : ""}</pre>
+      </li>`)}</ol>
+      ${error && html`<p class="error">${error}</p>`}</div>`;
+}
+
 function RunDetail({ workflow, run, history: ref }) {
   const [data, setData] = useState(null);
   const [steps, setSteps] = useState(null);
@@ -1048,6 +1094,7 @@ function RunDetail({ workflow, run, history: ref }) {
     </div>
     ${data.data.temporalError && html`<p class="error">Temporal: ${data.data.temporalError}</p>`}
     ${status === "Running" && html`<${LiveView} workflow=${workflow} />`}
+    <${Writes} workflow=${workflow} recorded=${rec && rec.writes} running=${status === "Running"} />
     <h2>Timeline</h2>
     <p class="lede">Each step as Temporal ran it. Hover a bar for its timings, attempts and output.</p>
     <div class="panel">
@@ -1105,7 +1152,7 @@ const SANDBOX = {
   skill: { where: "A Claude agent step following a skill: a fresh Podman container (a bobbin session) for this step alone, from the worker's content-pinned agent image, removed when the step ends", fs: "A brand-new, empty writable layer over the image, holding the skill's folder at the version the plan pins in /work/skill and its inputs in /work/in. Deleted with the container: no other step ever sees it, and nothing is mounted from the machine", net: "None for its commands (--network=none). Only the worker talks to the Claude API", gets: "The skill's SKILL.md, its arguments, and its inputs as files in /work/in; no environment variables from the machine or the worker", leaves: "Claude's reply, every command it ran with its output, the files it left in /work/out, and the list of changed paths" },
   image: { where: "podman build on the worker, from base images pinned to content and already on it: nothing is pulled", fs: "A fresh build context holding only the Containerfile and in/<node>.txt for each input, removed afterwards. The built image stays in the worker's Podman storage", net: "None for RUN steps (--network=none). With \"push\", the worker pushes the image with its own login", gets: "Its Containerfile, and its inputs as files in in/", leaves: "The image ID, and where it was pushed if asked" },
   browse: { where: "A fresh Podman container running a fresh Chromium profile, removed when the step ends", fs: "A brand-new browser profile, deleted with the container. Nothing is mounted from the machine", net: "Chromium is set to reach only the hosts the program names, refusing and recording every other request. The container itself is on Podman's network, so this rests on Chromium's own settings", gets: "Its URL and allowed hosts, from the program", leaves: "What the browser saw: URL, title, text, screenshot, blocked requests" },
-  agent: { where: "A fresh Podman container (a bobbin session) for this step alone, from the worker's content-pinned agent image, removed when the step ends; Claude, through Anthropic's SDK, decides each command", fs: "A brand-new, empty writable layer over the image, where its inputs are written to /work/in. Deleted with the container: no other step ever sees it, and nothing is mounted from the machine", net: "None for its commands (--network=none). Only the worker talks to the Claude API", gets: "Its instruction, and its inputs as files in /work/in; no environment variables from the machine or the worker", leaves: "Claude's reply, every command it ran with its output, the files it left in /work/out, and the list of changed paths" },
+  agent: { where: "A fresh Podman container (a bobbin session) for this step alone, from the worker's content-pinned agent image, removed when the step ends; Claude, through Anthropic's SDK, decides each command", fs: "A brand-new, empty writable layer over the image, where its inputs are written to /work/in. Deleted with the container: no other step ever sees it, and nothing is mounted from the machine", net: "None for its commands (--network=none). Only the worker talks to the Claude API, and to the MCP servers the step is granted: remote ones through Anthropic's MCP connector, local ones each in its own container with no network", gets: "Its instruction, its inputs as files in /work/in, and the connector tools its arguments grant (as far as the worker allows); no environment variables from the machine or the worker", leaves: "Claude's reply, every command it ran with its output, every connector call it made and every write it queued (run once after the run's steps, never in the step), the files it left in /work/out, and the list of changed paths" },
   ask: { where: "One request to Claude through Anthropic's SDK; no container", fs: "None", net: "Only the Claude API, signed with the worker's key (never recorded)", gets: "Its instruction, and its inputs as cited sources", leaves: "Claude's answer, with the model, stop reason and token counts" },
   record: { where: "loom's worker, writing to the Git store outside every container", fs: "The warp store only", net: "None", gets: "Every step's output", leaves: "One commit" },
   other: { where: "The loom worker", fs: "Whatever this command's implementation allows", net: "Whatever this command's implementation allows", gets: "Its arguments and inputs", leaves: "Its output" },

@@ -68,6 +68,10 @@ type Temporal interface {
 	// ChangeSkills runs loom's skills workflow on a worker and waits for
 	// it: the only way the UI changes skills.
 	ChangeSkills(ctx context.Context, in loom.SkillsChange) (treadle.Skill, error)
+	// Writes are a running run's queued writes so far (loom.Writes), and
+	// DecideWrite approves or declines one that waits (loom.DecideWrite).
+	Writes(ctx context.Context, workflowID string) ([]loom.WriteOutcome, error)
+	DecideWrite(ctx context.Context, workflowID string, d loom.WriteDecision) error
 }
 
 // LiveFrame is what a browsing step last showed.
@@ -157,6 +161,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills/{name}", s.skill)
 	mux.HandleFunc("GET /api/skills/{name}/{version}", s.skillVersion)
 	mux.HandleFunc("GET /api/skills/{name}/review", s.skillReview)
+	mux.HandleFunc("GET /api/writes/{workflow...}", s.writes)
+	mux.HandleFunc("POST /api/writes/{workflow...}", s.decideWrite)
 	mux.HandleFunc("POST /api/skills/import", s.importSkill)
 	mux.HandleFunc("POST /api/skills/add", s.addSkill)
 	mux.HandleFunc("POST /api/skills/{name}/approve", s.approveSkill)
@@ -492,6 +498,8 @@ type record struct {
 	// Previous's; MoreFiles says some weren't listed (MaxFiles).
 	Files     map[string][]stepFile `json:"files"`
 	MoreFiles bool                  `json:"moreFiles,omitempty"`
+	// Writes are the run's queued writes and what came of each.
+	Writes []loom.WriteOutcome `json:"writes,omitempty"`
 }
 
 func (s *Server) detail(w http.ResponseWriter, r *http.Request) {
@@ -569,6 +577,18 @@ func (s *Server) readRecord(ctx context.Context, commit, tree warp.ID) (record, 
 			return rec, err
 		}
 		if err := json.Unmarshal(b, &rec.Plan); err != nil {
+			return rec, err
+		}
+	}
+	if id, ok := s.entry(ctx, tree, loom.WritesFile); ok {
+		if n, err := s.Store.BlobSize(ctx, id); err != nil || n > MaxDiffBlob*2 {
+			return rec, fmt.Errorf("%s: too large or unreadable", loom.WritesFile)
+		}
+		b, err := s.Store.Blob(ctx, id)
+		if err != nil {
+			return rec, err
+		}
+		if err := json.Unmarshal(b, &rec.Writes); err != nil {
 			return rec, err
 		}
 	}
