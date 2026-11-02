@@ -31,6 +31,9 @@ All responses are JSON except the diffs, which are plain text.
 | `GET /api/live/{workflow}` | | `{"frames": [{"activity", "attempt", "url", "image"}]}`: the latest heartbeat frame of each browsing step the run is executing, read with `DescribeWorkflowExecution` on its plan (`<workflow>/plan`); `temporalError` if Temporal is unreachable |
 | `GET /api/steps/{workflow}/{run}` | | `{"steps": [...]}`: each step as Temporal's history records it, in order, then loom's record: `node`, `activity`, `status`, `attempts`, `scheduled`, `started`, `closed`, and the last `failure` (at most 2 KiB). With Temporal unreachable: no steps and `temporalError`, still 200 |
 | `GET /api/diff/{from}/{to}` | | Unified diff text. 400 unless both are full commit IDs |
+| `GET /api/skills` | | `{"skills": [...], "problems": [...]}`: the newest version of every skill in the store (treadle's `Library.Skills`), each with `name`, `description`, `version`, `commit` and, if imported, `source`; and why any skill can't be used |
+| `GET /api/skills/{name}` | | `{"versions": [...]}`: every version of the skill, newest first. 404 if there's no such skill, 400 for a name a skill can't have |
+| `GET /api/skills/{name}/{version}` | | `{"skill", "files": [{"path", "size"}], "skillMD"}`: one version's files and its `SKILL.md`, only for a version that was added to that skill (404 otherwise, even for another tree in the store) |
 | `GET /api/blobdiff/{from}/{to}` | | One file's change: the unified diff of two blobs (warp's `DiffBlobs`), binary content reported but never printed. 400 unless both are full blob IDs; 413 if either is over 1 MiB (`MaxDiffBlob`), naming the `git diff` to run instead. Like `/api/diff`, it serves any object in the store by its full ID |
 
 Requests are limited to 1 MB, and unknown JSON fields and trailing data are rejected. Every `ref` (query parameter or body field) is optional and defaults to the server's `-ref`; otherwise it must be a valid ref under `refs/loom/` (400 if not).
@@ -85,6 +88,14 @@ Clicking a step, here or in the drawdown on the home page, opens the **step insp
 - **Files**, for a step whose record holds files (an agent's `/work/out`, recorded by loom under `files/<node>/`): each file with its size, marked added, changed, the same or deleted against the previous run of the same program. A changed file opens to its diff; an added text file of an agent step opens to its contents. A file the agent kept in an OCI registry, being too big for the record, is marked *in the registry* and opens to the `oras blob fetch` command that gets it back.
 - **Produced:** its output, where it is in Git (`outputs/<node>` in the run's commit), and the steps it was passed to.
 - **Not shared with this step:** every other step whose output was never given to it, marked as running alongside, running after it, or reaching it only through its parents. What its parents passed on may still include parts of those outputs.
+
+## Skills
+
+The **skills** link opens the Skills page (`#/skills`): every skill the store keeps ([treadle](https://github.com/heedle-ai/treadle/wiki)), with its description, newest version, and whether it was imported. A skill's page (`#/skill/<name>`) shows its `SKILL.md` as text, its files with their sizes, and every version, newest first, with where each was imported from; for a GitHub source, a link to the exact folder at the exact commit, built only from checked parts so it can only point at github.com.
+
+Wherever a step follows a skill, it says so with a badge naming the skill and the version its plan pins, linking to that version: on the graph (`n1 weather @72ba7cf "Boston"`), in hover cards, in the run's outputs and in the step inspector. A run that pinned an older version opens that version, marked *not the newest*.
+
+The page only reads. Adding skills is `loom skills` for now; doing it from here is **Planned** (roadmap 3.8), as a step the worker runs, since drawdown never writes to the store itself.
 
 ## Security
 

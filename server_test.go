@@ -21,6 +21,7 @@ import (
 	"github.com/heedle-ai/draft"
 	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
+	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
 	"github.com/heedle-ai/shuttle/plan"
 	"github.com/heedle-ai/warp"
@@ -125,7 +126,7 @@ func newWorld(t *testing.T) *world {
 		t.Fatal(err)
 	}
 	fake := &fakeTemporal{store: store, sources: dir}
-	s := &drawdown.Server{Store: store, Ref: loom.DefaultRef, Registry: shipment.Registry(), Temporal: fake,
+	s := &drawdown.Server{Skills: &treadle.Library{Store: store}, Store: store, Ref: loom.DefaultRef, Registry: shipment.Registry(), Temporal: fake,
 		TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)

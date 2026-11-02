@@ -125,6 +125,7 @@ func main() {
 		}
 	}
 	srv := &drawdown.Server{
+		Skills:     &treadle.Library{Store: s},
 		Store:      s,
 		Ref:        *ref,
 		Registry:   reg,
