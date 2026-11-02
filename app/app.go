@@ -43,6 +43,7 @@ import (
 // flags in args, until ctx ends or serving fails.
 func Run(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("drawdown", flag.ContinueOnError)
+	fs.SetOutput(out)
 	store := fs.String("store", "", "warp store directory (created if missing)")
 	listen := fs.String("listen", "127.0.0.1:8090", "address to serve the UI on")
 	address := fs.String("address", client.DefaultHostPort, "Temporal frontend address")
@@ -184,16 +185,20 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "drawdown on http://%s (store %s, queue %q, worker %v)\n", ln.Addr(), s.Dir(), *queue, *runWorker)
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		hs.Shutdown(shut)
-	}()
-	if err := hs.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+	served := make(chan error, 1)
+	go func() { served <- hs.Serve(ln) }()
+	select {
+	case err := <-served:
 		return err
+	case <-ctx.Done():
 	}
-	return nil
+	// Finish the requests in flight before the worker and the Temporal
+	// client stop, and before Run returns (review 21).
+	shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = hs.Shutdown(shut)
+	<-served
+	return err
 }
 
 // AskExample is the shipment question answered by Claude instead of fixed

@@ -93,7 +93,7 @@ The answer shows as text with the model and token counts. Change a source as in 
 
 ## Your own programs
 
-Type any program using `echo`, `source`, `assess`, `ask`, `agent` or `browse`. Errors show as you type, with line and column; **Run** is enabled only when the program compiles. To add commands, see [draft → Adding Commands](https://github.com/heedle-ai/draft/wiki/Adding-Commands), and register them in `cmd/drawdown/main.go` for both the registry and the worker.
+Type any program using `echo`, `source`, `assess`, `ask`, `agent` or `browse`. Errors show as you type, with line and column; **Run** is enabled only when the program compiles. To add commands, see [draft → Adding Commands](https://github.com/heedle-ai/draft/wiki/Adding-Commands), and register them in `app/app.go` for both the registry and the worker.
 
 ## Troubleshooting
 

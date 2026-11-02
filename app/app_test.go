@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"regexp"
@@ -79,5 +81,11 @@ func TestInv_RunServesUntilItsContextEnds(t *testing.T) {
 	}
 	if err := Run(context.Background(), []string{}, io.Discard); err == nil || !strings.Contains(err.Error(), "-store") {
 		t.Errorf("no store: %v", err)
+	}
+	// Review 21: help goes where Run writes, as the error flag.ErrHelp
+	// (which drawdown and heedle exit 0 on).
+	var help bytes.Buffer
+	if err := Run(context.Background(), []string{"-h"}, &help); !errors.Is(err, flag.ErrHelp) || !strings.Contains(help.String(), "-store") {
+		t.Errorf("-h: %v\n%s", err, help.String())
 	}
 }
