@@ -681,7 +681,7 @@ function AddSkill({ onDone }) {
   const tab = (id, label) => html`<button role="tab" aria-selected=${mode === id} onClick=${() => { setMode(id); setResult(null); }}>${label}</button>`;
   return html`
     <div class="panel add-skill">
-      <div class="tabs" role="tablist">${tab("import", "Import a link")}${tab("paste", "Paste a SKILL.md")}${tab("upload", "Upload a folder")}${tab("create", "Describe a skill")}</div>
+      <div class="tabs" role="tablist">${tab("import", "Import a link")}${tab("browse", "Browse a repository")}${tab("paste", "Paste a SKILL.md")}${tab("upload", "Upload a folder")}${tab("create", "Describe a skill")}</div>
       ${mode === "create" && html`
         <textarea aria-label="What the skill should do" value=${describe} onInput=${(e) => setDescribe(e.target.value)}
           placeholder="Sum the second column of a CSV file in the inputs, and report the total."></textarea>
@@ -696,6 +696,7 @@ function AddSkill({ onDone }) {
         </div>
         <div class="row"><button class="primary" disabled=${busy || !link.trim()} onClick=${() => send("/api/skills/import", { link, path, branch })}>${busy ? "Importing…" : "Import"}</button>
           <span class="muted">From a repository that isn't trusted, it waits for your review before any program can use it.</span></div>`}
+      ${mode === "browse" && html`<${BrowseRepo} onDone=${onDone} />`}
       ${mode === "paste" && html`
         <textarea aria-label="SKILL.md" value=${text} onInput=${(e) => setText(e.target.value)} placeholder=${"---\nname: brief\ndescription: Writes a short brief.\n---\nKeep it under 200 words."}></textarea>
         <div class="row"><button class="primary" disabled=${busy || !text.trim()} onClick=${() => send("/api/skills/add", { files: { "SKILL.md": DD.base64(text) } })}>${busy ? "Adding…" : "Add"}</button>
@@ -710,6 +711,67 @@ function AddSkill({ onDone }) {
         ? html`<a href=${"#/review/" + encodeURIComponent(result.skill.name)}>${result.skill.name}</a> is waiting for review.`
         : html`Added <a href=${"#/skill/" + encodeURIComponent(result.skill.name)}>${result.skill.name}</a> at <span class="mono">@${result.skill.version.slice(0, 7)}</span>; programs can use it now.`}</p>`}
     </div>`;
+}
+
+// BrowseRepo lists a repository's skills (on a worker) and imports the
+// ones chosen, one by one, each through the ordinary import: from a
+// repository that isn't trusted, each waits for review.
+function BrowseRepo({ onDone }) {
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState("");
+  const [cat, setCat] = useState(null);
+  const [error, setError] = useState("");
+  const [chosen, setChosen] = useState(() => new Set());
+  const [done, setDone] = useState({});
+  const keyOf = (e) => e.source.repo + "#" + (e.source.path || "");
+  const list = async () => {
+    setBusy("list"); setError(""); setCat(null); setChosen(new Set()); setDone({});
+    const r = await api("/api/skills/catalog", { link });
+    setBusy("");
+    const c = r.ok ? DD.asCatalog(r.data) : null;
+    if (c) setCat(c); else setError((r.data && r.data.error) || String(r.data));
+  };
+  const toggle = (k) => setChosen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const importChosen = async () => {
+    setBusy("import");
+    for (const e of cat.entries.filter((e) => chosen.has(keyOf(e)))) {
+      const r = await api("/api/skills/import", { link: e.source.repo, path: e.source.path || "", branch: e.source.ref || "" });
+      const sk = r.ok ? DD.asSkill(r.data.skill) : null;
+      setDone((d) => ({ ...d, [keyOf(e)]: sk ? { skill: sk } : { error: (r.data && r.data.error) || String(r.data) } }));
+    }
+    setBusy(""); setChosen(new Set()); onDone();
+  };
+  const usable = cat ? cat.entries.filter((e) => !e.problem) : [];
+  return html`
+    <div class="row">
+      <label>A GitHub repository of skills<input type="text" value=${link} onInput=${(e) => setLink(e.target.value)}
+        onKeyDown=${(e) => { if (e.key === "Enter" && link.trim() && !busy) list(); }}
+        placeholder="github.com/anthropics/skills" /></label>
+    </div>
+    <div class="row"><button class="primary" disabled=${!!busy || !link.trim()} onClick=${list}>${busy === "list" ? "Listing its skills…" : "List its skills"}</button>
+      <span class="muted">A worker fetches only the SKILL.md files. Nothing is imported until you choose.</span></div>
+    ${error && html`<p class="error">${error}</p>`}
+    ${cat && html`
+      <div class="catalog">
+        <div class="catalog-head">
+          <strong>${cat.entries.length} skill${cat.entries.length === 1 ? "" : "s"}</strong>${cat.omitted ? html` <span class="muted">(and ${cat.omitted} more not listed)</span>` : ""}
+          <button class="link" onClick=${() => setChosen(chosen.size ? new Set() : new Set(usable.map(keyOf)))}>${chosen.size ? "Choose none" : "Choose all"}</button>
+          <button class="primary" style=${{ marginLeft: "auto" }} disabled=${!!busy || chosen.size === 0} onClick=${importChosen}>
+            ${busy === "import" ? "Importing…" : `Import ${chosen.size || ""} skill${chosen.size === 1 ? "" : "s"}`}</button>
+        </div>
+        <ul class="catalog-list">${cat.entries.map((e) => {
+          const k = keyOf(e), d = done[k];
+          return html`<li key=${k} class=${e.problem ? "catalog-bad" : ""}>
+            <label><input type="checkbox" disabled=${!!e.problem || !!busy} checked=${chosen.has(k)} onChange=${() => toggle(k)} />
+              <span class="mono catalog-name">${e.name || e.source.path}</span></label>
+            <span class="catalog-desc">${e.problem ? html`<span class="error">${e.problem}</span>` : e.description}</span>
+            <span class="catalog-state">${d && d.skill ? (d.skill.pending
+              ? html`<a href=${"#/review/" + encodeURIComponent(d.skill.name)}><${Pill} cls="s-Running">waiting for review<//></a>`
+              : html`<a href=${"#/skill/" + encodeURIComponent(d.skill.name)}><${Pill} cls="s-Completed">added<//></a>`)
+              : d && d.error ? html`<span class="error">${d.error}</span>` : html`<span class="muted mono">${e.source.path || "/"}</span>`}</span>
+          </li>`;
+        })}</ul>
+      </div>`}`;
 }
 
 function SkillsPage() {

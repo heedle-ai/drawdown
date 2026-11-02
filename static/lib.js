@@ -191,6 +191,17 @@ const DD = (() => {
     return v;
   }
 
+  // asCatalog is a repository's listing from the API, keeping only the
+  // entries whose fields have the right shapes: { entries, omitted }, or
+  // null for anything that isn't a listing.
+  function asCatalog(v) {
+    if (!v || typeof v !== "object" || !Array.isArray(v.entries) || !opt(v.omitted, (n) => Number.isInteger(n) && n >= 0)) return null;
+    const entries = v.entries.filter((e) => e && typeof e === "object" && e.source && typeof e.source === "object" &&
+      str(e.source.repo) && opt(e.source.path, str) && opt(e.source.ref, str) && opt(e.source.commit, str) &&
+      opt(e.name, str) && opt(e.description, str) && opt(e.problem, str) && (str(e.name) || str(e.problem)));
+    return { entries, omitted: v.omitted || 0 };
+  }
+
   // sourceLink is the web page of the exact folder a skill version was
   // imported from, for a GitHub repository at a known commit; else null.
   // Every part is checked, so the link can only point at github.com.
@@ -391,6 +402,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog };
 })();
 if (typeof module !== "undefined") module.exports = DD;
