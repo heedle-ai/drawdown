@@ -352,11 +352,11 @@ function usePlans(programs) {
 
 const WEAVE_RUNS = 48, WEAVE_ROWS = 12;
 
-function Weave({ runs }) {
+function Weave({ runs, all, day, onDay }) {
   const rows = runs && runs.runs ? runs.runs.slice(0, WEAVE_RUNS).reverse() : [];
   const planOf = usePlans(rows.map((r) => r.program || ""));
   if (!runs) return html`<p class="muted">Loading…</p>`;
-  if (rows.length === 0) return html`<p class="muted">No runs yet. Run a program below and it appears here as a column.</p>`;
+  if (rows.length === 0 && !day) return html`<p class="muted">No runs yet. Run a program below and it appears here as a column.</p>`;
   const kinds = new Set();
   const cols = rows.map((r) => {
     const status = r.merged ? "Merged" : r.status;
@@ -399,11 +399,47 @@ function Weave({ runs }) {
         <div class="pills">${Object.entries(byStatus).map(([s, n]) => html`<${Pill} key=${s} cls=${"s-" + s}>${n} ${s.toLowerCase()}<//>`)}</div>
         <div class="pills">${Object.entries(byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => html`<${Pill} key=${k} cls=${"k-" + k}>${n} ${KIND_LABEL[k]}<//>`)}</div>
       </div>
+      ${all && html`<${Calendar} runs=${all.runs} day=${day} onDay=${onDay} />`}
     </div>
     <div class="legend">
       ${[...kinds].sort().map((k) => html`<${KindPill} key=${k} kind=${k} />`)}
       <span class="muted" style=${{ marginLeft: "8px" }}>top edge:</span>
       ${["Completed", "Running", "Failed", "Recorded", "Merged"].map((s) => html`<${StatusPill} key=${s} status=${s} />`)}
+    </div>`;
+}
+
+// Calendar is a month of days beside the woven grid: each day is tinted by
+// how many runs started on it and marked when one failed; choosing a day
+// shows only its runs, and choosing it again shows all of them.
+function Calendar({ runs, day, onDay }) {
+  const counts = DD.byDay(runs);
+  const latest = Object.keys(counts).sort().pop();
+  const [shown, setShown] = useState(() => {
+    const d = new Date((day || latest || DD.dayKey(new Date())) + "T12:00");
+    return { y: d.getFullYear(), m: d.getMonth() };
+  });
+  const most = Math.max(1, ...Object.values(counts).map((c) => c.runs));
+  const move = (k) => setShown(({ y, m }) => ({ y: m + k < 0 ? y - 1 : m + k > 11 ? y + 1 : y, m: (m + k + 12) % 12 }));
+  const title = new Date(shown.y, shown.m, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const today = DD.dayKey(new Date());
+  return html`
+    <div class="cal" aria-label="Runs by day">
+      <div class="cal-head">
+        <button class="cal-nav" onClick=${() => move(-1)} aria-label="Previous month"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <strong>${title}</strong>
+        <button class="cal-nav" onClick=${() => move(1)} aria-label="Next month"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6 4.5 9.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+      <div class="cal-grid" role="grid">
+        ${["M", "T", "W", "T", "F", "S", "S"].map((d, i) => html`<span key=${"h" + i} class="cal-dow" aria-hidden="true">${d}</span>`)}
+        ${DD.monthGrid(shown.y, shown.m).flat().map((d) => {
+          const c = counts[d.key];
+          const label = `${d.key}: ${c ? `${c.runs} run${c.runs === 1 ? "" : "s"}${c.failed ? `, ${c.failed} failed` : ""}` : "no runs"}`;
+          const cls = ["cal-day", d.inMonth ? "" : "out", c ? "has" : "", c && c.failed ? "failed" : "", d.key === day ? "on" : "", d.key === today ? "today" : ""].join(" ");
+          return html`<button key=${d.key} class=${cls} disabled=${!c} aria-pressed=${d.key === day} aria-label=${label} title=${label}
+            style=${c ? { "--n": (0.25 + 0.75 * (c.runs / most)).toFixed(2), color: c.runs / most > 0.5 ? "var(--surface)" : "var(--ink)" } : null}
+            onClick=${() => onDay(d.key === day ? "" : d.key)}>${d.day}</button>`;
+        })}
+      </div>
     </div>`;
 }
 
@@ -1081,6 +1117,34 @@ function Writes({ workflow, recorded, running }) {
       ${error && html`<p class="error">${error}</p>`}</div>`;
 }
 
+// Provenance is where a run's record sits in Git, in plain sight: the
+// chain it extends (the same program's previous run, the record before
+// it, then its own commit), each a click from its diff, and the Temporal
+// workflow and run that produced it.
+function Provenance({ rec, workflow, run, history, temporalLink }) {
+  const link = (from, label) => from
+    ? html`<button class="chain-link" onClick=${() => go("diff", from, rec.commit)} title=${`What changed from ${from} to ${rec.commit}`}>
+        <${Pill} cls="k-other" mono>${short(from)}<//><span class="muted">${label}</span></button>`
+    : html`<span class="chain-link none"><${Pill} cls="k-other" plain>none<//><span class="muted">${label}</span></span>`;
+  return html`
+    <h2>Provenance</h2>
+    <p class="lede">Every run is a Git commit. Click an earlier record to see exactly what changed since.</p>
+    <div class="panel">
+      <div class="chain">
+        ${link(rec.previous, "same program, last time")}
+        <span class="chain-arrow" aria-hidden="true">→</span>
+        ${link(rec.parent, "the record before it")}
+        <span class="chain-arrow" aria-hidden="true">→</span>
+        <span class="chain-link"><${Pill} cls="k-record" mono>${short(rec.commit)}<//><span class="muted">this run</span></span>
+      </div>
+      <div class="meta" style=${{ marginTop: "14px" }}>
+        <span class="muted">Commit</span><span class="mono">${rec.commit}</span>
+        <span class="muted">History</span><span class="mono">${history}</span>
+        <span class="muted">Temporal</span><span><span class="mono">${workflow} / ${run}</span> · <a href=${temporalLink} target="_blank" rel="noopener">its event history ↗</a></span>
+      </div>
+    </div>`;
+}
+
 function RunDetail({ workflow, run, history: ref }) {
   const [data, setData] = useState(null);
   const [steps, setSteps] = useState(null);
@@ -1136,6 +1200,7 @@ function RunDetail({ workflow, run, history: ref }) {
         ${ex && html`<span class="muted">Started</span><span>${when(ex.start)}</span>`}
       </div>
     </div>
+    ${rec && html`<${Provenance} rec=${rec} workflow=${workflow} run=${run} history=${(ex && ex.ref) || ref} temporalLink=${temporalLink} />`}
     ${data.data.temporalError && html`<p class="error">Temporal: ${data.data.temporalError}</p>`}
     ${status === "Running" && html`<${LiveView} workflow=${workflow} />`}
     <${Writes} workflow=${workflow} recorded=${rec && rec.writes} running=${status === "Running"} />
@@ -1413,10 +1478,14 @@ class ErrorBoundary extends React.Component {
 
 function Home({ info, refs, heads, current }) {
   const runs = useRuns(current);
+  const [day, setDay] = useState("");
+  const shown = runs && day ? { ...runs, runs: DD.onDay(runs.runs, day) } : runs;
+  const dayName = day && new Date(day + "T12:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   return html`
     <h2>Drawdown</h2>
-    <p class="lede">Recent runs, woven: one column per run, one cell per step, coloured by the kind of step. Hover for details; click to open.</p>
-    <div class="panel"><${Weave} runs=${runs} /></div>
+    <p class="lede">Recent runs, woven: one column per run, one cell per step, coloured by the kind of step. Hover for details; click to open. Pick a day on the calendar to see only its runs.</p>
+    ${day && html`<p class="filter-note">Showing runs started on ${dayName}. <button class="link" onClick=${() => setDay("")}>Show every day</button></p>`}
+    <div class="panel"><${Weave} runs=${shown} all=${runs} day=${day} onDay=${setDay} /></div>
     <div class="cols">
       <div>
         <h2>Agents</h2>
@@ -1433,7 +1502,7 @@ function Home({ info, refs, heads, current }) {
     <p class="lede">The latest answer to every question asked on this history.</p>
     <${Beliefs} history=${current} />
     <h2>Runs</h2>
-    <${Runs} data=${runs} />`;
+    <${Runs} data=${shown} />`;
 }
 
 function App() {

@@ -285,6 +285,53 @@ const DD = (() => {
     return { t0, t1: Math.max(t1, t0 + 1) };
   }
 
+  // dayKey is the local calendar day ("2026-11-02") a time falls on, or ""
+  // for a time that isn't one.
+  function dayKey(t) {
+    const d = new Date(t);
+    if (!t || isNaN(d)) return "";
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  // byDay counts runs by the local day they started: how many, and how
+  // many failed or are still running.
+  function byDay(runs) {
+    const out = {};
+    for (const r of runs || []) {
+      const k = dayKey(r.start);
+      if (!k) continue;
+      const d = (out[k] ||= { runs: 0, failed: 0, running: 0 });
+      d.runs++;
+      if (r.status === "Running") d.running++;
+      else if (["Failed", "Terminated", "TimedOut", "Canceled"].includes(r.status)) d.failed++;
+    }
+    return out;
+  }
+
+  // monthGrid is a month as weeks of seven days, Monday first; days of the
+  // neighbouring months that fill the first and last weeks have inMonth
+  // false. month is 0-based, as in Date.
+  function monthGrid(year, month) {
+    const first = new Date(year, month, 1);
+    const start = new Date(year, month, 1 - ((first.getDay() + 6) % 7));
+    const weeks = [];
+    for (let d = new Date(start); weeks.length < 6; ) {
+      const week = [];
+      for (let i = 0; i < 7; i++, d.setDate(d.getDate() + 1)) {
+        week.push({ key: dayKey(d), day: d.getDate(), inMonth: d.getMonth() === month });
+      }
+      weeks.push(week);
+      if (d.getMonth() !== month) break;
+    }
+    return weeks;
+  }
+
+  // onDay is the runs that started on a day ("" for all of them).
+  function onDay(runs, key) {
+    return key ? (runs || []).filter((r) => dayKey(r.start) === key) : runs || [];
+  }
+
   // replaced is the program a written one replaces, worth putting back:
   // the editor's text unless it was empty or is what was written.
   function replaced(before, written) {
@@ -306,6 +353,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay };
 })();
 if (typeof module !== "undefined") module.exports = DD;

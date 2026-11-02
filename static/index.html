@@ -130,6 +130,24 @@
   .weave-row { display:flex; gap:28px; align-items:flex-start; flex-wrap:wrap; }
   .weave-row .weave-wrap { flex:1 1 360px; min-width:0; }
   .weave-sum { flex:0 1 330px; display:flex; flex-direction:column; gap:10px; }
+  .cal { flex:0 0 auto; }
+  .cal-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; font-size:13px; }
+  .cal-nav { border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:6px; width:28px; height:26px; cursor:pointer; display:inline-grid; place-items:center; padding:0; }
+  .cal-grid { display:grid; grid-template-columns:repeat(7, 26px); gap:3px; }
+  .cal-dow { font-size:10.5px; color:var(--muted); text-align:center; }
+  .cal-day { width:26px; height:26px; border-radius:5px; border:0; padding:0; font:11px var(--mono); color:var(--muted);
+             background:var(--sunk, transparent); cursor:default; position:relative; }
+  .cal-day.out { opacity:.35; }
+  .cal-day.has { cursor:pointer; color:var(--surface); background:color-mix(in srgb, var(--record) calc(var(--n) * 100%), var(--sunk, var(--surface))); }
+  .cal-day.failed::after { content:""; position:absolute; right:3px; top:3px; width:6px; height:6px; border-radius:50%; background:var(--bad); }
+  .cal-day.today { box-shadow:inset 0 0 0 1.5px var(--muted); }
+  .cal-day.on { outline:2px solid var(--ink); outline-offset:1px; }
+  .cal-day.has:hover, .cal-day.has:focus-visible { transform:scale(1.12); }
+  .filter-note { margin:-4px 0 10px; font-size:13.5px; }
+  .chain { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .chain-link { display:inline-flex; flex-direction:column; align-items:flex-start; gap:3px; font-size:12px; border:0; background:none; padding:0; color:inherit; font-family:inherit; }
+  button.chain-link { cursor:pointer; } button.chain-link:hover .pill { outline:2px solid var(--record); }
+  .chain-arrow { color:var(--muted); font-size:18px; }
   .big-num { font-size:34px; font-weight:700; letter-spacing:-.03em; line-height:1; }
   .big-num span { font-size:14px; font-weight:500; letter-spacing:0; color:var(--muted); }
   .legend { display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }

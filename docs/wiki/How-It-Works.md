@@ -76,6 +76,10 @@ An agent's tab (`#/agent/<ref>`) shows:
 
 A browse step's output (reed's JSON) is shown as the page it saw: the screenshot, title, URL, allowlist and blocked requests, with the page text behind a fold. Images from outputs and live frames are shown only if they're JPEG data URLs.
 
+## The woven grid and its calendar
+
+The home page weaves the recent runs: one column per run, its top edge coloured by status, one cell per step coloured by the kind of step. Beside it are counts by status and by kind, and a **calendar** of the month. Each day is tinted by how many runs started that day (in your time zone), and a red dot marks a day where one failed. Choosing a day shows only that day's runs, in the grid and in the runs table, until you choose it again or **Show every day**. The arrows move between months. The day logic is `lib.js`'s `dayKey`, `byDay`, `monthGrid` and `onDay`, which `ui/lib.test.js` checks.
+
 ## Runs, steps and the graph
 
 [[/images/run-detail.png|alt=A run's page: status and info pills, the program, the timeline of its steps with a retry badge, the plan graph, and output cards for two web pages and Claude's answer]]
@@ -85,6 +89,8 @@ A run's page puts its **timeline** first: one lane per step, read from Temporal'
 The **plan graph** is drawn small, coloured by the kind of each step. Every step in it opens that step, every arrow shows what it carries, and the expand button opens it full screen to pan, zoom and follow the links:
 
 [[/images/graph.png|alt=The plan graph opened full screen, with zoom, fit and close buttons]]
+
+Under the run's header, **Provenance** shows where its record sits in Git. It names the same program's previous run, the record before it, and this run's own commit, and a click on either earlier record opens the diff from it to this one. It also gives the full commit, the history (ref) it was recorded on, and the Temporal workflow and run that produced it, linked to their event history in Temporal's Web UI.
 
 Clicking a step, here or in the drawdown on the home page, opens the **step inspector** (`#/step/<workflow>/<run>/<node>`):
 
