@@ -19,7 +19,7 @@
     --paper:#eef1f6; --surface:#ffffff; --sunk:#f6f8fb; --ink:#1d2333; --muted:#5d6680; --line:#dbe0ea;
     --focus:#3b5bdb;
     /* Dyes: one per kind of step. */
-    --echo:#8a8778; --source:#3b5bdb; --assess:#c2185b; --browse:#c98f00; --ask:#7a3fe0;
+    --echo:#8a8778; --source:#3b5bdb; --assess:#c2185b; --browse:#c98f00; --ask:#7a3fe0; --agent:#d4561f;
     --container:#8d5a2b; --record:#0f8a6c; --other:#5d6680;
     /* Statuses. */
     --ok:#178a55; --run:#c98f00; --bad:#d23a2b; --rec:#64708a; --merge:#0f8fa8;
@@ -30,7 +30,7 @@
     :root {
       --paper:#141824; --surface:#1b2130; --sunk:#171c29; --ink:#e6e9f2; --muted:#98a1b8; --line:#2b3346;
       --focus:#8ea6ff;
-      --echo:#b3b0a2; --source:#7d95ff; --assess:#f0628f; --browse:#f2c44b; --ask:#b28bff;
+      --echo:#b3b0a2; --source:#7d95ff; --assess:#f0628f; --browse:#f2c44b; --ask:#b28bff; --agent:#ff8a5c;
       --container:#c9925d; --record:#3fcf9f; --other:#98a1b8;
       --ok:#3fcf8a; --run:#f2c44b; --bad:#ff7a6b; --rec:#98a1b8; --merge:#47c6dc;
     }
@@ -72,7 +72,7 @@
   .s-Completed { --c:var(--ok); } .s-Running { --c:var(--run); } .s-Recorded { --c:var(--rec); } .s-Merged { --c:var(--merge); }
   .s-Failed, .s-Terminated, .s-TimedOut, .s-Canceled { --c:var(--bad); } .s-Abandoned { --c:var(--muted); } .s-Scheduled { --c:var(--muted); } .s-Unknown { --c:var(--muted); }
   .k-echo { --c:var(--echo); } .k-source { --c:var(--source); } .k-assess { --c:var(--assess); } .k-browse { --c:var(--browse); }
-  .k-ask { --c:var(--ask); } .k-container { --c:var(--container); } .k-record { --c:var(--record); } .k-other { --c:var(--other); }
+  .k-ask { --c:var(--ask); } .k-agent { --c:var(--agent); } .k-container { --c:var(--container); } .k-record { --c:var(--record); } .k-other { --c:var(--other); }
   .s-Running.pill::before { animation:pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity:.25; } }
 
@@ -182,6 +182,16 @@
   .hidden-step:hover .pill { opacity:.9; }
   button.cell { border:0; padding:0; cursor:pointer; } button.selvedge { border:0; padding:0; cursor:pointer; }
   .warp .cell:hover, .warp .cell:focus-visible { transform:scale(1.18); }
+
+  /* Agent work */
+  .commands { margin:8px 0 0; padding-left:0; list-style:none; display:grid; gap:6px; }
+  .cmd-line { display:flex; gap:8px; align-items:baseline; min-width:0; }
+  .cmd-line code { flex:1; min-width:0; overflow-wrap:anywhere; }
+  .exit { font:600 11px var(--mono); border-radius:4px; padding:1px 6px; color:#fff; }
+  .exit.ok { background:var(--ok); } .exit.bad { background:var(--bad); }
+  .cmd-out { margin:4px 0 0 30px; max-height:180px; overflow:auto; color:var(--muted); background:var(--sunk); border-radius:6px; padding:6px 8px; }
+  .agent-work details { margin-top:10px; } .agent-work details.file { margin:6px 0 0 12px; }
+  .agent-work summary { cursor:pointer; font-weight:550; }
 
   /* Hover cards */
   .tip { position:fixed; z-index:20; max-width:380px; background:var(--surface); color:var(--ink); border:1px solid var(--line);

@@ -6,7 +6,7 @@
 // then open http://127.0.0.1:8090. By default it also runs a loom worker
 // in the same process, with draft's echo command, the hello world's source
 // and assess commands, reed's browse (give -browser-image to use it) and
-// pirn's ask (set ANTHROPIC_API_KEY to use it),
+// pirn's ask and agent (set ANTHROPIC_API_KEY, and -agent-image for agent),
 // so one command is enough to try things out.
 package main
 
@@ -23,6 +23,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 
+	"github.com/heedle-ai/bobbin"
 	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
@@ -44,7 +45,8 @@ func main() {
 	sources := flag.String("sources", shipment.SourcesDir(), "directory for the source command's files")
 	browserImage := flag.String("browser-image", "", "reed browser image ID for the browse command (scripts/build-image.sh in heedle-ai/reed)")
 	browserNetwork := flag.String("browser-network", "", "Podman network browse containers join (default: Podman's)")
-	askModel := flag.String("ask-model", pirn.DefaultModel, "Claude model the ask command uses (key from ANTHROPIC_API_KEY)")
+	askModel := flag.String("ask-model", pirn.DefaultModel, "Claude model ask and agent use (key from ANTHROPIC_API_KEY)")
+	agentImage := flag.String("agent-image", "", "content-pinned image ID agent steps run in (needs /bin/sh)")
 	flag.Parse()
 	if *store == "" {
 		log.Fatal("give -store DIR, e.g. -store ~/heedle-store.git")
@@ -73,7 +75,11 @@ func main() {
 		if err := reed.Register(reg, w, browser); err != nil {
 			log.Fatal(err)
 		}
-		if err := pirn.Register(reg, w, pirn.Claude{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: *askModel}); err != nil {
+		claude := pirn.Claude{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: *askModel}
+		if err := pirn.Register(reg, w, claude); err != nil {
+			log.Fatal(err)
+		}
+		if err := pirn.RegisterAgent(reg, w, pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage}); err != nil {
 			log.Fatal(err)
 		}
 		loom.Register(w, s, reg)
@@ -90,6 +96,7 @@ func main() {
 	if !*runWorker {
 		reg.MustRegister(reed.BuiltinSpec())
 		reg.MustRegister(pirn.BuiltinSpec())
+		reg.MustRegister(pirn.AgentBuiltinSpec())
 	}
 	srv := &drawdown.Server{
 		Store:      s,
