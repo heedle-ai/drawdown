@@ -86,6 +86,7 @@ type History interface {
 	Parents(ctx context.Context, commit warp.ID) (tree warp.ID, parents []warp.ID, err error)
 	FindByTrailer(ctx context.Context, from warp.ID, key, value string) (warp.ID, bool, error)
 	Diff(ctx context.Context, a, b warp.ID) ([]byte, error)
+	DiffBlobs(ctx context.Context, a, b warp.ID) ([]byte, error)
 	Refs(ctx context.Context, prefix string) ([]warp.RefInfo, error)
 }
 
@@ -117,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/runs", s.list)
 	mux.HandleFunc("GET /api/runs/{workflow}/{run}", s.detail)
 	mux.HandleFunc("GET /api/diff/{from}/{to}", s.diff)
+	mux.HandleFunc("GET /api/blobdiff/{from}/{to}", s.blobDiff)
 	mux.HandleFunc("GET /api/refs", s.refs)
 	mux.HandleFunc("GET /api/beliefs", s.beliefs)
 	mux.HandleFunc("GET /api/live/{workflow}", s.live)
@@ -410,6 +412,10 @@ type record struct {
 	Outputs  map[string]string `json:"outputs"`
 	Parent   warp.ID           `json:"parent,omitempty"`   // the record before this one
 	Previous warp.ID           `json:"previous,omitempty"` // the last earlier run of the same workflow
+	// Files are the files each step left (files/<node>/), compared with
+	// Previous's; MoreFiles says some weren't listed (MaxFiles).
+	Files     map[string][]stepFile `json:"files"`
+	MoreFiles bool                  `json:"moreFiles,omitempty"`
 }
 
 func (s *Server) detail(w http.ResponseWriter, r *http.Request) {
@@ -472,6 +478,9 @@ func (s *Server) findRecord(ctx context.Context, ref, wf, run string) (record, b
 		if prev, ok, err := s.Store.FindByTrailer(ctx, parents[0], loom.TrailerWorkflow, wf); err == nil && ok {
 			rec.Previous = prev
 		}
+	}
+	if rec.Files, rec.MoreFiles, err = s.stepFiles(ctx, tree, rec.Previous); err != nil {
+		return record{}, false, err
 	}
 	return rec, true, nil
 }

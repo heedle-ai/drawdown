@@ -977,11 +977,60 @@ function StepPage({ workflow, run, node, history: ref }) {
       <p class="lede">Every command Claude ran in the container, in order, then the files it kept and everything that changed.</p>
       <div class="panel"><${AgentWork} agent=${agentOut} part="work" /></div>`}
 
+    ${DD.asFiles((rec.files || {})[node]).length > 0 && html`<${StepFiles} files=${DD.asFiles(rec.files[node])} node=${node}
+      previous=${rec.previous} commit=${rec.commit} more=${rec.moreFiles} agent=${agentOut} />`}
+
     <h3>Not shared with this step</h3>
     <p class="lede">These steps' outputs were never given to it. What its parents passed on may still include parts of them${upstream.size > inputs.length ? ", from the steps marked as reaching it through its parents" : ""}. No step sees another's files.</p>
     <div class="pills">
       ${hidden.length === 0 ? html`<span class="muted">None: this run has no other steps.</span>` : hidden.map((x) => html`
         <a key=${x.id} href=${link(x.id)} class="hidden-step"><${Pill} cls=${"k-" + kindOf(x.activity)}>${x.id} ${x.activity}${upstream.has(x.id) ? " (only through its parents)" : ancestors(plan, x.id).has(node) ? " (runs after it)" : " (runs alongside)"}<//></a>`)}
+    </div>`;
+}
+
+// StepFiles lists the files a step left, as its record holds them
+// (files/<node>/), compared with the previous run of the same program.
+// A changed file opens to its diff (warp's DiffBlobs); an added text file
+// opens to its contents, from the step's own output.
+function StepFiles({ files, node, previous, commit, more, agent }) {
+  const texts = new Map(((agent && agent.files) || []).filter((f) => f.text != null).map((f) => [f.path, f.text]));
+  return html`
+    <h3>Files</h3>
+    <p class="lede">What this step left in its record, under <code>files/${node}/</code>, compared with ${previous
+      ? html`the <a href=${"#/diff/" + encodeURIComponent(previous) + "/" + encodeURIComponent(commit)}>previous run of this program</a>` : "nothing: this is the program's first run"}.
+      ${" " + DD.fileSummary(files)}${more ? ". Only the first files are listed." : "."}</p>
+    <div class="panel files">${files.map((f) => html`<${FileRow} key=${f.path} f=${f} text=${texts.get(f.path)} />`)}</div>`;
+}
+
+function FileRow({ f, text }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const [state, setState] = useState("");
+  const canOpen = f.status === "changed" || (f.status === "added" && text != null);
+  useEffect(() => {
+    if (!open || f.status !== "changed") return;
+    let live = true;
+    setState("loading");
+    api(`/api/blobdiff/${encodeURIComponent(f.before)}/${encodeURIComponent(f.blob)}`).then((r) => {
+      if (!live) return;
+      if (!r.ok) { setState(r.data.error || "error"); return; }
+      ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: false, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });
+      setState("ok");
+    });
+    return () => { live = false; };
+  }, [open, f.before, f.blob]);
+  return html`
+    <div class="file-row">
+      <button class="file-head" disabled=${!canOpen} aria-expanded=${open} onClick=${() => setOpen(!open)}>
+        <${Pill} cls=${"f-" + f.status}>${f.status}<//>
+        <code>${f.path}</code>
+        <span class="muted">${f.size < 1024 ? `${f.size} B` : `${(f.size / 1024).toFixed(1)} KiB`}${f.status === "deleted" ? " before" : ""}</span>
+      </button>
+      ${open && f.status === "added" && html`<pre class="file-body">${text}</pre>`}
+      ${open && f.status === "changed" && html`<div class="file-body">
+        ${state === "loading" && html`<p class="muted">Loading…</p>`}
+        ${!["", "loading", "ok"].includes(state) && html`<p class="error">${state}</p>`}
+        <div ref=${ref}></div></div>`}
     </div>`;
 }
 
@@ -996,7 +1045,7 @@ function Diff({ from, to }) {
       if (!live) return;
       if (!r.ok) { setState(r.data.error || "error"); return; }
       if (!r.data.trim()) { setState("same"); return; }
-      ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: true, matching: "lines", outputFormat: "line-by-line" });
+      ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: true, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });
       setState("ok");
     });
     return () => { live = false; };

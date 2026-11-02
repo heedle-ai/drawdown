@@ -108,6 +108,7 @@ type world struct {
 	srv     *httptest.Server
 	fake    *fakeTemporal
 	sources string
+	store   *warp.Store
 }
 
 func newWorld(t *testing.T) *world {
@@ -128,7 +129,7 @@ func newWorld(t *testing.T) *world {
 		TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	return &world{t: t, srv: srv, fake: fake, sources: dir}
+	return &world{t: t, srv: srv, fake: fake, sources: dir, store: store}
 }
 
 func (w *world) call(method, path string, body any) (int, map[string]any, string) {
