@@ -32,6 +32,8 @@ All responses are JSON except the diffs, which are plain text.
 | `GET /api/steps/{workflow}/{run}` | | `{"steps": [...]}`: each step as Temporal's history records it, in order, then loom's record: `node`, `activity`, `status`, `attempts`, `scheduled`, `started`, `closed`, and the last `failure` (at most 2 KiB). With Temporal unreachable: no steps and `temporalError`, still 200 |
 | `GET /api/diff/{from}/{to}` | | Unified diff text. 400 unless both are full commit IDs |
 | `GET /api/skills` | | `{"skills": [...], "pending": [...], "problems": [...]}`: the newest version of every skill in the store (treadle's `Library.Skills`), each with `name`, `description`, `version`, `commit` and, if imported, `source`; the imports waiting for review (`Library.Pending`), each with `"pending": true`; and why any skill or import can't be used |
+| `GET /api/writes/{workflow}` (a run's workflow ID, or a merge re-run's, `…/rerun-N`) | | `{"writes": [...]}`: a running run's queued writes so far and their status (loom's `WritesQuery`); a finished run's are in its record (`record.writes`, from `writes.json`). 400 for anything but a run's workflow ID, 502 if Temporal fails |
+| `POST /api/writes/{workflow}` | `{"node", "id", "approve"}` | Approves or declines one write waiting for approval by signalling the run (loom's `WriteSignal`); the page never runs a write. Answers the run's writes |
 | `POST /api/skills/import` | `{"link", "path", "branch"}` | Imports a skill from a GitHub link, or an `https://` repository URL with its folder and branch (treadle's `SourceFor`; never `file://`, which would read the worker's disk), by running loom's skills workflow on a worker; `{"skill"}`, with `"pending": true` if it waits for review. 400 with the reason if refused, 502 if Temporal or the worker failed |
 | `POST /api/skills/add` | `{"files": {"PATH": "BASE64", ...}}` | Adds a folder given by hand (pasted or uploaded), at most 1 MiB, through the same workflow; it needs no review |
 | `POST /api/skills/{name}/approve` | `{"version", "replaces"}` | Approves exactly the version the review showed, against the version its diff was from (`replaces`, empty for a new skill) |
@@ -93,6 +95,12 @@ Clicking a step, here or in the drawdown on the home page, opens the **step insp
 - **Files**, for a step whose record holds files (an agent's `/work/out`, recorded by loom under `files/<node>/`): each file with its size, marked added, changed, the same or deleted against the previous run of the same program. A changed file opens to its diff; an added text file of an agent step opens to its contents. A file the agent kept in an OCI registry, being too big for the record, is marked *in the registry* and opens to the `oras blob fetch` command that gets it back.
 - **Produced:** its output, where it is in Git (`outputs/<node>` in the run's commit), and the steps it was passed to.
 - **Not shared with this step:** every other step whose output was never given to it, marked as running alongside, running after it, or reaching it only through its parents. What its parents passed on may still include parts of those outputs.
+
+## Writes
+
+A run whose agent steps queued writes ([loom → Writes](https://github.com/heedle-ai/loom/wiki/How-It-Works#writes)) shows them under **Writes** on its page: each connector and tool, its input, its status, and what came of it. While the run waits for approval, a write that needs it has **Approve** and **Decline** buttons; deciding signals the run, which runs the write once if approved. An agent step's own page lists every connector call it made (run by Anthropic's MCP connector or on the worker) and every write it queued, with what the step was granted. Inputs, outputs and errors are shown as text, with control and invisible format characters as `⟨U+XXXX⟩`.
+
+drawdown's own worker (`-worker`) takes the same `-connectors FILE` as `loom worker`.
 
 ## Skills
 

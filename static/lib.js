@@ -33,7 +33,22 @@ const DD = (() => {
     if (!objs(v.changes, (c) => KINDS.includes(c.kind) && str(c.path)) || !strs(v.skipped)) return null;
     if (!opt(v.skippedMore, num) || !opt(v.moreChanges, num)) return null;
     if (!v.inputs || typeof v.inputs !== "object" || !Object.values(v.inputs).every(str)) return null;
+    // Connector calls and queued writes (pirn's ToolCall and Write).
+    if (!opt(v.grant, str) || !opt(v.tools, (t) => objs(t, (c) => str(c.connector) && str(c.tool) && str(c.input) &&
+      opt(c.output, str) && opt(c.isError, bool) && opt(c.remote, bool) && opt(c.write, str)))) return null;
+    if (!opt(v.writes, (ws) => objs(ws, isWrite))) return null;
     return v;
+  }
+
+  const bool = (v) => typeof v === "boolean";
+  const isWrite = (w) => str(w.id) && str(w.connector) && str(w.tool) && w.input !== undefined && opt(w.approve, bool);
+  const WRITE_STATUS = ["waiting", "approved", "declined", "expired", "done", "failed", "refused"];
+
+  // asWrites is a run's writes (loom's WriteOutcome) if every one is well
+  // formed, each input shown as JSON text; else [].
+  function asWrites(v) {
+    if (!objs(v, (w) => isWrite(w) && str(w.node) && WRITE_STATUS.includes(w.status) && opt(w.output, str) && opt(w.error, str) && opt(w.isError, bool))) return [];
+    return v.map((w) => ({ ...w, inputText: JSON.stringify(w.input) }));
   }
 
   // asPage is v if it's a browse step's page (reed's JSON, format 1), with
@@ -284,6 +299,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens };
 })();
 if (typeof module !== "undefined") module.exports = DD;

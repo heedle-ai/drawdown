@@ -39,6 +39,7 @@ type fakeTemporal struct {
 	execs   []drawdown.Execution
 	live    map[string][]drawdown.LiveFrame
 	steps   map[string][]drawdown.Step
+	writes  map[string][]loom.WriteOutcome
 }
 
 func (f *fakeTemporal) Live(_ context.Context, wf string) ([]drawdown.LiveFrame, error) {
@@ -80,6 +81,31 @@ func (f *fakeTemporal) Submit(ctx context.Context, in loom.RunInput) (string, st
 	}
 	f.execs = append(f.execs, drawdown.Execution{WorkflowID: wf, RunID: run, Status: "Completed", Start: start, Close: start.Add(time.Second), Ref: in.Ref})
 	return wf, run, nil
+}
+
+// Writes answers the writes a test gave the fake for a workflow.
+func (f *fakeTemporal) Writes(_ context.Context, wf string) ([]loom.WriteOutcome, error) {
+	if f.down {
+		return nil, errors.New("connection refused")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]loom.WriteOutcome(nil), f.writes[wf]...), nil
+}
+
+// DecideWrite decides a waiting write, as RunWorkflow does on its signal.
+func (f *fakeTemporal) DecideWrite(_ context.Context, wf string, d loom.WriteDecision) error {
+	if f.down {
+		return errors.New("connection refused")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, w := range f.writes[wf] {
+		if w.Node == d.Node && w.ID == d.ID && w.Status == loom.WriteWaiting {
+			f.writes[wf][i].Status = map[bool]string{true: loom.WriteApproved, false: loom.WriteDeclined}[d.Approve]
+		}
+	}
+	return nil
 }
 
 // ChangeSkills runs loom's skills workflow in Temporal's test suite, on

@@ -185,3 +185,15 @@ test("a picked folder becomes files by path, without hidden ones, within the lim
   assert.match((await DD.readFolder([f("pdf/SKILL.md"), f("pdf/big.bin", DD.MAX_UPLOAD)], read)).error, /more than/);
   assert.equal(DD.base64("é ok"), Buffer.from("é ok").toString("base64"));
 });
+
+test("connector calls and writes are shown only when well formed", () => {
+  const base = { pirn: 1, model: "m", text: "t", agent: 1, image: "i", turns: 1, commands: [], files: [], changes: [], inputs: {} };
+  const ok = { ...base, grant: "mail", tools: [{ connector: "mail", tool: "send", input: "{}", write: "w1" }], writes: [{ id: "w1", connector: "mail", tool: "send", input: {} }] };
+  assert.ok(DD.parse(JSON.stringify(ok)).agent);
+  for (const bad of [{ ...ok, tools: [{ connector: "mail" }] }, { ...ok, tools: "x" }, { ...ok, writes: [{ id: 1 }] }, { ...ok, tools: [{ ...ok.tools[0], remote: "yes" }] }]) {
+    assert.equal(DD.parse(JSON.stringify(bad)).agent, undefined, JSON.stringify(bad));
+  }
+  const w = { node: "n0", id: "w1", connector: "mail", tool: "send", input: { to: "a" }, status: "waiting" };
+  assert.equal(DD.asWrites([w])[0].inputText, '{"to":"a"}');
+  for (const bad of [[{ ...w, status: "sent" }], [{ ...w, node: 1 }], "x", [{ ...w, output: {} }]]) assert.deepEqual(DD.asWrites(bad), []);
+});

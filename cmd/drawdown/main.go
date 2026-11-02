@@ -50,6 +50,7 @@ func main() {
 	browserNetwork := flag.String("browser-network", "", "Podman network browse containers join (default: Podman's)")
 	askModel := flag.String("ask-model", pirn.DefaultModel, "Claude model ask and agent use (key from ANTHROPIC_API_KEY)")
 	agentImage := flag.String("agent-image", "", "content-pinned image ID agent steps run in (needs /bin/sh)")
+	connectorsFile := flag.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by environment variable name)")
 	imageRegistry := flag.String("image-registry", "", "OCI repository (such as ghcr.io/acme/heedle-images) that (image … \"push\") pushes to, with the worker's podman login")
 	agentRegistry := flag.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
 	flag.Parse()
@@ -87,7 +88,11 @@ func main() {
 		if err := bobbin.RegisterImage(reg, w, bobbin.Runner{}, imageRegistryFor(*imageRegistry)); err != nil {
 			log.Fatal(err)
 		}
-		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry)}
+		connectors, err := readConnectors(*connectorsFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors}
 		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
 			log.Fatal(err)
 		}
@@ -184,4 +189,17 @@ func commands() *registry.Registry {
 	reg.MustRegister(pirn.AgentBuiltinSpec())
 	reg.MustRegister(bobbin.ImageBuiltinSpec())
 	return reg
+}
+
+// readConnectors reads the worker's connectors file, if it has one.
+func readConnectors(path string) (pirn.Connectors, error) {
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return pirn.ReadConnectors(f)
 }

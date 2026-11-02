@@ -39,6 +39,16 @@ func (t TemporalClient) ChangeSkills(ctx context.Context, in loom.SkillsChange) 
 	return loom.ChangeSkills(ctx, t.Client, t.Queue, in)
 }
 
+// Writes asks a run for its writes so far.
+func (t TemporalClient) Writes(ctx context.Context, workflowID string) ([]loom.WriteOutcome, error) {
+	return loom.Writes(ctx, t.Client, workflowID)
+}
+
+// DecideWrite approves or declines a run's write.
+func (t TemporalClient) DecideWrite(ctx context.Context, workflowID string, d loom.WriteDecision) error {
+	return loom.DecideWrite(ctx, t.Client, workflowID, d)
+}
+
 // List returns up to 200 executions of loom's RunWorkflow on this task
 // queue, using Temporal's visibility query.
 func (t TemporalClient) List(ctx context.Context) ([]Execution, error) {
