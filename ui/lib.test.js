@@ -167,3 +167,10 @@ test("skills from the API are checked, and source links point only at GitHub", (
   }
   assert.equal(DD.sourceLink({ repo: "file:///home/me/skills", commit: c }), null);
 });
+
+test("a review shows invisible characters as code points", () => {
+  // Review 17: bidirectional overrides and zero-width spaces were shown as they are.
+  assert.equal(DD.visible("a\u202eb\u200bc\u0000d\u001be"), "a⟨U+202E⟩b⟨U+200B⟩c⟨U+0000⟩d⟨U+001B⟩e");
+  assert.equal(DD.visible("tab\tline\nemoji 👩\u200d💻 é"), "tab\tline\nemoji 👩\u200d💻 é");
+  assert.equal(DD.visible("\u2066x\u2069\ufeff"), "⟨U+2066⟩x⟨U+2069⟩⟨U+FEFF⟩");
+});

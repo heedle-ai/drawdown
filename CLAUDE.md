@@ -64,3 +64,6 @@ why the existing tool can't do it.
   Temporal that really runs plans in Temporal's test suite.
 - `go.mod` replaces the heedle-ai modules with `../` checkouts until they
   are published; clone all repos as siblings.
+- **Run every CI step before pushing,** not only the Go tests:
+  `bash .github/sri.sh`, `bash .github/invariants.sh` and
+  `node --test ui/lib.test.js`.

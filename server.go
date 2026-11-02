@@ -132,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills", s.skills)
 	mux.HandleFunc("GET /api/skills/{name}", s.skill)
 	mux.HandleFunc("GET /api/skills/{name}/{version}", s.skillVersion)
+	mux.HandleFunc("GET /api/skills/{name}/review", s.skillReview)
 	return s.guard(mux)
 }
 
