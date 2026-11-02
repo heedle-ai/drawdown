@@ -422,21 +422,26 @@ function Calendar({ runs, day, onDay }) {
   const move = (k) => setShown(({ y, m }) => ({ y: m + k < 0 ? y - 1 : m + k > 11 ? y + 1 : y, m: (m + k + 12) % 12 }));
   const title = new Date(shown.y, shown.m, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
   const today = DD.dayKey(new Date());
+  const [record, sunk, ink, surface] = ["--record", "--sunk", "--ink", "--surface"].map(css);
+  const hex = [record, sunk, ink, surface].every((h) => /^#[0-9a-f]{6}$/i.test(h));
   return html`
-    <div class="cal" aria-label="Runs by day">
+    <div class="cal" role="group" aria-label="Runs by day, from the latest records">
       <div class="cal-head">
         <button class="cal-nav" onClick=${() => move(-1)} aria-label="Previous month"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <strong>${title}</strong>
         <button class="cal-nav" onClick=${() => move(1)} aria-label="Next month"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6 4.5 9.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
-      <div class="cal-grid" role="grid">
+      <div class="cal-grid">
         ${["M", "T", "W", "T", "F", "S", "S"].map((d, i) => html`<span key=${"h" + i} class="cal-dow" aria-hidden="true">${d}</span>`)}
         ${DD.monthGrid(shown.y, shown.m).flat().map((d) => {
           const c = counts[d.key];
-          const label = `${d.key}: ${c ? `${c.runs} run${c.runs === 1 ? "" : "s"}${c.failed ? `, ${c.failed} failed` : ""}` : "no runs"}`;
-          const cls = ["cal-day", d.inMonth ? "" : "out", c ? "has" : "", c && c.failed ? "failed" : "", d.key === day ? "on" : "", d.key === today ? "today" : ""].join(" ");
-          return html`<button key=${d.key} class=${cls} disabled=${!c} aria-pressed=${d.key === day} aria-label=${label} title=${label}
-            style=${c ? { "--n": (0.25 + 0.75 * (c.runs / most)).toFixed(2), color: c.runs / most > 0.5 ? "var(--surface)" : "var(--ink)" } : null}
+          const name = new Date(d.key + "T12:00").toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+          const label = `${name}: ${c ? `${c.runs} run${c.runs === 1 ? "" : "s"}${c.failed ? `, ${c.failed} failed` : ""}` : "no runs"}`;
+          const cls = ["cal-day", d.inMonth ? "" : "cal-out", c ? "cal-has" : "", c && c.failed ? "cal-failed" : "", d.key === day ? "cal-on" : "", d.key === today ? "cal-today" : ""].join(" ");
+          // The tint, and whichever text reads best on it (review 23).
+          const look = c && hex ? DD.tint(c.runs / most, record, sunk, ink, surface) : null;
+          return html`<button key=${d.key} class=${cls} disabled=${!c && d.key !== day} aria-pressed=${d.key === day} aria-label=${label} title=${label}
+            style=${look ? { background: look.bg, color: look.text } : null}
             onClick=${() => onDay(d.key === day ? "" : d.key)}>${d.day}</button>`;
         })}
       </div>
@@ -988,13 +993,13 @@ function useRuns(ref) {
   return data;
 }
 
-function Runs({ data }) {
+function Runs({ data, day }) {
   if (!data) return html`<p class="muted">Loading…</p>`;
   const runs = data.runs || [];
   const longest = Math.max(1, ...runs.map((r) => ms(r.start, r.close) || 0));
   return html`
     ${data.temporalError && html`<p class="error">Temporal: ${data.temporalError}</p>`}
-    ${runs.length === 0 ? html`<p class="muted">No runs yet.</p>` : html`
+    ${runs.length === 0 ? html`<p class="muted">${day ? "No runs on this day among the latest records." : "No runs yet."}</p>` : html`
     <div class="panel" style=${{ padding: "4px 4px" }}>
     <table class="list">
       <thead><tr><th>Status</th><th>Program</th><th>Started</th><th>Took</th><th>Record</th></tr></thead>
@@ -1479,6 +1484,7 @@ class ErrorBoundary extends React.Component {
 function Home({ info, refs, heads, current }) {
   const runs = useRuns(current);
   const [day, setDay] = useState("");
+  useEffect(() => setDay(""), [current]);
   const shown = runs && day ? { ...runs, runs: DD.onDay(runs.runs, day) } : runs;
   const dayName = day && new Date(day + "T12:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   return html`
@@ -1502,7 +1508,7 @@ function Home({ info, refs, heads, current }) {
     <p class="lede">The latest answer to every question asked on this history.</p>
     <${Beliefs} history=${current} />
     <h2>Runs</h2>
-    <${Runs} data=${shown} />`;
+    <${Runs} data=${shown} day=${day} />`;
 }
 
 function App() {

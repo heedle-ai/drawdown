@@ -78,7 +78,7 @@ A browse step's output (reed's JSON) is shown as the page it saw: the screenshot
 
 ## The woven grid and its calendar
 
-The home page weaves the recent runs: one column per run, its top edge coloured by status, one cell per step coloured by the kind of step. Beside it are counts by status and by kind, and a **calendar** of the month. Each day is tinted by how many runs started that day (in your time zone), and a red dot marks a day where one failed. Choosing a day shows only that day's runs, in the grid and in the runs table, until you choose it again or **Show every day**. The arrows move between months. The day logic is `lib.js`'s `dayKey`, `byDay`, `monthGrid` and `onDay`, which `ui/lib.test.js` checks.
+The home page weaves the recent runs: one column per run, its top edge coloured by status, one cell per step coloured by the kind of step. Beside it are counts by status and by kind, and a **calendar** of the month. Each day is tinted by how many runs started that day (in your time zone) among the latest records the page reads: up to 200 records from Git, and Temporal's latest executions. Merges aren't counted as runs. A red dot marks a day where a run failed. Choosing a day shows only that day's runs, in the grid and in the runs table, until you choose it again or **Show every day**. A chosen day stays clickable even if it no longer has runs among the latest records, and changing history clears the choice. The arrows move between months. Each day's text is whichever of the theme's text colours reads best on its tint, and the tint is kept where that reaches WCAG's 4.5:1. The logic is `lib.js`'s `dayKey`, `byDay`, `monthGrid`, `onDay` and `tint`, which `ui/lib.test.js` checks.
 
 ## Runs, steps and the graph
 

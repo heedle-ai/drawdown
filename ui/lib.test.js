@@ -239,3 +239,31 @@ test("a month grid is whole weeks, Monday first, covering every day once", () =>
     assert.ok(!weeks.at(-1).every((d) => !d.inMonth), "no week of only the next month");
   }
 });
+
+test("calendar days are readable: every tint has text at WCAG 4.5:1, in both themes", () => {
+  // Review 23: white on mid tints was 2.5:1 in light mode, 3.4:1 in dark.
+  const html = require("node:fs").readFileSync(__dirname + "/../static/index.html", "utf8");
+  const themes = [...html.matchAll(/--surface:(#[0-9a-f]{6}); --sunk:(#[0-9a-f]{6}); --ink:(#[0-9a-f]{6})[\s\S]*?--record:(#[0-9a-f]{6})/gi)];
+  assert.ok(themes.length >= 2, "light and dark palettes found");
+  for (const [, surface, sunk, ink, record] of themes) {
+    for (let share = 0; share <= 1.0001; share += 0.01) {
+      const { bg, text } = DD.tint(share, record, sunk, ink, surface);
+      assert.ok(DD.contrast(bg, text) >= 4.5, `${record} at ${share.toFixed(2)}: ${DD.contrast(bg, text).toFixed(2)}`);
+    }
+  }
+  assert.equal(DD.contrast("#000000", "#ffffff").toFixed(0), "21");
+});
+
+test("the calendar's classes are its own, and merges and unknown times aren't runs", () => {
+  // Review 23: days of other months used the run page's .out class.
+  const app = require("node:fs").readFileSync(__dirname + "/../static/app.js", "utf8");
+  const cal = app.slice(app.indexOf("function Calendar("), app.indexOf("const statusVar"));
+  const classes = [...cal.matchAll(/class=\$?\{?"([^"]+)"|"(cal-[a-z-]*|[a-z-]+)"(?= :| \])/g)];
+  const listed = cal.match(/const cls = \[([^\]]*)\]/)[1].match(/"([a-z-]*)"/g).map((x) => x.slice(1, -1)).filter(Boolean);
+  for (const c of listed) assert.ok(c.startsWith("cal-"), `calendar class ${c} isn't cal- prefixed`);
+  assert.ok(classes.length > 0);
+  // Review 23: a chosen day that lost its runs was disabled, so it couldn't be cleared.
+  assert.ok(cal.includes("disabled=${!c && d.key !== day}"), "the chosen day stays clickable");
+  assert.deepEqual(DD.byDay([{ start: "2026-11-02T10:00:00Z", merged: "abc", status: "Recorded" }]), {});
+  assert.equal(DD.dayKey("0001-01-01T00:00:00Z"), "");
+});
