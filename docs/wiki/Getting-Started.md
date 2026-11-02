@@ -44,6 +44,7 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 | `-browser-network` | Podman's default | The Podman network browse pods join |
 | `-ask-model` | `claude-sonnet-5-5` | The Claude model `ask` and `agent` use. The key comes from `ANTHROPIC_API_KEY` in drawdown's environment; without it, `ask` steps fail with `AskSetup` and `agent` steps with `AgentSetup` |
 | `-agent-image` | none | A content-pinned image ID with `/bin/sh` that [agent steps](https://github.com/heedle-ai/pirn/wiki/How-It-Works#agent-steps) run in. Without it, `agent` steps fail with `AgentSetup` |
+| `-image-registry` | none | An OCI repository, such as `ghcr.io/acme/heedle-images`, that `(image "<Containerfile>" "push")` pushes to, with the worker's own `podman login`; see [bobbin → Image builds](https://github.com/heedle-ai/bobbin/wiki/How-It-Works#image-builds). Without it, such steps fail with `ImageSetup`; builds without `"push"` still work |
 | `-agent-registry` | none | An OCI repository, such as `ghcr.io/acme/heedle-files`, where agent files too big for the record are kept, pushed with `oras` and the worker's own login; see [pirn → Large files](https://github.com/heedle-ai/pirn/wiki/How-It-Works#large-files). Without it, they're listed as skipped |
 | `-sources` | loom's `examples/hello/sources` | Folder the `source` command reads |
 

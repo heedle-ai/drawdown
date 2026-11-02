@@ -154,6 +154,9 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 		`agent: { where: "A fresh Podman container (a bobbin session) for this step alone`,
 		`net: "None for its commands (--network=none). Only the worker talks to the Claude API"`,
 		`no environment variables from the machine or the worker`,
+		`image: { where: "podman build on the worker, from base images pinned to content and already on it: nothing is pulled"`,
+		`net: "None for RUN steps (--network=none). With \"push\", the worker pushes the image with its own login"`,
+		`A fresh build context holding only the Containerfile and in/<node>.txt for each input`,
 	} {
 		if !strings.Contains(js, claim) {
 			t.Errorf("static/app.js no longer claims %s", claim)
@@ -162,6 +165,10 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 	container := strings.Join(bobbin.Spec{Image: strings.Repeat("ab", 32)}.Argv(time.Minute), " ")
 	browser := strings.Join(reed.Browser{Image: strings.Repeat("ab", 32)}.Argv("v", []string{"a.example"}), " ")
 	session := strings.Join(bobbin.Spec{Image: strings.Repeat("ab", 32)}.SessionArgv("s", time.Minute), " ")
+	if build := strings.Join(bobbin.BuildArgv("/c", "/i"), " "); !strings.Contains(build, "--network=none") || !strings.Contains(build, "--pull=never") ||
+		strings.Contains(build, "-v ") || strings.Contains(build, "--volume") {
+		t.Errorf("image builds changed; update the inspector: %s", build)
+	}
 	if !strings.Contains(session, "--network=none") {
 		t.Errorf("agent sessions have a network: %s", session)
 	}
@@ -304,9 +311,10 @@ func TestInv_StepPageStartsFresh(t *testing.T) {
 	}
 }
 
-// TestInv_RegistryPatternsAgree: pirn (which pushes), loom (which records)
-// and this page (which shows a fetch command) accept exactly the same
-// registry repositories: one pattern, written three times.
+// TestInv_RegistryPatternsAgree: pirn (which pushes files), bobbin (which
+// pushes images), loom (which records) and this page (which shows a fetch
+// command) accept exactly the same registry repositories: one pattern,
+// written four times.
 func TestInv_RegistryPatternsAgree(t *testing.T) {
 	read := func(path, re string) string {
 		b, err := os.ReadFile(path)
@@ -322,7 +330,8 @@ func TestInv_RegistryPatternsAgree(t *testing.T) {
 	pirn := read("../pirn/registry.go", "repoRef = regexp.MustCompile\\(`([^`]+)`\\)")
 	loom := read("../loom/files.go", "ociRepo   = regexp.MustCompile\\(`([^`]+)`\\)")
 	page := strings.ReplaceAll(read("static/lib.js", `const OCI_REPO = /(.+)/;`), `\/`, "/")
-	if pirn != loom || pirn != page {
-		t.Errorf("registry patterns differ:\npirn %s\nloom %s\npage %s", pirn, loom, page)
+	bobbin := read("../bobbin/build.go", "imageRepo = regexp.MustCompile\\(`([^`]+)`\\)")
+	if pirn != loom || pirn != page || pirn != bobbin {
+		t.Errorf("registry patterns differ:\npirn %s\nloom %s\npage %s\nbobbin %s", pirn, loom, page, bobbin)
 	}
 }
