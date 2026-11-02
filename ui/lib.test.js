@@ -211,3 +211,31 @@ test("a written program never loses the one it replaces", () => {
     assert.equal(DD.replaced(before, written), "", JSON.stringify(before));
   }
 });
+
+test("the calendar groups runs by the local day they started", () => {
+  const at = (y, m, d, h) => new Date(y, m, d, h).toISOString();
+  assert.equal(DD.dayKey(at(2026, 10, 2, 23)), "2026-11-02");
+  for (const bad of ["", undefined, "not a time"]) assert.equal(DD.dayKey(bad), "");
+  const runs = [
+    { start: at(2026, 10, 2, 9), status: "Completed" }, { start: at(2026, 10, 2, 18), status: "Failed" },
+    { start: at(2026, 10, 3, 1), status: "Running" }, { start: "", status: "Completed" },
+  ];
+  assert.deepEqual(DD.byDay(runs), {
+    "2026-11-02": { runs: 2, failed: 1, running: 0 },
+    "2026-11-03": { runs: 1, failed: 0, running: 1 },
+  });
+  assert.equal(DD.onDay(runs, "2026-11-02").length, 2);
+  assert.equal(DD.onDay(runs, "").length, 4, "no day is every run");
+});
+
+test("a month grid is whole weeks, Monday first, covering every day once", () => {
+  for (const [y, m] of [[2026, 10], [2026, 1], [2021, 1], [2026, 11]]) {
+    const weeks = DD.monthGrid(y, m);
+    const days = weeks.flat();
+    assert.ok(weeks.every((w) => w.length === 7));
+    assert.equal(new Date(days[0].key + "T12:00").getDay(), 1, `${y}-${m + 1} starts on a Monday`);
+    const inMonth = days.filter((d) => d.inMonth).map((d) => d.day);
+    assert.deepEqual(inMonth, Array.from({ length: new Date(y, m + 1, 0).getDate() }, (_, i) => i + 1));
+    assert.ok(!weeks.at(-1).every((d) => !d.inMonth), "no week of only the next month");
+  }
+});
