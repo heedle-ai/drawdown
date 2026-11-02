@@ -94,8 +94,12 @@ func main() {
 		// Skills are the store's, at their newest when drawdown starts; each
 		// run is checked against, and records, the versions it pins.
 		lib := &treadle.Library{Store: s}
-		if err := treadle.Register(ctx, reg, w, agent, lib); err != nil {
+		skipped, err := treadle.Register(ctx, reg, w, agent, lib)
+		if err != nil {
 			log.Fatal(err)
+		}
+		for _, err := range skipped {
+			log.Printf("skill left out: %v", err)
 		}
 		loom.RegisterWith(w, &loom.Checker{Registry: reg, RegistryFor: func(ctx context.Context, p plan.Plan) (*registry.Registry, error) {
 			return lib.Pinned(ctx, commands(), p)
@@ -112,8 +116,12 @@ func main() {
 
 	if !*runWorker {
 		reg = commands()
-		if err := (&treadle.Library{Store: s}).AddTo(ctx, reg); err != nil {
+		skipped, err := (&treadle.Library{Store: s}).AddTo(ctx, reg)
+		if err != nil {
 			log.Fatal(err)
+		}
+		for _, err := range skipped {
+			log.Printf("skill left out: %v", err)
 		}
 	}
 	srv := &drawdown.Server{
