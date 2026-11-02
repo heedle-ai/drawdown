@@ -72,6 +72,9 @@ type Temporal interface {
 	// DecideWrite approves or declines one that waits (loom.DecideWrite).
 	Writes(ctx context.Context, workflowID string) ([]loom.WriteOutcome, error)
 	DecideWrite(ctx context.Context, workflowID string, d loom.WriteDecision) error
+	// WriteProgram has a worker's Claude write a program for a task
+	// (loom.WriteProgram); nothing runs.
+	WriteProgram(ctx context.Context, description string) (loom.Written, error)
 }
 
 // LiveFrame is what a browsing step last showed.
@@ -163,6 +166,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills/{name}/review", s.skillReview)
 	mux.HandleFunc("GET /api/writes/{workflow...}", s.writes)
 	mux.HandleFunc("POST /api/writes/{workflow...}", s.decideWrite)
+	mux.HandleFunc("POST /api/write", s.writeProgram)
+	mux.HandleFunc("POST /api/skills/create", s.createSkill)
 	mux.HandleFunc("POST /api/skills/import", s.importSkill)
 	mux.HandleFunc("POST /api/skills/add", s.addSkill)
 	mux.HandleFunc("POST /api/skills/{name}/approve", s.approveSkill)

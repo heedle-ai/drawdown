@@ -3,11 +3,13 @@ package drawdown
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/heedle-ai/loom"
+	"github.com/heedle-ai/pirn"
 	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
 )
@@ -148,13 +150,13 @@ func writeError(w http.ResponseWriter, err error) {
 // skillsTimeout is how long the page waits for a change: a little longer
 // than loom lets the change take, so a change reported as failed is never
 // made afterwards.
-const skillsTimeout = loom.SkillsTimeout + 30*time.Second
+func skillsTimeout(op string) time.Duration { return loom.ChangeTimeout(op) + 30*time.Second }
 
 // changeSkills runs one change on a worker and replies with the skill it
 // concerns: 400 with the library's reason for a refusal, 502 if Temporal
 // or the worker failed.
 func (s *Server) changeSkills(w http.ResponseWriter, r *http.Request, in loom.SkillsChange) {
-	ctx, cancel := context.WithTimeout(r.Context(), skillsTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), skillsTimeout(in.Op))
 	defer cancel()
 	sk, err := s.Temporal.ChangeSkills(ctx, in)
 	switch {
@@ -231,4 +233,46 @@ func (s *Server) rejectSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.changeSkills(w, r, loom.SkillsChange{Op: loom.SkillsReject, Name: r.PathValue("name"), Version: req.Version})
+}
+
+// createSkill has a worker's agent write a skill, and its test, from a
+// description; it waits for review (loom's SkillsCreate). It takes as long
+// as an agent step.
+func (s *Server) createSkill(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Description string `json:"description"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Description) == "" || len(req.Description) > treadle.MaxCreateDescription {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: fmt.Sprintf("a description is 1 to %d bytes", treadle.MaxCreateDescription)})
+		return
+	}
+	s.changeSkills(w, r, loom.SkillsChange{Op: loom.SkillsCreate, Description: req.Description})
+}
+
+// writeProgram has a worker's Claude write a program for a task, from the
+// commands and skills it has, and answers it with its plan: the page
+// shows it, and it runs only if someone submits it.
+func (s *Server) writeProgram(w http.ResponseWriter, r *http.Request) {
+	var req loom.WriteRequest
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Description) == "" || len(req.Description) > loom.MaxDescription {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: fmt.Sprintf("a description is 1 to %d bytes", loom.MaxDescription)})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), loom.WriteTimeout+90*time.Second)
+	defer cancel()
+	out, err := s.Temporal.WriteProgram(ctx, req.Description)
+	switch {
+	case errors.Is(err, warp.ErrInvalid) || errors.Is(err, pirn.ErrInvalid) || errors.Is(err, loom.ErrNoProgram):
+		writeJSON(w, http.StatusUnprocessableEntity, apiError{Error: err.Error()})
+	case err != nil:
+		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, out)
+	}
 }

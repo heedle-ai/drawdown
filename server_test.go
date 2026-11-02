@@ -40,6 +40,8 @@ type fakeTemporal struct {
 	live    map[string][]drawdown.LiveFrame
 	steps   map[string][]drawdown.Step
 	writes  map[string][]loom.WriteOutcome
+	writer  *loom.Writer
+	create  func(context.Context, string) (map[string][]byte, error)
 }
 
 func (f *fakeTemporal) Live(_ context.Context, wf string) ([]drawdown.LiveFrame, error) {
@@ -108,6 +110,17 @@ func (f *fakeTemporal) DecideWrite(_ context.Context, wf string, d loom.WriteDec
 	return nil
 }
 
+// WriteProgram writes with the fake's writer (a stand-in Claude).
+func (f *fakeTemporal) WriteProgram(ctx context.Context, description string) (loom.Written, error) {
+	if f.down {
+		return loom.Written{}, errors.New("connection refused")
+	}
+	if f.writer == nil {
+		return loom.Written{}, errors.New("no writer")
+	}
+	return f.writer.Write(ctx, description)
+}
+
 // ChangeSkills runs loom's skills workflow in Temporal's test suite, on
 // the fake's store, as a worker would.
 func (f *fakeTemporal) ChangeSkills(ctx context.Context, in loom.SkillsChange) (treadle.Skill, error) {
@@ -118,7 +131,7 @@ func (f *fakeTemporal) ChangeSkills(ctx context.Context, in loom.SkillsChange) (
 	defer f.mu.Unlock()
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
-	loom.RegisterSkills(env, &treadle.Library{Store: f.store})
+	loom.RegisterSkills(env, loom.Skills{Library: &treadle.Library{Store: f.store}, Create: f.create})
 	env.ExecuteWorkflow(loom.SkillsWorkflowName, in)
 	var s treadle.Skill
 	err := env.GetWorkflowError()

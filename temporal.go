@@ -49,6 +49,11 @@ func (t TemporalClient) DecideWrite(ctx context.Context, workflowID string, d lo
 	return loom.DecideWrite(ctx, t.Client, workflowID, d)
 }
 
+// WriteProgram has a worker write a program for a task.
+func (t TemporalClient) WriteProgram(ctx context.Context, description string) (loom.Written, error) {
+	return loom.WriteProgram(ctx, t.Client, t.Queue, description)
+}
+
 // List returns up to 200 executions of loom's RunWorkflow on this task
 // queue, using Temporal's visibility query.
 func (t TemporalClient) List(ctx context.Context) ([]Execution, error) {

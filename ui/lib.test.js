@@ -197,3 +197,17 @@ test("connector calls and writes are shown only when well formed", () => {
   assert.equal(DD.asWrites([w])[0].inputText, '{"to":"a"}');
   for (const bad of [[{ ...w, status: "sent" }], [{ ...w, node: 1 }], "x", [{ ...w, output: {} }]]) assert.deepEqual(DD.asWrites(bad), []);
 });
+
+test("a skill's connectors and creation are shown only as strings", () => {
+  const sk = { name: "triage", description: "d", version: "a".repeat(40), commit: "b".repeat(40) };
+  assert.ok(DD.asSkill({ ...sk, connectors: "linear/search mail", created: "Triage bugs." }));
+  for (const bad of [{ ...sk, connectors: ["linear"] }, { ...sk, created: {} }]) assert.equal(DD.asSkill(bad), null);
+});
+
+test("a written program never loses the one it replaces", () => {
+  // Review 20: describing a task overwrote the editor with no way back.
+  assert.equal(DD.replaced("(echo \"mine\")", "(echo \"theirs\")"), "(echo \"mine\")");
+  for (const [before, written] of [["", "(echo)"], ["  \n", "(echo)"], ["(echo)", "(echo)"], [undefined, "(echo)"]]) {
+    assert.equal(DD.replaced(before, written), "", JSON.stringify(before));
+  }
+});
