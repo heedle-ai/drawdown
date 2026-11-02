@@ -87,6 +87,8 @@ type History interface {
 	FindByTrailer(ctx context.Context, from warp.ID, key, value string) (warp.ID, bool, error)
 	Diff(ctx context.Context, a, b warp.ID) ([]byte, error)
 	DiffBlobs(ctx context.Context, a, b warp.ID) ([]byte, error)
+	Files(ctx context.Context, tree warp.ID) ([]warp.File, error)
+	BlobSize(ctx context.Context, id warp.ID) (int64, error)
 	Refs(ctx context.Context, prefix string) ([]warp.RefInfo, error)
 }
 

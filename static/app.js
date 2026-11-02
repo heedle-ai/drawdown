@@ -201,8 +201,8 @@ function AgentWork({ agent: a, part = "all" }) {
           </li>`)}</ol>
       </details>`}
       ${work && a.files.length > 0 && html`<details open><summary>Files kept from /work/out (${a.files.length})</summary>
-        ${a.files.map((f) => html`<details key=${f.path} class="file"><summary><code>${f.path}</code> <span class="muted">${bytes(f.text ?? f.base64 ?? "")}${f.base64 != null ? ", binary" : ""}</span></summary>
-          ${f.text != null ? html`<pre>${f.text}</pre>` : html`<p class="muted">A binary file of ${f.size} bytes, kept in the record as base64.</p>`}</details>`)}
+        ${a.files.map((f) => html`<details key=${f.path} class="file"><summary><code>${f.path}</code> <span class="muted">${DD.size(f.size)}${f.oci ? ", in the registry" : f.base64 != null ? ", binary" : ""}</span></summary>
+          ${f.oci ? html`<${RegistryFile} f=${f} />` : f.text != null ? html`<pre>${f.text}</pre>` : html`<p class="muted">A binary file of ${f.size} bytes, kept in the record as base64.</p>`}</details>`)}
       </details>`}
       ${work && (a.skipped || []).length > 0 && html`<p class="muted">Not kept: ${a.skipped.join("; ")}${a.skippedMore ? `, and ${a.skippedMore} more` : ""}</p>`}
       ${work && html`<details><summary>Changed in the container (${a.changes.length}${a.moreChanges ? `+${a.moreChanges}` : ""})</summary>
@@ -988,27 +988,38 @@ function StepPage({ workflow, run, node, history: ref }) {
     </div>`;
 }
 
+// RegistryFile is a file too big for the record, kept in an OCI registry:
+// where it is, and the command that gets it back.
+function RegistryFile({ f }) {
+  return html`<div class="registry-file"><p class="muted">Too big for the record (${DD.size(f.size)}), so it's kept in the registry <code>${f.oci}</code>,
+    under its SHA-256. The record holds a pointer. To get it back:</p>
+    <pre>${DD.fetchCommand(f.oci, f.sha256, f.path.split("/").pop())}</pre></div>`;
+}
+
 // StepFiles lists the files a step left, as its record holds them
 // (files/<node>/), compared with the previous run of the same program.
 // A changed file opens to its diff (warp's DiffBlobs); an added text file
 // opens to its contents, from the step's own output.
 function StepFiles({ files, node, previous, commit, more, agent }) {
-  const texts = new Map(((agent && agent.files) || []).filter((f) => f.text != null).map((f) => [f.path, f.text]));
+  const kept = new Map(((agent && agent.files) || []).map((f) => [f.path, f]));
   return html`
     <h3>Files</h3>
     <p class="lede">What this step left in its record, under <code>files/${node}/</code>, compared with ${previous
       ? html`the <a href=${"#/diff/" + encodeURIComponent(previous) + "/" + encodeURIComponent(commit)}>previous run of this program</a>` : "nothing: this is the program's first run"}.
       ${" " + DD.fileSummary(files)}${more ? ". Only the first files are listed." : "."}</p>
-    <div class="panel files">${files.map((f) => html`<${FileRow} key=${f.path} f=${f} text=${texts.get(f.path)} />`)}</div>`;
+    <div class="panel files">${files.map((f) => html`<${FileRow} key=${f.path} f=${f} kept=${f.status === "deleted" ? null : kept.get(f.path)} />`)}</div>`;
 }
 
-function FileRow({ f, text }) {
+function FileRow({ f, kept }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const [state, setState] = useState("");
-  const canOpen = f.status === "changed" || (f.status === "added" && text != null);
+  const oci = kept && kept.oci ? kept : null;
+  const text = kept && kept.text != null ? kept.text : null;
+  const canOpen = oci != null || f.status === "changed" || (f.status === "added" && text != null);
   useEffect(() => {
-    if (!open || f.status !== "changed") return;
+    if (ref.current) ref.current.innerHTML = "";
+    if (!open || f.status !== "changed" || oci) return;
     let live = true;
     setState("loading");
     api(`/api/blobdiff/${encodeURIComponent(f.before)}/${encodeURIComponent(f.blob)}`).then((r) => {
@@ -1018,16 +1029,18 @@ function FileRow({ f, text }) {
       setState("ok");
     });
     return () => { live = false; };
-  }, [open, f.before, f.blob]);
+  }, [open, f.status, f.before, f.blob, oci]);
   return html`
     <div class="file-row">
       <button class="file-head" disabled=${!canOpen} aria-expanded=${open} onClick=${() => setOpen(!open)}>
         <${Pill} cls=${"f-" + f.status}>${f.status}<//>
+        ${oci && html`<${Pill} cls="k-record">in the registry<//>`}
         <code>${f.path}</code>
-        <span class="muted">${f.size < 1024 ? `${f.size} B` : `${(f.size / 1024).toFixed(1)} KiB`}${f.status === "deleted" ? " before" : ""}</span>
+        <span class="muted">${DD.size(oci ? oci.size : f.size)}${f.status === "deleted" ? " before" : ""}</span>
       </button>
-      ${open && f.status === "added" && html`<pre class="file-body">${text}</pre>`}
-      ${open && f.status === "changed" && html`<div class="file-body">
+      ${open && oci && html`<div class="file-body"><${RegistryFile} f=${oci} /></div>`}
+      ${open && !oci && f.status === "added" && html`<pre class="file-body">${text}</pre>`}
+      ${open && !oci && f.status === "changed" && html`<div class="file-body">
         ${state === "loading" && html`<p class="muted">Loading…</p>`}
         ${!["", "loading", "ok"].includes(state) && html`<p class="error">${state}</p>`}
         <div ref=${ref}></div></div>`}
@@ -1133,7 +1146,7 @@ function App() {
   let body;
   if (route[0] === "agent" && route.length === 2) body = html`<${AgentPage} agent=${route[1]} refs=${refs} heads=${heads} info=${info} />`;
   else if (route[0] === "run" && route.length === 3) body = html`<${RunDetail} workflow=${route[1]} run=${route[2]} history=${current} />`;
-  else if (route[0] === "step" && route.length === 4) body = html`<${StepPage} workflow=${route[1]} run=${route[2]} node=${route[3]} history=${current} />`;
+  else if (route[0] === "step" && route.length === 4) body = html`<${StepPage} key=${route.join("/")} workflow=${route[1]} run=${route[2]} node=${route[3]} history=${current} />`;
   else if (route[0] === "diff" && route.length === 3) body = html`<${Diff} from=${route[1]} to=${route[2]} />`;
   else body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;
 

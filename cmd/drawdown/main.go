@@ -47,6 +47,7 @@ func main() {
 	browserNetwork := flag.String("browser-network", "", "Podman network browse containers join (default: Podman's)")
 	askModel := flag.String("ask-model", pirn.DefaultModel, "Claude model ask and agent use (key from ANTHROPIC_API_KEY)")
 	agentImage := flag.String("agent-image", "", "content-pinned image ID agent steps run in (needs /bin/sh)")
+	agentRegistry := flag.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
 	flag.Parse()
 	if *store == "" {
 		log.Fatal("give -store DIR, e.g. -store ~/heedle-store.git")
@@ -79,7 +80,7 @@ func main() {
 		if err := pirn.Register(reg, w, claude); err != nil {
 			log.Fatal(err)
 		}
-		if err := pirn.RegisterAgent(reg, w, pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage}); err != nil {
+		if err := pirn.RegisterAgent(reg, w, pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry)}); err != nil {
 			log.Fatal(err)
 		}
 		loom.Register(w, s, reg)
@@ -125,3 +126,12 @@ func main() {
 const AskExample = `(pipe
   (par (source "weather") (source "carrier") (source "factory"))
   (ask "Will the shipment be late? Answer yes or no first, then explain in two sentences, citing the sources that decide it."))`
+
+// registryFor is the registry agent files too big for the record go to,
+// or nil (they're skipped) without one.
+func registryFor(repo string) *pirn.Registry {
+	if repo == "" {
+		return nil
+	}
+	return &pirn.Registry{Repo: repo}
+}

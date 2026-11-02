@@ -16,6 +16,7 @@ const DD = (() => {
   }
 
   const KINDS = ["added", "changed", "deleted"];
+  const SHA256 = /^[0-9a-f]{64}$/;
   const objs = (v, ok) => Array.isArray(v) && v.every((x) => x && typeof x === "object" && ok(x));
 
   // asAgent is v if it's an agent step's result (pirn's JSON, agent format
@@ -23,7 +24,8 @@ const DD = (() => {
   function asAgent(v) {
     if (!asAnswer(v) || v.agent !== 1 || !str(v.image) || !num(v.turns)) return null;
     if (!objs(v.commands, (c) => str(c.command) && num(c.exitCode) && opt(c.stdout, str) && opt(c.stderr, str) && opt(c.ms, num) && opt(c.error, str))) return null;
-    if (!objs(v.files, (f) => str(f.path) && num(f.size) && opt(f.text, str) && opt(f.base64, str))) return null;
+    if (!objs(v.files, (f) => str(f.path) && num(f.size) && opt(f.text, str) && opt(f.base64, str) &&
+      (f.oci === undefined ? f.sha256 === undefined : str(f.oci) && SHA256.test(f.sha256) && f.text === undefined && f.base64 === undefined))) return null;
     // Only the kinds podman diff reports: the page groups by kind.
     if (!objs(v.changes, (c) => KINDS.includes(c.kind) && str(c.path)) || !strs(v.skipped)) return null;
     if (!opt(v.skippedMore, num) || !opt(v.moreChanges, num)) return null;
@@ -109,7 +111,7 @@ const DD = (() => {
   }
 
   const STATUSES = ["added", "changed", "same", "deleted"];
-  const blob = (v) => str(v) && /^[0-9a-f]{40,64}$/.test(v);
+  const blob = (v) => str(v) && /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(v);
 
   // asFiles is a step's recorded files from the API (the record's files
   // for one node), keeping only well-formed entries: a blob for every
@@ -127,6 +129,23 @@ const DD = (() => {
     for (const f of files) n[f.status]++;
     const words = { added: "added", changed: "changed", same: "the same", deleted: "deleted" };
     return STATUSES.filter((s) => n[s]).map((s) => `${n[s]} ${words[s]}`).join(", ");
+  }
+
+  // size writes a byte count for people.
+  function size(n) {
+    if (!num(n) || n < 0) return "";
+    const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return i === 0 ? `${n} B` : `${n.toFixed(1)} ${units[i]}`;
+  }
+
+  const quote = (s) => "'" + s.replace(/'/g, "'\\''") + "'";
+
+  // fetchCommand is the command that gets back a file an agent step kept
+  // in a registry: pirn's FetchCommand, character for character.
+  function fetchCommand(repo, sum, file) {
+    return `oras blob fetch --output ${quote(file)} ${repo}@sha256:${sum}`;
   }
 
   // ancestors are every node id depends on, directly or not.
@@ -182,6 +201,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, parse, preview, decisions, ancestors, dur, span, tokens };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, parse, preview, decisions, ancestors, dur, span, tokens };
 })();
 if (typeof module !== "undefined") module.exports = DD;
