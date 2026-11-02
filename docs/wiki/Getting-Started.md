@@ -1,3 +1,5 @@
+> **One binary:** [heedle](https://github.com/heedle-ai/heedle/wiki) serves this same UI. `heedle up` starts Temporal, a worker and the UI together. drawdown is also a library, `app.Run`, which takes the flags below.
+
 ## 1. Install and clone
 
 ```bash
