@@ -31,7 +31,7 @@ function useRoute() {
     addEventListener("hashchange", on);
     return () => removeEventListener("hashchange", on);
   }, []);
-  return hash.slice(2).split("/").map(decodeURIComponent);
+  return hash.slice(2).split("/").map((seg) => { try { return decodeURIComponent(seg); } catch { return seg; } });
 }
 
 const go = (...parts) => { location.hash = "#/" + parts.map(encodeURIComponent).join("/"); };
@@ -653,8 +653,9 @@ function SkillPage({ name, version }) {
       <section>
         <h3>Versions</h3>
         <p class="lede">Newest first. Runs keep the version they were compiled with.</p>
-        <ol class="versions">${list.map((v) => html`
-          <li key=${v.version}><a href=${"#/skill/" + encodeURIComponent(name) + "/" + encodeURIComponent(v.version)} aria-current=${v.version === shown ? "true" : undefined}>
+        <ol class="versions">${list.map((v, i) => html`
+          <li key=${v.commit}><a href=${"#/skill/" + encodeURIComponent(name) + "/" + encodeURIComponent(v.version)}
+            aria-current=${v.version === shown && list.findIndex((x) => x.version === shown) === i ? "true" : undefined}>
             <span class="mono">${v.version.slice(0, 12)}</span></a>
             ${v.source ? html` <span class="muted">from ${v.source.repo.replace(/^https:\/\//, "")}${v.source.commit ? " @" + v.source.commit.slice(0, 7) : ""}</span>` : html` <span class="muted">added from a folder</span>`}</li>`)}</ol>
       </section>

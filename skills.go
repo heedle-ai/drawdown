@@ -53,42 +53,23 @@ func (s *Server) skill(w http.ResponseWriter, r *http.Request) {
 }
 
 // skillVersion is one version of a skill: its files with their sizes, and
-// its SKILL.md. Only a version that was added to that skill is served.
+// its SKILL.md (treadle's Library.Folder). Only a version that was added
+// to that skill, and is within pirn's limits, is served.
 func (s *Server) skillVersion(w http.ResponseWriter, r *http.Request) {
-	versions, err := s.versions(r)
-	if err != nil {
-		writeError(w, err)
+	if s.Skills == nil {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "no skills here"})
 		return
 	}
-	var v *treadle.Skill
-	for i := range versions {
-		if string(versions[i].Version) == r.PathValue("version") {
-			v = &versions[i]
-		}
-	}
-	if v == nil {
-		writeJSON(w, http.StatusNotFound, apiError{Error: "no such version of " + r.PathValue("name")})
-		return
-	}
-	list, err := s.Skills.Store.Files(r.Context(), v.Version)
+	sk, list, text, err := s.Skills.Folder(r.Context(), r.PathValue("name"), warp.ID(r.PathValue("version")))
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	files := []skillFile{}
-	var md warp.ID
 	for _, f := range list {
 		files = append(files, skillFile{Path: f.Path, Size: f.Size})
-		if f.Path == treadle.SkillFile {
-			md = f.ID
-		}
 	}
-	text, err := s.Skills.Store.Blob(r.Context(), md)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"skill": v, "files": files, "skillMD": string(text)})
+	writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "files": files, "skillMD": string(text)})
 }
 
 func (s *Server) versions(r *http.Request) ([]treadle.Skill, error) {
@@ -98,10 +79,14 @@ func (s *Server) versions(r *http.Request) ([]treadle.Skill, error) {
 	return s.Skills.Versions(r.Context(), r.PathValue("name"))
 }
 
-// writeError answers 400 for a request treadle or warp refuses, else 500.
+// writeError answers 404 for something that isn't there, 400 for a
+// request treadle or warp refuses, else 500.
 func writeError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
-	if errors.Is(err, warp.ErrInvalid) || errors.Is(err, warp.ErrNotFound) {
+	switch {
+	case errors.Is(err, warp.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, warp.ErrInvalid):
 		status = http.StatusBadRequest
 	}
 	writeJSON(w, status, apiError{Error: err.Error()})

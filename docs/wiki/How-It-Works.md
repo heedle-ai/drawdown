@@ -33,7 +33,7 @@ All responses are JSON except the diffs, which are plain text.
 | `GET /api/diff/{from}/{to}` | | Unified diff text. 400 unless both are full commit IDs |
 | `GET /api/skills` | | `{"skills": [...], "problems": [...]}`: the newest version of every skill in the store (treadle's `Library.Skills`), each with `name`, `description`, `version`, `commit` and, if imported, `source`; and why any skill can't be used |
 | `GET /api/skills/{name}` | | `{"versions": [...]}`: every version of the skill, newest first. 404 if there's no such skill, 400 for a name a skill can't have |
-| `GET /api/skills/{name}/{version}` | | `{"skill", "files": [{"path", "size"}], "skillMD"}`: one version's files and its `SKILL.md`, only for a version that was added to that skill (404 otherwise, even for another tree in the store) |
+| `GET /api/skills/{name}/{version}` | | `{"skill", "files": [{"path", "size"}], "skillMD"}`: one version's files and its `SKILL.md` (treadle's `Library.Folder`), only for a version that was added to that skill and is within pirn's limits (404 if it isn't that skill's, even for another tree in the store; 400 if it's over the limits) |
 | `GET /api/blobdiff/{from}/{to}` | | One file's change: the unified diff of two blobs (warp's `DiffBlobs`), binary content reported but never printed. 400 unless both are full blob IDs; 413 if either is over 1 MiB (`MaxDiffBlob`), naming the `git diff` to run instead. Like `/api/diff`, it serves any object in the store by its full ID |
 
 Requests are limited to 1 MB, and unknown JSON fields and trailing data are rejected. Every `ref` (query parameter or body field) is optional and defaults to the server's `-ref`; otherwise it must be a valid ref under `refs/loom/` (400 if not).
