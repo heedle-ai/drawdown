@@ -289,7 +289,8 @@ const DD = (() => {
   // for a time that isn't one.
   function dayKey(t) {
     const d = new Date(t);
-    if (!t || isNaN(d)) return "";
+    // Go's zero time (0001-01-01) means "not known", not a day.
+    if (!t || isNaN(d) || d.getFullYear() < 1970) return "";
     const p = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
@@ -299,6 +300,7 @@ const DD = (() => {
   function byDay(runs) {
     const out = {};
     for (const r of runs || []) {
+      if (r.merged) continue; // a merge joins histories; it isn't a run
       const k = dayKey(r.start);
       if (!k) continue;
       const d = (out[k] ||= { runs: 0, failed: 0, running: 0 });
@@ -329,7 +331,43 @@ const DD = (() => {
 
   // onDay is the runs that started on a day ("" for all of them).
   function onDay(runs, key) {
-    return key ? (runs || []).filter((r) => dayKey(r.start) === key) : runs || [];
+    return key ? (runs || []).filter((r) => !r.merged && dayKey(r.start) === key) : runs || [];
+  }
+
+  // contrast is the WCAG contrast ratio of two #rrggbb colours.
+  function contrast(a, b) {
+    const lum = (h) => {
+      const [r, g, bl] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+        .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+    };
+    const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05);
+  }
+
+  // mix is #rrggbb a at weight t over b.
+  function mix(a, b, t) {
+    const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const x = p(a), y = p(b);
+    return "#" + x.map((v, i) => Math.round(v * t + y[i] * (1 - t)).toString(16).padStart(2, "0")).join("");
+  }
+
+  // tint is a calendar day's background, from share (0 to 1, its runs
+  // against the busiest day's) and the colours of the theme, with the
+  // text that reads best on it: the tint runs from 15% to 85% of color,
+  // stepped down where neither text would reach WCAG's 4.5:1 (review 23).
+  function tint(share, color, ground, ...texts) {
+    let t = 0.15 + 0.7 * Math.min(1, Math.max(0, share));
+    for (;;) {
+      const bg = mix(color, ground, t), text = readable(bg, ...texts);
+      if (contrast(bg, text) >= 4.5 || t <= 0.05) return { bg, text };
+      t -= 0.01;
+    }
+  }
+
+  // readable is whichever of the text colours reads best on bg.
+  function readable(bg, ...texts) {
+    return texts.reduce((best, t) => (contrast(bg, t) > contrast(bg, best) ? t : best));
   }
 
   // replaced is the program a written one replaces, worth putting back:
@@ -353,6 +391,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint };
 })();
 if (typeof module !== "undefined") module.exports = DD;
