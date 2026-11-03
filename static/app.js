@@ -973,26 +973,32 @@ function RemoveConnector({ name, onDone }) {
 }
 
 // SkillConnectors shows the connectors a skill asks for, each marked as
-// this worker has it or not, with a link to connect the ones it hasn't.
+// this worker can use it or not, with a link to connect the ones it can't.
 function SkillConnectors({ grant }) {
-  const [have, setHave] = useState(null);
-  useEffect(() => { api("/api/connectors").then((r) => { const v = r.ok && DD.asConnectors(r.data); setHave(v ? v.connectors.map((c) => c.name) : null); }); }, [grant]);
-  const names = [...new Set(grant.split(/\s+/).filter(Boolean).map((g) => g.split("/")[0]))];
-  const missing = have ? names.filter((n) => !have.includes(n)) : [];
+  const [view, setView] = useState(null);
+  useEffect(() => { api("/api/connectors").then((r) => setView((r.ok && DD.asConnectors(r.data)) || null)); }, [grant]);
+  const cs = DD.skillConnectors(grant, view);
+  const label = { connected: ", connected", key: ", key not set", absent: ", not connected", unknown: "" };
+  const cls = { connected: "s-Completed", key: "s-Failed", absent: "s-Failed", unknown: "k-other" };
+  const todo = cs.filter((c) => c.state === "key" || c.state === "absent").map((c) => c.name);
   return html`<div class="pills" style=${{ marginTop: "8px" }}><span class="muted">Its steps use</span>
-    ${names.map((n) => html`<${Pill} key=${n} cls=${!have ? "k-other" : have.includes(n) ? "s-Completed" : "s-Failed"} mono>${n}${have ? (have.includes(n) ? ", connected" : ", not connected") : ""}<//>`)}
-    ${missing.length > 0 && html`<a href="#/connectors">Connect ${missing.join(" and ")}</a>`}</div>`;
+    ${cs.map((c) => html`<${Pill} key=${c.name} cls=${cls[c.state]} mono>${c.name}${label[c.state]}<//>`)}
+    ${todo.length > 0 && html`<a href="#/connectors">Connect ${todo.join(" and ")}</a>`}</div>`;
 }
 
 // ConnectPrompt turns a step's failure for want of a connector or a key
-// into what to do about it, with a link to the Connectors page.
+// into what to do about it, with a link to the Connectors page where
+// that's where it's done.
 function ConnectPrompt({ failure }) {
   const p = DD.connectorProblem(failure);
   if (!p) return null;
-  const msg = p.missing ? html`This step needs the connector${p.missing.length > 1 ? "s" : ""} ${p.missing.map((n, i) => html`${i ? " and " : ""}<span class="mono">${n}</span>`)}, which this worker doesn't have. Add ${p.missing.length > 1 ? "them" : "it"} with that name.`
+  const list = (ns) => ns.map((n, i) => html`${i ? " and " : ""}<span class="mono">${n}</span>`);
+  const msg = p.missing ? html`This step needs the connector${p.missing.length > 1 ? "s" : ""} ${list(p.missing)}, which this worker doesn't have. Add ${p.missing.length > 1 ? "them" : "it"} with that name.`
+    : p.tools ? html`This step asks for tools of ${list(p.tools)} that this worker's connector doesn't allow. Add them to its tools in the connectors file.`
+    : p.again ? html`The key <span class="mono">${p.key}</span> for <span class="mono">${p.connector}</span> in the keychain isn't one heedle can use. Set it again.`
     : p.key ? html`This step needs the key <span class="mono">${p.key}</span>${p.connector ? html` for <span class="mono">${p.connector}</span>` : ""}, which isn't set.`
-    : html`The keychain holding this step's keys was locked when it ran. Unlock it (log in to your desktop), then run it again.`;
-  return html`<div class="note connect-prompt" role="note"><span>${msg}</span> ${!p.locked && html`<a class="btn" href="#/connectors">${p.missing ? "Connect" : "Set it up"} on the connectors page</a>`}</div>`;
+    : html`The keychain holding this step's keys was locked, or waiting for you to allow access, when it ran. Unlock it (log in to your desktop, or answer the keychain's window), then run it again.`;
+  return html`<div class="note connect-prompt" role="note"><span>${msg}</span> ${!p.locked && html`<a class="btn" href="#/connectors">${p.missing ? "Connect" : p.tools ? "See it" : "Set it up"} on the connectors page</a>`}</div>`;
 }
 
 function ConnectorsPage() {
