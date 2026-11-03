@@ -783,22 +783,28 @@ function SchedulesPage() {
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
   const ss = DD.asSchedules(data.data);
+  const [note, setNote] = useState("");
   const act = async (name, action) => {
-    setErr(""); setSure("");
+    setErr(""); setSure(""); setNote("");
     const r = await api(`/api/schedules/${encodeURIComponent(name)}/${action}`, {});
     if (!r.ok) setErr((r.data && r.data.error) || String(r.data));
+    else if (action === "run") setNote(`Started ${name}, or, if a run of it is still going, it starts when that one ends.`);
+    // Temporal's list catches up in a moment: look now, and again soon.
     setTick((t) => t + 1);
+    setTimeout(() => setTick((t) => t + 1), 1500);
   };
   return html`
     <h2>Schedules</h2>
     <p class="lede">Programs Temporal runs on a timer. Each run is a run like any other: on the runs list, recorded in Git, its writes waiting for your approval. Make one with <strong>Schedule…</strong> beside <strong>Run</strong>.</p>
     ${err && html`<p class="error" role="alert">${err}</p>`}
+    ${note && html`<p role="status">${note}</p>`}
     ${ss.length === 0 && html`<div class="panel muted">No schedules yet. Write a program on the home page, then <strong>Schedule…</strong>.</div>`}
     ${ss.map((s) => html`
       <div class="panel connector" key=${s.name}>
         <div class="pills">
           <strong class="mono">${s.name}</strong>
           <${Pill} cls=${s.paused ? "s-Scheduled" : "s-Completed"}>${s.paused ? "paused" : DD.when(s.spec)}<//>
+          <${Pill} cls="k-record" plain mono>${s.ref.replace(/^refs\/loom\//, "")}<//>
           ${!s.paused && (s.next || []).length > 0 && html`<${Pill} cls="k-other" plain>next ${when(s.next[0])}<//>`}
           <span style=${{ marginLeft: "auto" }} class="pills">
             <button type="button" onClick=${() => act(s.name, "run")}>Run now</button>
@@ -807,6 +813,7 @@ function SchedulesPage() {
               : html`<button type="button" class="link-btn" onClick=${() => setSure(s.name)}>Delete</button>`}
           </span>
         </div>
+        ${s.paused && s.note && html`<p class="muted">${s.note}</p>`}
         <${Program} text=${s.program} max=${400} />
         ${(s.recent || []).length > 0 && html`<p class="muted">Recent runs: ${s.recent.slice(-8).reverse().map((r, i) => html`${i ? ", " : ""}<a key=${r.runId} href=${"#/run/" + encodeURIComponent(r.workflowId) + "/" + encodeURIComponent(r.runId)}>${when(r.at)}</a>`)}</p>`}
       </div>`)}`;

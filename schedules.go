@@ -2,11 +2,19 @@ package drawdown
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"regexp"
 	"time"
+
+	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/sdk/temporal"
 
 	"github.com/heedle-ai/loom"
 )
+
+// scheduleName is loom's rule for a schedule's name.
+var scheduleName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 
 // schedules lists loom's schedules.
 func (s *Server) schedules(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +75,10 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
 	defer cancel()
 	if err := s.Temporal.CreateSchedule(ctx, req.Name, in, spec); err != nil {
+		if errors.Is(err, temporal.ErrScheduleAlreadyRunning) {
+			writeJSON(w, http.StatusConflict, apiError{Error: "there is already a schedule " + req.Name})
+			return
+		}
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
 		return
 	}
@@ -82,6 +94,10 @@ func (s *Server) scheduleAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, apiError{Error: "a schedule can pause, resume, delete or run"})
 		return
 	}
+	if !scheduleName.MatchString(name) {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "no schedule " + name})
+		return
+	}
 	// Like any POST here, it must be JSON, so no other site can send it.
 	var none struct{}
 	if !readJSONUpTo(w, r, &none, 64) {
@@ -90,6 +106,11 @@ func (s *Server) scheduleAction(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
 	defer cancel()
 	if err := s.Temporal.ScheduleAction(ctx, name, action); err != nil {
+		var nf *serviceerror.NotFound
+		if errors.As(err, &nf) {
+			writeJSON(w, http.StatusNotFound, apiError{Error: "no schedule " + name})
+			return
+		}
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
 		return
 	}

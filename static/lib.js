@@ -588,7 +588,7 @@ const DD = (() => {
     if (!v || !Array.isArray(v.schedules)) return [];
     return v.schedules.filter((s) => s && str(s.name) && /^[a-z0-9-]{1,40}$/.test(s.name) && str(s.program) && str(s.ref) &&
       s.spec && typeof s.spec === "object" && opt(s.spec.every, num) && opt(s.spec.cron, str) && opt(s.spec.timeZone, str) &&
-      bool(s.paused) && (s.next === null || strs(s.next)) &&
+      bool(s.paused) && opt(s.note, str) && (s.next === null || strs(s.next)) &&
       (s.recent === null || objs(s.recent, (r) => str(r.workflowId) && RUN_ID.test(r.workflowId) && str(r.runId) && RUN_ID.test(r.runId) && str(r.at))));
   }
 

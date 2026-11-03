@@ -44,8 +44,33 @@ func TestInv_SchedulesAreRunsOnATimer(t *testing.T) {
 	if s["name"] != "digest" || s["program"] != prog || s["spec"].(map[string]any)["cron"] != "0 9 * * 1-5" {
 		t.Errorf("schedule %v", s)
 	}
-	if code, _, raw := w.call("POST", "/api/schedules/digest/run", map[string]any{}); code != 200 {
-		t.Fatalf("run now: %d %s", code, raw)
+	if code, _, _ := w.call("POST", "/api/schedules", map[string]string{"name": "digest", "program": prog, "every": "1h"}); code != 409 {
+		t.Errorf("a name taken: %d", code)
+	}
+	for _, path := range []string{"/api/schedules/nothing/run", "/api/schedules/Bad%20Name/run"} {
+		if code, _, _ := w.call("POST", path, map[string]any{}); code != 404 {
+			t.Errorf("%s: %d", path, code)
+		}
+	}
+	// A run of the program by hand, then two by the schedule: each
+	// scheduled run's previous is the run before it, though their
+	// workflow IDs differ by the time Temporal adds (review 30).
+	w.submit(prog)
+	var runs [2]string
+	for i := range runs {
+		if code, _, raw := w.call("POST", "/api/schedules/digest/run", map[string]any{}); code != 200 {
+			t.Fatalf("run now: %d %s", code, raw)
+		}
+		_, m, _ := w.call("GET", "/api/schedules", nil)
+		recent := m["schedules"].([]any)[0].(map[string]any)["recent"].([]any)
+		r := recent[len(recent)-1].(map[string]any)
+		runs[i] = r["workflowId"].(string) + "/" + r["runId"].(string)
+	}
+	_, first, _ := w.call("GET", "/api/runs/"+runs[0], nil)
+	_, second, _ := w.call("GET", "/api/runs/"+runs[1], nil)
+	r1, r2 := first["record"].(map[string]any), second["record"].(map[string]any)
+	if r1["previous"] == nil || r2["previous"] != r1["commit"] {
+		t.Errorf("previous runs: first %v, second %v (want %v)", r1["previous"], r2["previous"], r1["commit"])
 	}
 	_, list, _ := w.call("GET", "/api/runs", nil)
 	found := false

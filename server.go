@@ -698,8 +698,28 @@ func (s *Server) findRecord(ctx context.Context, ref, wf, run string) (record, b
 	}
 	if len(parents) > 0 {
 		rec.Parent = parents[0]
-		if prev, ok, err := s.Store.FindByTrailer(ctx, parents[0], loom.TrailerWorkflow, wf); err == nil && ok {
-			rec.Previous = prev
+		// The previous run of the same program: by its program ID, which a
+		// scheduled run shares though its workflow ID has the time added,
+		// or, for records from before that trailer, by workflow ID; the
+		// nearer of the two (review 30).
+		byWF, okW, _ := s.Store.FindByTrailer(ctx, parents[0], loom.TrailerWorkflow, wf)
+		var byProg warp.ID
+		okP := false
+		if id, err := loom.WorkflowID(ctx, loom.RunInput{Program: rec.Program, Plan: rec.Plan, Ref: ref}); err == nil {
+			byProg, okP, _ = s.Store.FindByTrailer(ctx, parents[0], loom.TrailerProgram, id)
+		}
+		switch {
+		case okW && okP && byWF != byProg:
+			// byWF is the nearer unless it's an ancestor of byProg.
+			if older, ok, _ := s.Store.FindByTrailer(ctx, byProg, loom.TrailerWorkflow, wf); ok && older == byWF {
+				rec.Previous = byProg
+			} else {
+				rec.Previous = byWF
+			}
+		case okW:
+			rec.Previous = byWF
+		case okP:
+			rec.Previous = byProg
 		}
 	}
 	if rec.Files, rec.MoreFiles, err = s.stepFiles(ctx, tree, rec.Previous); err != nil {

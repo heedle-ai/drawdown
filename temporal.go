@@ -166,7 +166,7 @@ func (t TemporalClient) CreateSchedule(ctx context.Context, name string, in loom
 
 // Schedules lists loom's schedules.
 func (t TemporalClient) Schedules(ctx context.Context) ([]loom.Schedule, error) {
-	return loom.Schedules(ctx, t.Client)
+	return loom.Schedules(ctx, t.Client, t.Queue)
 }
 
 // ScheduleAction pauses, resumes, deletes or runs a schedule now.
