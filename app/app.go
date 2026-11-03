@@ -122,7 +122,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if _, err := os.Stat(*connectorsFile); *connectorsFile != "" && err != nil {
 			log.Printf("connectors: %s isn't there yet, so no connectors until it is", *connectorsFile)
 		}
-		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors, Vault: vault,
+		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors, Vault: &drawdown.OAuthVault{Keys: vault},
 			LoadConnectors: loadConnectors}
 		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
 			return err

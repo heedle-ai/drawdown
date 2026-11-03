@@ -780,6 +780,22 @@ function AddConnector({ onDone, taken }) {
   const [name, setName] = useState("");
   const [token, setToken] = useState("");
   const [done, setDone] = useState("");
+  const [waiting, setWaiting] = useState("");
+  // While a sign-in is open in another tab, look for the connector it adds.
+  useEffect(() => {
+    if (!waiting) return;
+    let live = true, timer = null;
+    const until = Date.now() + 10 * 60 * 1000;
+    const look = async () => {
+      const r = await api("/api/connectors");
+      if (!live) return;
+      const v = r.ok && DD.asConnectors(r.data);
+      if (v && v.connectors.some((c) => c.name === waiting)) { setDone(waiting); setWaiting(""); setPick(null); onDone(); return; }
+      if (Date.now() < until) timer = setTimeout(look, 2000); else { setWaiting(""); setErr("The sign-in didn't finish in 10 minutes. Try again."); }
+    };
+    timer = setTimeout(look, 2000);
+    return () => { live = false; clearTimeout(timer); };
+  }, [waiting]);
   const find = async (cursor) => {
     setBusy(true); setErr(""); setDone("");
     const r = await api("/api/connectors/catalog", { search, cursor: cursor || "" });
@@ -790,6 +806,17 @@ function AddConnector({ onDone, taken }) {
     setPage((old) => (cursor && old ? { servers: [...old.servers, ...p.servers], next: p.next } : p));
   };
   const choose = (e) => { setPick(e); setName(DD.freeName(e.suggest, taken)); setToken(""); setErr(""); };
+  const signIn = async () => {
+    setBusy(true); setErr("");
+    const r = await api("/api/connectors/connect", { name, url: pick.url });
+    setBusy(false);
+    if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
+    if (r.data.signIn === false) { add(); return; } // it needs no sign-in
+    const u = DD.signInURL(r.data.authorize);
+    if (!u) { setErr("The sign-in page's address wasn't https://."); return; }
+    window.open(u, "_blank", "noopener,noreferrer");
+    setWaiting(name);
+  };
   const add = async () => {
     setBusy(true); setErr("");
     const r = await api("/api/connectors/add", { name, url: pick.url, token });
@@ -813,11 +840,15 @@ function AddConnector({ onDone, taken }) {
           <p><strong>${pick.title || pick.name}</strong> <span class="mono muted">${pick.url}</span></p>
           <div class="row">
             <label>Connector name<input type="text" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
-            <label>Access token${pick.token ? "" : " (if it signs you in)"}<input type="password" autocomplete="off" value=${token} onInput=${(e) => setToken(e.target.value)} /></label>
+            <label>Or paste an access token from its settings<input type="password" autocomplete="off" value=${token} onInput=${(e) => setToken(e.target.value)} /></label>
           </div>
+          ${waiting ? html`<p role="status">Finish signing in to <strong>${pick.title || pick.name}</strong> in the new tab; this page picks it up when you're done.</p>` : html`
           <div class="row">
-            <button class="primary" type="button" disabled=${busy || !name || (pick.token && !token)} onClick=${add}>${busy ? "Adding…" : "Add " + name}</button>
+            <button class="primary" type="button" disabled=${busy || !name || !!token} onClick=${signIn}>${busy ? "Working…" : "Sign in and add " + name}</button>
+            <button type="button" disabled=${busy || !name || (pick.token && !token)} onClick=${add}>${token ? "Add with this token" : "Add without signing in"}</button>
             <button type="button" onClick=${() => setPick(null)}>Cancel</button>
+          </div>`}
+          <div class="row">
             <span class="muted">The address goes to your connectors file${token ? html`; the token to your keychain as <span class="mono">${DD.tokenName(name)}</span>` : ""}. Add it only if you trust its publisher: steps granted it send it what they're given.</span>
           </div>
         </div>`}
@@ -876,6 +907,7 @@ function ConnectorsPage() {
         <div class="pills">
           <strong class="mono">${c.name}</strong>
           <${Pill} cls="k-other" plain>${c.url ? "remote" : "local container"}<//>
+          ${c.signedIn && html`<${Pill} cls="s-Completed">signed in; heedle refreshes its token<//>`}
           ${(c.writes || []).length > 0 && html`<${Pill} cls=${c.approve ? "s-Running" : "k-other"} plain>${c.writes.length} write${c.writes.length === 1 ? "" : "s"}${c.approve ? ", each waits for your approval" : ""}<//>`}
           <${RemoveConnector} name=${c.name} onDone=${refresh} />
         </div>
