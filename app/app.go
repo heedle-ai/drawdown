@@ -99,21 +99,31 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if _, err := pirn.LookupSecret(ctx, vault, "ANTHROPIC_API_KEY"); err != nil {
 			log.Printf("ANTHROPIC_API_KEY: %v; ask and agent steps will fail until the worker can read it", err)
 		}
-		claude := pirn.Claude{Model: *askModel, KeyFrom: func(ctx context.Context) (string, error) {
-			return pirn.LookupSecret(ctx, vault, "ANTHROPIC_API_KEY")
-		}}
+		// Each keeps what it last read if a read fails: a keychain locked
+		// for a moment, or a connectors file mid-save (review 27).
+		key := pirn.LastGood(func() (string, error) {
+			return pirn.LookupSecret(context.Background(), vault, "ANTHROPIC_API_KEY")
+		})
+		loadConnectors := pirn.LastGood(func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) })
+		claude := pirn.Claude{Model: *askModel, KeyFrom: func(context.Context) (string, error) { return key() }}
 		if err := pirn.Register(reg, w, claude); err != nil {
 			return err
 		}
 		if err := bobbin.RegisterImage(reg, w, bobbin.Runner{}, imageRegistryFor(*imageRegistry)); err != nil {
 			return err
 		}
-		connectors, err := readConnectors(*connectorsFile)
+		// A bad file doesn't stop the UI that shows what's wrong with it
+		// (review 27); steps fail until it's fixed.
+		connectors, err := loadConnectors()
 		if err != nil {
-			return err
+			log.Printf("connectors: %v", err)
+			connectors = nil
+		}
+		if _, err := os.Stat(*connectorsFile); *connectorsFile != "" && err != nil {
+			log.Printf("connectors: %s isn't there yet, so no connectors until it is", *connectorsFile)
 		}
 		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors, Vault: vault,
-			LoadConnectors: func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) }}
+			LoadConnectors: loadConnectors}
 		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
 			return err
 		}

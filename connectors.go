@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"sync"
 
 	"github.com/heedle-ai/pirn"
 )
@@ -83,15 +84,30 @@ func (s *Server) connectors(w http.ResponseWriter, r *http.Request) {
 	if s.Connectors != nil {
 		cs, err := s.Connectors()
 		if err != nil {
-			resp["error"] = err.Error()
+			// A file that fails its check offers no connector: show why,
+			// not what the worker won't use (review 27).
+			resp["error"], cs = err.Error(), nil
 		}
+		var wg sync.WaitGroup
 		for _, c := range cs {
 			v := connectorView{Name: c.Name, URL: c.URL, Image: c.Image, Command: c.Command, Tools: c.Tools, Writes: c.Writes, Approve: c.Approve, Secrets: []secretView{}}
 			for _, n := range secretNames(c) {
-				v.Secrets = append(v.Secrets, s.secretView(r.Context(), n))
+				v.Secrets = append(v.Secrets, secretView{Name: n})
 			}
 			views = append(views, v)
 		}
+		// Each key's place is looked up at once, not one after another: a
+		// keychain that is slow to answer delays the page once (review 27).
+		for i := range views {
+			for j := range views[i].Secrets {
+				wg.Add(1)
+				go func(sv *secretView) {
+					defer wg.Done()
+					*sv = s.secretView(r.Context(), sv.Name)
+				}(&views[i].Secrets[j])
+			}
+		}
+		wg.Wait()
 	}
 	resp["connectors"] = views
 	writeJSON(w, http.StatusOK, resp)
@@ -108,8 +124,8 @@ type secretRequest struct {
 // Anthropic key, and never through Temporal, which would keep it in the
 // run's history. The value is never written back, logged or kept.
 func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err != nil || !net.ParseIP(host).IsLoopback() {
-		writeJSON(w, http.StatusForbidden, apiError{Error: "keys can be set only from the machine heedle runs on"})
+	if !fromThisMachine(r, s.Hosts) {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "keys can be set only from the machine heedle runs on, at localhost, not through a proxy"})
 		return
 	}
 	if s.Secrets == nil {
@@ -120,12 +136,17 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 	if !readJSONUpTo(w, r, &req, 16<<10) {
 		return
 	}
+	deleting := r.URL.Path == "/api/secrets/delete"
+	if deleting && req.Value != "" {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "a delete takes only the key's name"})
+		return
+	}
 	if !s.secretKnown(req.Name) {
 		writeJSON(w, http.StatusBadRequest, apiError{Error: "no connector uses a key named " + req.Name})
 		return
 	}
 	var err error
-	if r.URL.Path == "/api/secrets/delete" {
+	if deleting {
 		err = s.Secrets.Delete(r.Context(), req.Name)
 	} else {
 		err = s.Secrets.Store(r.Context(), req.Name, req.Value)
@@ -146,11 +167,32 @@ func (s *Server) secretKnown(name string) bool {
 	if s.Connectors == nil {
 		return false
 	}
-	cs, _ := s.Connectors()
+	cs, err := s.Connectors()
+	if err != nil {
+		return false // a file that fails its check names no key (review 27)
+	}
 	for _, c := range cs {
 		if slices.Contains(secretNames(c), name) {
 			return true
 		}
 	}
 	return false
+}
+
+// fromThisMachine reports whether r came straight from this machine: a
+// loopback address, with no proxy's forwarding headers, to a server that
+// answers no other host names. A reverse proxy on this machine (one that
+// -hosts would name) makes every request look local, so then keys can be
+// set only with heedle secret set (review 27).
+func fromThisMachine(r *http.Request, hosts []string) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || !net.ParseIP(host).IsLoopback() || len(hosts) > 0 {
+		return false
+	}
+	for _, h := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Real-Ip"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	return true
 }

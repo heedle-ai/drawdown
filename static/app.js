@@ -786,7 +786,8 @@ function ConnectorsPage() {
       <div class="pills"><strong>Claude</strong><${Pill} cls="k-agent" plain>ask and agent steps<//></div>
       <${KeyRow} k=${v.anthropic} onDone=${refresh} />
     </div>
-    ${v.error && html`<p class="error mono" role="alert">${v.file}: ${v.error}</p>`}
+    ${v.error && html`<p class="error mono" role="alert">${v.file}: ${v.error}. No connector is used until it's fixed.</p>`}
+    ${v.unreadable > 0 && html`<p class="error" role="alert">${v.unreadable} connector${v.unreadable === 1 ? "" : "s"} couldn't be shown.</p>`}
     ${v.connectors.length === 0 && !v.error && html`<div class="panel muted" style=${{ marginTop: "12px" }}>
       No connectors yet. They're listed in <span class="mono">${v.file || "the worker's -connectors file"}</span>, which the worker reads before every step:
       <pre>${'{"connectors": [\n  {"name": "maps", "url": "<the MCP server\'s address>", "tokenEnv": "MAPS_KEY"}\n]}'}</pre></div>`}
