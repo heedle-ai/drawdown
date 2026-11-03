@@ -789,7 +789,7 @@ function AddConnector({ onDone, taken }) {
     if (!p) { setErr("The registry's answer wasn't understood."); return; }
     setPage((old) => (cursor && old ? { servers: [...old.servers, ...p.servers], next: p.next } : p));
   };
-  const choose = (e) => { setPick(e); setName(taken.includes(e.suggest) ? e.suggest + "-2" : e.suggest); setToken(""); setErr(""); };
+  const choose = (e) => { setPick(e); setName(DD.freeName(e.suggest, taken)); setToken(""); setErr(""); };
   const add = async () => {
     setBusy(true); setErr("");
     const r = await api("/api/connectors/add", { name, url: pick.url, token });
@@ -818,7 +818,7 @@ function AddConnector({ onDone, taken }) {
           <div class="row">
             <button class="primary" type="button" disabled=${busy || !name || (pick.token && !token)} onClick=${add}>${busy ? "Adding…" : "Add " + name}</button>
             <button type="button" onClick=${() => setPick(null)}>Cancel</button>
-            <span class="muted">The token goes to your keychain; the address to your connectors file.</span>
+            <span class="muted">The address goes to your connectors file${token ? html`; the token to your keychain as <span class="mono">${DD.tokenName(name)}</span>` : ""}. Add it only if you trust its publisher: steps granted it send it what they're given.</span>
           </div>
         </div>`}
       ${page && page.servers.length === 0 && html`<p class="muted">Nothing found.</p>`}
@@ -831,6 +831,7 @@ function AddConnector({ onDone, taken }) {
               ${e.token && html` <${Pill} cls="k-other" plain>needs a token<//>`}</div>`
             : html`<div class="muted">${e.why}</div>`}
         </li>`)}</ul>`}
+      ${page && page.hidden > 0 && html`<p class="muted">${page.hidden} more couldn't be shown safely.</p>`}
       ${page && page.next && html`<button type="button" disabled=${busy} onClick=${() => find(page.next)}>More</button>`}
     </div>`;
 }

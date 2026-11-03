@@ -558,8 +558,22 @@ const DD = (() => {
     const servers = v.servers.filter((e) => e && typeof e === "object" && str(e.name) && opt(e.title, str) && str(e.description) &&
       str(e.suggest) && opt(e.why, str) && opt(e.token, bool) && opt(e.link, (l) => l === "" || https(l)) &&
       (e.fit === "ready" ? https(e.url) : e.fit === "no" && str(e.why)));
-    return { servers, next: v.next || "" };
+    return { servers, next: v.next || "", hidden: v.servers.length - servers.length };
   }
+
+  // freeName is a connector name like want that none of taken has, within
+  // the 24 characters a name may have (review 28).
+  function freeName(want, taken) {
+    if (!taken.includes(want)) return want;
+    for (let i = 2; ; i++) {
+      const n = want.slice(0, 24 - String(i).length - 1).replace(/-+$/, "") + "-" + i;
+      if (!taken.includes(n)) return n;
+    }
+  }
+
+  // tokenName is the keychain name the server keeps a connector's token
+  // under (drawdown.TokenName).
+  const tokenName = (name) => "HEEDLE_CONNECTOR_" + name.toUpperCase().replace(/-/g, "_") + "_TOKEN";
 
   // keysMissing counts the keys, the Anthropic key's included, that are
   // found nowhere.
@@ -567,6 +581,6 @@ const DD = (() => {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName };
 })();
 if (typeof module !== "undefined") module.exports = DD;
