@@ -534,14 +534,19 @@ const DD = (() => {
   const FROM = ["environment", "keychain", "missing"];
   const isKey = (k) => k && str(k.name) && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(k.name) && FROM.includes(k.from) && opt(k.error, str);
 
-  // asConnectors is the Connectors page's data if it's well formed: each
-  // connector a name with its keys, each key a name and where it's found;
-  // else null. A value is never sent, so none is read.
+  const isConnector = (c) => c && typeof c === "object" && str(c.name) && opt(c.url, str) && opt(c.image, str) && strs(c.command) &&
+    strs(c.tools) && strs(c.writes) && opt(c.approve, bool) && objs(c.secrets, isKey);
+
+  // asConnectors is the Connectors page's data if its frame is well formed
+  // (the file, Claude's key, a list), else null. Each connector a name with
+  // its keys, each key a name and where it's found, is kept; any other is
+  // left out and counted in unreadable, so one bad entry never hides the
+  // rest, or the form for Claude's key (review 27). A value is never sent,
+  // so none is read.
   function asConnectors(v) {
-    if (!v || typeof v !== "object" || !str(v.file) || !isKey(v.anthropic) || !opt(v.error, str)) return null;
-    if (!objs(v.connectors, (c) => str(c.name) && opt(c.url, str) && opt(c.image, str) && strs(c.command) && strs(c.tools) &&
-      strs(c.writes) && opt(c.approve, bool) && objs(c.secrets, isKey))) return null;
-    return v;
+    if (!v || typeof v !== "object" || !str(v.file) || !isKey(v.anthropic) || !opt(v.error, str) || !Array.isArray(v.connectors)) return null;
+    const good = v.connectors.filter(isConnector);
+    return { ...v, connectors: good, unreadable: v.connectors.length - good.length };
   }
 
   // keysMissing counts the keys, the Anthropic key's included, that are

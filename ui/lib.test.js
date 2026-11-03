@@ -344,12 +344,17 @@ test("the Connectors page reads only well-formed data, and never a value", () =>
   const good = { file: "/h/connectors.json", keychain: true, anthropic: { name: "ANTHROPIC_API_KEY", from: "keychain" },
     connectors: [{ name: "maps", url: "https://maps.example/mcp", secrets: [{ name: "MAPS_KEY", from: "missing" }] },
       { name: "search", image: "i@sha256:aa", command: ["srv"], writes: ["post"], approve: true, secrets: [{ name: "K", from: "environment" }, { name: "L", from: "missing", error: "locked" }] }] };
-  assert.equal(DD.asConnectors(good), good);
-  assert.equal(DD.keysMissing(good), 2);
-  for (const bad of [null, {}, { ...good, connectors: "x" }, { ...good, anthropic: { name: "ANTHROPIC_API_KEY", from: "somewhere" } },
-    { ...good, connectors: [{ name: "m", secrets: [{ name: "bad name", from: "keychain" }] }] },
-    { ...good, connectors: [{ name: "m", secrets: [{ name: "K", from: "keychain" }], tools: [1] }] },
-    { ...good, connectors: [{ name: 7, secrets: [] }] }]) {
+  assert.deepEqual(DD.asConnectors(good), { ...good, unreadable: 0 });
+  assert.equal(DD.keysMissing(DD.asConnectors(good)), 2);
+  for (const bad of [null, {}, { ...good, connectors: "x" }, { ...good, anthropic: { name: "ANTHROPIC_API_KEY", from: "somewhere" } }]) {
     assert.equal(DD.asConnectors(bad), null, JSON.stringify(bad));
+  }
+  // One bad entry is left out and counted; the rest, and Claude's key, stay (review 27).
+  for (const entry of [{ name: "m", secrets: [{ name: "bad name", from: "keychain" }] }, { name: "m", secrets: [{ name: "K", from: "keychain" }], tools: [1] },
+    { name: 7, secrets: [] }, null, "x"]) {
+    const v = DD.asConnectors({ ...good, error: "connector \"m\": bad", connectors: [...good.connectors, entry] });
+    assert.equal(v.connectors.length, 2, JSON.stringify(entry));
+    assert.equal(v.unreadable, 1);
+    assert.equal(v.anthropic.from, "keychain");
   }
 });
