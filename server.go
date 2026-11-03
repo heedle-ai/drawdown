@@ -146,8 +146,14 @@ type Server struct {
 	ConnectorsFile string
 	// Secrets, if set, is the keychain the Connectors page keeps keys in.
 	Secrets Secrets
+	// MCPRegistry is the MCP Registry the page adds connectors from
+	// (DefaultMCPRegistry if empty); RegistryClient, if set, reaches it.
+	MCPRegistry    string
+	RegistryClient *http.Client
 
 	programs sync.Map // tree ID -> program text; trees never change
+
+	connectorsMu sync.Mutex // one change to the connectors file at a time
 
 	mu          sync.Mutex
 	commands    *registry.Registry // Commands with the skills, as of commandsKey
@@ -186,6 +192,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/connectors", s.connectors)
 	mux.HandleFunc("POST /api/secrets", s.setSecret)
 	mux.HandleFunc("POST /api/secrets/delete", s.setSecret)
+	mux.HandleFunc("POST /api/connectors/catalog", s.connectorCatalog)
+	mux.HandleFunc("POST /api/connectors/add", s.addConnector)
+	mux.HandleFunc("POST /api/connectors/remove", s.addConnector)
 	return s.guard(mux)
 }
 
