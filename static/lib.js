@@ -628,6 +628,13 @@ const DD = (() => {
     });
   }
 
+  // stoppedBy is the steps that ended a run without finishing, each with
+  // what Temporal last said went wrong: failed or timed out, with a
+  // failure. A step retried and then completed isn't one.
+  function stoppedBy(steps) {
+    return (Array.isArray(steps) ? steps : []).filter((s) => s && (s.status === "Failed" || s.status === "TimedOut") && str(s.failure));
+  }
+
   // === Schedules ============================================================
 
   const RUN_ID = /^[A-Za-z0-9._:\-]{1,300}$/;
@@ -665,6 +672,6 @@ const DD = (() => {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy };
 })();
 if (typeof module !== "undefined") module.exports = DD;

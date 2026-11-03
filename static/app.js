@@ -1679,7 +1679,7 @@ function RunDetail({ workflow, run, history: ref }) {
         <${StatusPill} status=${status} big />
         ${ex && real(ex.start) && html`<${Pill} cls="k-other" plain>started ${ago(ex.start)}<//>`}
         ${ex && took(ex.start, ex.close) && html`<${Pill} cls="k-other" plain>took ${took(ex.start, ex.close)}<//>`}
-        ${stepList.length > 0 && html`<${Pill} cls="k-other" plain>${stepList.length} steps<//>`}
+        ${stepList.length > 0 && html`<${Pill} cls="k-other" plain>${stepList.length} step${stepList.length === 1 ? "" : "s"}<//>`}
         ${retried > 0 && html`<${Pill} cls="s-Failed">${retried} retried<//>`}
         ${rec && html`<${Tip} content=${html`<${Card} title="Git record"><${Field} k="Commit"><span class="mono">${rec.commit}</span><//><${Field} k="Before it"><span class="mono">${rec.parent || "none"}</span><//><${Field} k="Same program before"><span class="mono">${rec.previous || "none"}</span><//><//>`}
           color=${css("--record")}><${Pill} cls="k-record" mono>${short(rec.commit)}<//><//>`}
@@ -1702,6 +1702,14 @@ function RunDetail({ workflow, run, history: ref }) {
       ${stepList.length > 0 ? html`<${Timeline} steps=${stepList} plan=${plan} outputs=${rec && rec.outputs} running=${status === "Running"} wf=${workflow} run=${run} />`
         : html`<p class="muted">${steps && steps.temporalError ? `Temporal: ${steps.temporalError}` : "No steps yet."}</p>`}
     </div>
+    ${!rec && DD.stoppedBy(stepList).length > 0 && html`
+      <h2>What went wrong</h2>
+      <p class="lede">A run that fails leaves no record, so here is what Temporal says stopped it.</p>
+      ${DD.stoppedBy(stepList).map((s) => html`<div class="panel went-wrong" key=${s.node}>
+        <div class="pills"><span class="mono">${s.node}</span><${Pill} cls="s-Failed">${s.status === "TimedOut" ? "timed out" : "failed"}${s.attempts > 1 ? `, attempt ${s.attempts}` : ""}<//></div>
+        <p class="mono cg-wrap">${s.failure}</p>
+        <${ConnectPrompt} failure=${s.failure} />
+      </div>`)}`}
     ${!rec && html`<p class="muted">${status === "Running" ? "Running… the record appears when the run finishes."
       : status === "Completed" ? "Recording…" : "No record: only completed runs are recorded."}</p>`}
     ${rec && html`
