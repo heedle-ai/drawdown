@@ -464,17 +464,22 @@ function IconLink({ href, icon, label, external }) {
 
 // useComposition holds what the graph shows open and folded, so the page
 // and its full-screen view stay in step.
+// Both belong to one drawing: when the program changes shape (an edit in
+// the editor), steps and groups are named afresh, so both start empty.
 function useComposition(plan, shape) {
   const { shape: sh, exact } = DD.composition(shape, plan);
-  const [open, setOpen] = useState(() => new Set());
-  const [folded, setFolded] = useState(() => new Set());
-  const flip = (set, setter) => (k) => setter((s) => { const t = new Set(s); t.has(k) ? t.delete(k) : t.add(k); return t; });
+  const sig = JSON.stringify([sh, exact]);
+  const [openAt, setOpen] = useState({ sig, set: new Set() });
+  const [foldedAt, setFolded] = useState({ sig, set: new Set() });
+  const now = (at) => (at.sig === sig ? at.set : new Set());
+  const put = (setter, set) => setter({ sig, set });
+  const flip = (at, setter) => (k) => { const t = new Set(now(at)); t.has(k) ? t.delete(k) : t.add(k); put(setter, t); };
   return {
-    sh, exact, open, folded,
-    toggle: flip(open, setOpen), fold: flip(folded, setFolded),
-    expandAll: () => { setOpen(new Set(sh ? DD.stepsOf(sh) : [])); setFolded(new Set()); },
-    collapseAll: () => { setOpen(new Set()); setFolded(new Set()); },
-    foldAll: () => setFolded(new Set(DD.groupKeys(sh).filter((k) => k !== "0"))),
+    sh, exact, open: now(openAt), folded: now(foldedAt),
+    toggle: flip(openAt, setOpen), fold: flip(foldedAt, setFolded),
+    expandAll: () => { put(setOpen, new Set(sh ? DD.stepsOf(sh) : [])); put(setFolded, new Set()); },
+    collapseAll: () => { put(setOpen, new Set()); put(setFolded, new Set()); },
+    foldAll: () => put(setFolded, new Set(DD.groupKeys(sh).filter((k) => k !== "0"))),
   };
 }
 
@@ -521,31 +526,29 @@ function ShapeView({ sh, path, ctx, top }) {
   if (sh.kind === "step") return html`<${StepCard} id=${sh.node} ctx=${ctx} />`;
   const op = OPS[sh.kind];
   const ids = DD.stepsOf(sh);
-  if (ctx.folded.has(path)) {
-    const t = DD.tally(ids, (id) => ctx.stepOf.get(id) && ctx.stepOf.get(id).status);
-    return html`<button type="button" class=${"cg-folded cg-" + sh.kind} aria-expanded="false" onClick=${() => ctx.fold(path)}
-      aria-label=${`Unfold ${ids.length} steps ${op.name}`}>
-      <span class="cg-sym">${op.sym}</span>
-      <span>${ids.length} steps ${op.name}</span>
-      <span class="cg-ids mono">${ids.slice(0, 6).join(" ")}${ids.length > 6 ? " …" : ""}</span>
-      ${Object.entries(t).filter(([s]) => s !== "none").map(([s, c]) => html`<${Pill} key=${s} cls=${"s-" + s}>${c} ${s.toLowerCase()}<//>`)}
-    </button>`;
-  }
+  const folded = ctx.folded.has(path);
   const parts = [];
-  sh.parts.forEach((p, i) => {
+  if (!folded) sh.parts.forEach((p, i) => {
     if (sh.kind === "pipe" && i > 0) {
       const before = sh.parts.slice(0, i).flatMap(DD.stepsOf);
       parts.push(html`<${Flow} key=${"f" + i} flows=${DD.flowsInto(ctx.plan, ctx.exact ? DD.stepsOf(sh.parts[i - 1]) : before, DD.stepsOf(p))} ctx=${ctx} />`);
     }
     parts.push(html`<${ShapeView} key=${i} sh=${p} path=${path + "." + i} ctx=${ctx} />`);
   });
+  const t = folded ? DD.tally(ids, (id) => ctx.stepOf.get(id) && ctx.stepOf.get(id).status) : {};
+  // The fold button is the same element folded or not, so it keeps focus.
   return html`
-    <div class=${"cg-group cg-" + sh.kind + (top ? " cg-top" : "")} role="group" aria-label=${`${ids.length} steps ${op.name}`}>
+    <div class=${"cg-group cg-" + sh.kind + (top ? " cg-top" : "") + (folded ? " cg-is-folded" : "")} role="group" aria-label=${`${ids.length} steps ${op.name}`}>
       ${!top && html`<div class="cg-op">
-        <button type="button" class="cg-fold" aria-expanded="true" onClick=${() => ctx.fold(path)} aria-label=${`Fold these ${ids.length} steps`} title="Fold">
-          <${Icon} d=${ICONS.fold} label="Fold" /></button>
-        <span class="cg-sym">${op.sym}</span><span class="muted">${op.name}</span></div>`}
-      <div class="cg-parts">${parts}</div>
+        <button type="button" class="cg-fold" aria-expanded=${!folded} onClick=${() => ctx.fold(path)}
+          aria-label=${`${folded ? "Unfold" : "Fold"} these ${ids.length} steps, ${op.name}`} title=${folded ? "Unfold" : "Fold"}>
+          <${Icon} d=${folded ? ICONS.unfold : ICONS.fold} label=${folded ? "Unfold" : "Fold"} /></button>
+        <span class="cg-sym">${op.sym}</span><span class="muted">${folded ? `${ids.length} steps ${op.name}` : op.name}</span></div>`}
+      ${folded ? html`<div class="cg-summary">
+          <span class="cg-ids mono">${ids.slice(0, 6).join(" ")}${ids.length > 6 ? ` and ${ids.length - 6} more` : ""}</span>
+          ${Object.entries(t).filter(([s]) => s !== "none").map(([s, c]) => html`<${Pill} key=${s} cls=${"s-" + s}>${c} ${s.toLowerCase()}<//>`)}
+        </div>`
+        : html`<div class="cg-parts">${parts}</div>`}
     </div>`;
 }
 
@@ -593,6 +596,7 @@ function StepCard({ id, ctx }) {
           <${Icon} d=${ICONS.more} label="Details" /></button>
       </div>
       ${argText && html`<div class="cg-args mono" title=${argText}>${argText}</div>`}
+      ${!ctx.exact && !open && html`<div class="cg-waits">${(n.requires || []).length ? html`waits for ${list(n.requires)}` : "waits for nothing"}</div>`}
       <div class="cg-chips">
         ${step && step.attempts > 1 && html`<${Pill} cls="s-Failed">${step.attempts} attempts<//>`}
         ${step && took(step.started, step.closed) && html`<${Pill} cls="k-other" plain>ran ${took(step.started, step.closed)}<//>`}
@@ -624,7 +628,7 @@ function StepCard({ id, ctx }) {
         ${ctx.stepHref && html`<${IconLink} href=${ctx.stepHref(id)} icon="open" label=${`Inspect ${id}: inputs, sandbox, files`} />`}
         ${sk && html`<${IconLink} href=${"#/skill/" + encodeURIComponent(sk.name) + "/" + encodeURIComponent(sk.version)} icon="skill" label=${`The skill ${sk.name} at @${sk.version.slice(0, 7)}`} />`}
         ${ctx.rec && ctx.rec.previous && html`<${IconLink} href=${"#/diff/" + encodeURIComponent(ctx.rec.previous) + "/" + encodeURIComponent(ctx.rec.commit)} icon="diff" label="What changed since this program's previous run" />`}
-        ${ctx.rec && html`<${IconLink} href=${"#/diff/" + encodeURIComponent(ctx.rec.parent || ctx.rec.commit) + "/" + encodeURIComponent(ctx.rec.commit)} icon="record" label=${`The record ${short(ctx.rec.commit)} in Git`} />`}
+        ${ctx.rec && ctx.rec.parent && html`<${IconLink} href=${"#/diff/" + encodeURIComponent(ctx.rec.parent) + "/" + encodeURIComponent(ctx.rec.commit)} icon="record" label=${`The record ${short(ctx.rec.commit)} in Git`} />`}
         ${ctx.temporalLink && html`<${IconLink} href=${ctx.temporalLink} icon="temporal" label="The run's event history in Temporal" external />`}
       </nav>`}
     </article>`;
@@ -638,6 +642,7 @@ function Viewer({ title, info, onClose, children }) {
   const drag = useRef(null);
   const closeRef = useRef(null);
   const stage = useRef(null);
+  const dialog = useRef(null);
   const zoom = (f, cx, cy) => setView((v) => {
     const k = Math.min(4, Math.max(0.25, v.k * f));
     const r = stage.current.getBoundingClientRect();
@@ -649,7 +654,14 @@ function Viewer({ title, info, onClose, children }) {
   useEffect(() => {
     const key = (e) => {
       if (e.key === "Escape") onClose();
-      else if ((e.key === "+" || e.key === "=") && !e.target.closest("input, textarea")) zoomRef.current(1.2);
+      else if (e.key === "Tab") {
+        // A modal keeps focus inside it.
+        const all = [...dialog.current.querySelectorAll("a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+        const first = all[0], last = all[all.length - 1];
+        if (!dialog.current.contains(document.activeElement)) { e.preventDefault(); first && first.focus(); }
+        else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      } else if ((e.key === "+" || e.key === "=") && !e.target.closest("input, textarea")) zoomRef.current(1.2);
       else if (e.key === "-" && !e.target.closest("input, textarea")) zoomRef.current(1 / 1.2);
     };
     addEventListener("keydown", key);
@@ -662,7 +674,7 @@ function Viewer({ title, info, onClose, children }) {
     return () => { removeEventListener("keydown", key); box.removeEventListener("wheel", wheel); tip.hide(); };
   }, []);
   return html`
-    <div class="viewer" role="dialog" aria-modal="true" aria-label=${title}>
+    <div class="viewer" role="dialog" aria-modal="true" aria-label=${title} ref=${dialog}>
       <div class="viewer-bar">
         <strong>${title}</strong>
         <span class="muted">${info}</span>
@@ -1084,6 +1096,12 @@ function NewRun({ info, history: ref }) {
 
   const err = result && result.data && result.data.error ? result.data : null;
   const plan = result && result.ok && result.data.plan ? result.data.plan : null;
+  // The last program that compiled stays drawn while a typo is fixed, so
+  // what was folded or opened in it isn't lost.
+  const lastGood = useRef(null);
+  if (plan) lastGood.current = { plan, shape: result.data.shape };
+  if (!program.trim()) lastGood.current = null;
+  const shown = plan ? lastGood.current : err ? lastGood.current : null;
   const kinds = plan ? [...new Set((plan.nodes || []).map((n) => kindOf(n.activity)))] : [];
   return html`
     <${Describe} program=${program} onProgram=${setProgram} />
@@ -1112,8 +1130,8 @@ function NewRun({ info, history: ref }) {
           <${Pill} cls="s-Completed">compiles<//>
           <${Pill} cls="k-other" plain>${plan.nodes.length} step${plan.nodes.length === 1 ? "" : "s"}<//>
           ${kinds.map((k) => html`<${KindPill} key=${k} kind=${k} />`)}
-        </div>
-        <${CompositionGraph} plan=${plan} shape=${result && result.ok ? result.data.shape : null} />`}
+        </div>`}
+      ${shown && html`<div class=${plan ? "" : "cg-stale"}><${CompositionGraph} plan=${shown.plan} shape=${shown.shape} /></div>`}
     </div>`;
 }
 

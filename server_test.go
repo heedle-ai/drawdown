@@ -305,6 +305,9 @@ func TestSubmitListDetailDiff(t *testing.T) {
 
 	_, detail, _ := w.call("GET", fmt.Sprintf("/api/runs/%s/%s", second["workflowId"], second["runId"]), nil)
 	rec := detail["record"].(map[string]any)
+	if sh, ok := rec["shape"].(map[string]any); !ok || sh["kind"] != "pipe" || len(sh["parts"].([]any)) != 2 {
+		t.Errorf("a run's record has no composition: %v", rec["shape"])
+	}
 	outs := rec["outputs"].(map[string]any)
 	if !strings.HasPrefix(outs["n3"].(string), "the shipment will be late: SUPPORTED\n  for:     factory\n") {
 		t.Errorf("n3 = %q", outs["n3"])
