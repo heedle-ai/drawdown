@@ -30,6 +30,10 @@ type fakeProvider struct {
 	refreshes  int
 	open       bool // the MCP server needs no token
 	exchangeOK bool
+	mixUp      bool // its metadata puts the token endpoint elsewhere
+	redirect   bool // its registration endpoint redirects
+	noExpiry   bool // its tokens say nothing of when they expire
+	down       bool // its token endpoint fails
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -50,11 +54,19 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 	})
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server/as", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		token := base() + "/as/token"
+		if p.mixUp {
+			token = "https://collector.example/token"
+		}
 		json.NewEncoder(w).Encode(map[string]any{"issuer": base() + "/as", "authorization_endpoint": base() + "/as/authorize",
-			"token_endpoint": base() + "/as/token", "registration_endpoint": base() + "/as/register",
+			"token_endpoint": token, "registration_endpoint": base() + "/as/register",
 			"code_challenge_methods_supported": []string{"S256"}, "response_types_supported": []string{"code"}})
 	})
 	mux.HandleFunc("POST /as/register", func(w http.ResponseWriter, r *http.Request) {
+		if p.redirect {
+			http.Redirect(w, r, "http://127.0.0.1:1/internal", http.StatusTemporaryRedirect)
+			return
+		}
 		var m struct {
 			RedirectURIs []string `json:"redirect_uris"`
 		}
@@ -90,9 +102,18 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 				w.Write([]byte(`{"error":"invalid_grant"}`))
 				return
 			}
+			if p.noExpiry {
+				w.Write([]byte(`{"access_token":"good-access","refresh_token":"rt-1","token_type":"Bearer"}`))
+				return
+			}
 			w.Write([]byte(`{"access_token":"good-access","refresh_token":"rt-1","expires_in":3600,"token_type":"Bearer"}`))
 		case "refresh_token":
-			if r.Form.Get("refresh_token") != "rt-1" || r.Form.Get("client_id") != "cid-1" {
+			if p.down {
+				w.WriteHeader(503)
+				return
+			}
+			// Every token request names the MCP server (RFC 8707; review 29).
+			if r.Form.Get("refresh_token") != "rt-1" || r.Form.Get("client_id") != "cid-1" || r.Form.Get("resource") != base()+"/mcp" {
 				w.WriteHeader(400)
 				w.Write([]byte(`{"error":"invalid_grant"}`))
 				return
@@ -233,5 +254,91 @@ func TestInv_SignInKeepsTokensInTheKeychain(t *testing.T) {
 	p.open = false
 	if w := do("POST", "http://heedle.lan:8090/api/connectors/connect", connect, here); w.Code == 200 {
 		t.Errorf("a callback to another host: %d", w.Code)
+	}
+}
+
+// TestInv_SignInCantBeMixedUp: heedle signs in only where every endpoint
+// is at the issuer's origin, follows no redirect while finding it, takes a
+// callback only within 10 minutes, never lets a sign-in's leftover refresh
+// a token pasted later, and tells a refused refresh (sign in again) from
+// one that failed for now; a token that says nothing of when it expires
+// is refreshed within the hour. (Review 29.)
+func TestInv_SignInCantBeMixedUp(t *testing.T) {
+	p := newFakeProvider(t)
+	file := filepath.Join(t.TempDir(), "connectors.json")
+	keys := memSecrets{}
+	read := func() (pirn.Connectors, error) {
+		f, err := os.Open(file)
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		return pirn.ReadConnectors(f)
+	}
+	s := &Server{ConnectorsFile: file, Connectors: read, Secrets: keys, OAuthClient: p.srv.Client()}
+	const here = "127.0.0.1:5000"
+	connect := `{"name":"tracker","url":"` + p.srv.URL + `/mcp"}`
+	p.mixUp = true
+	if code, m, _ := s.call(t, "POST", "/api/connectors/connect", connect, here); code != http.StatusBadGateway || !strings.Contains(m["error"].(string), "aren't all at") {
+		t.Errorf("a token endpoint elsewhere: %d %v", code, m)
+	}
+	p.mixUp, p.redirect = false, true
+	if code, _, _ := s.call(t, "POST", "/api/connectors/connect", connect, here); code != http.StatusBadGateway {
+		t.Errorf("a registration that redirects: %d", code)
+	}
+	p.redirect = false
+	code, m, _ := s.call(t, "POST", "/api/connectors/connect", connect, here)
+	if code != 200 || m["at"] == "" {
+		t.Fatalf("connect: %d %v", code, m)
+	}
+	// Older than 10 minutes: refused.
+	s.signInsMu.Lock()
+	var state string
+	for k, v := range s.signIns {
+		v.expires = time.Now().Add(-time.Second)
+		s.signIns[k], state = v, k
+	}
+	s.signInsMu.Unlock()
+	r := httptest.NewRequest("GET", "http://127.0.0.1:8090/oauth/callback?code=code-1&state="+url.QueryEscape(state), nil)
+	r.RemoteAddr = here
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("a stale sign-in: %d", w.Code)
+	}
+	// A sign-in's leftover blocks pasting a token under its name...
+	keys["HEEDLE_CONNECTOR_TRACKER_OAUTH"] = grant{ClientID: "c", TokenURL: p.srv.URL + "/as/token", Refresh: "rt-1"}.encode()
+	if code, _, _ := s.call(t, "POST", "/api/connectors/add", `{"name":"tracker","url":"https://new.example/mcp","token":"pasted"}`, here); code != http.StatusConflict {
+		t.Errorf("a token pasted over a leftover sign-in: %d", code)
+	}
+	// ...and a token pasted over a signed-in one ends its refreshing.
+	delete(keys, "HEEDLE_CONNECTOR_TRACKER_OAUTH")
+	os.WriteFile(file, []byte(`{"connectors":[{"name":"tracker","url":"https://t.example/mcp","tokenEnv":"HEEDLE_CONNECTOR_TRACKER_TOKEN"}]}`), 0o600)
+	keys["HEEDLE_CONNECTOR_TRACKER_OAUTH"] = "x"
+	if code, _, _ := s.call(t, "POST", "/api/secrets", `{"name":"HEEDLE_CONNECTOR_TRACKER_TOKEN","value":"pasted"}`, here); code != 200 || keys["HEEDLE_CONNECTOR_TRACKER_OAUTH"] != "" {
+		t.Errorf("a token pasted over a sign-in: %d %v", code, keys)
+	}
+
+	// Refreshing: for now vs refused, and a token with no expiry.
+	v := &OAuthVault{Keys: keys, Client: p.srv.Client()}
+	ctx := context.Background()
+	g := grant{ClientID: "cid-1", TokenURL: p.srv.URL + "/as/token", Refresh: "rt-1", Resource: p.srv.URL + "/mcp", Expiry: time.Now().Add(-time.Minute).Unix()}
+	keys["HEEDLE_CONNECTOR_TRACKER_OAUTH"] = g.encode()
+	p.down = true
+	if _, _, err := v.Lookup(ctx, "HEEDLE_CONNECTOR_TRACKER_TOKEN"); err == nil || strings.Contains(err.Error(), "sign in again") {
+		t.Errorf("a token endpoint down for now: %v", err)
+	}
+	p.down = false
+	if tok, _, err := v.Lookup(ctx, "HEEDLE_CONNECTOR_TRACKER_TOKEN"); tok != "fresh-access" || err != nil {
+		t.Errorf("with the resource: %q %v", tok, err)
+	}
+	if e := expiryOf(time.Time{}, "rt"); e < time.Now().Add(50*time.Minute).Unix() || e > time.Now().Add(61*time.Minute).Unix() {
+		t.Errorf("no expiry given: %v", e)
+	}
+	if expiryOf(time.Time{}, "") != 0 {
+		t.Error("no expiry and no refresh token: not refreshed")
 	}
 }

@@ -331,14 +331,23 @@ func (s *Server) addConnector(w http.ResponseWriter, r *http.Request) {
 		}
 		// Only now that the file no longer names it: its token, if the
 		// page made it and nothing else names it (review 28).
+		var left []string
 		for _, n := range secretNames(gone) {
 			used := slices.ContainsFunc(cs, func(c pirn.Connector) bool { return slices.Contains(secretNames(c), n) })
 			if strings.HasPrefix(n, TokenPrefix) && !used && s.Secrets != nil {
-				s.Secrets.Delete(ctx, n)
-				s.Secrets.Delete(ctx, oauthName(n)) // what refreshed it, if it was signed in
+				for _, k := range []string{n, oauthName(n)} { // and what refreshed it, if it was signed in
+					if err := s.Secrets.Delete(ctx, k); err != nil {
+						left = append(left, k)
+					}
+				}
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"name": req.Name, "removed": true})
+		resp := map[string]any{"name": req.Name, "removed": true}
+		if len(left) > 0 {
+			// Said, not hidden: a leftover would block the name (review 29).
+			resp["warning"] = "removed, but these keys couldn't be deleted from your keychain: " + strings.Join(left, ", ")
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	case i >= 0:
 		writeJSON(w, http.StatusConflict, apiError{Error: "there is already a connector " + req.Name})
@@ -356,13 +365,10 @@ func (s *Server) addConnector(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Never another's key: not one the environment holds (it would
-		// win), one another connector names, or one already kept.
-		if os.Getenv(c.TokenEnv) != "" || slices.ContainsFunc(cs, func(o pirn.Connector) bool { return slices.Contains(secretNames(o), c.TokenEnv) }) {
-			writeJSON(w, http.StatusConflict, apiError{Error: c.TokenEnv + " is already in use; choose another name"})
-			return
-		}
-		if _, ok, err := s.Secrets.Lookup(r.Context(), c.TokenEnv); err != nil || ok {
-			writeJSON(w, http.StatusConflict, apiError{Error: c.TokenEnv + " is already in your keychain (or it can't be read); remove it first, or choose another name"})
+		// win), one another connector names, or one already kept, nor a
+		// sign-in's leftover that would refresh it from elsewhere (review 29).
+		if msg := s.nameFree(r.Context(), cs, req.Name, c.TokenEnv); msg != "" {
+			writeJSON(w, http.StatusConflict, apiError{Error: msg})
 			return
 		}
 	}

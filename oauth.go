@@ -48,6 +48,7 @@ type grant struct {
 	TokenURL     string           `json:"tu"`
 	AuthStyle    oauth2.AuthStyle `json:"as,omitempty"`
 	Refresh      string           `json:"rt,omitempty"`
+	Resource     string           `json:"res,omitempty"` // the MCP server, sent with every token request
 	Expiry       int64            `json:"exp,omitempty"` // unix seconds; 0: doesn't expire
 }
 
@@ -68,17 +69,22 @@ func decodeGrant(s string) (grant, error) {
 	return g, err
 }
 
+// loopbackURL reports whether s is an address on this machine: a
+// loopback address, or localhost, as oauthex allows for http.
 func loopbackURL(s string) bool {
 	u, err := url.Parse(s)
 	if err != nil {
 		return false
 	}
 	ip := net.ParseIP(u.Hostname())
-	return ip != nil && ip.IsLoopback()
+	return u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
 }
 
-func (g grant) config() *oauth2.Config {
-	return &oauth2.Config{ClientID: g.ClientID, ClientSecret: g.ClientSecret, Endpoint: oauth2.Endpoint{TokenURL: g.TokenURL, AuthStyle: g.AuthStyle}}
+// sameOrigin reports whether a and b have the same scheme and host.
+func sameOrigin(a, b string) bool {
+	ua, err1 := url.Parse(a)
+	ub, err2 := url.Parse(b)
+	return err1 == nil && err2 == nil && ua.Scheme == ub.Scheme && strings.EqualFold(ua.Host, ub.Host)
 }
 
 // signIn is one sign-in waiting for the provider to send the browser
@@ -91,11 +97,35 @@ type signIn struct {
 }
 
 // oauthClient reaches MCP and authorization servers.
+// It follows no redirect (one could leave https, or reach a service on
+// this machine), and reads at most a MiB of any answer (review 29).
 func (s *Server) oauthClient() *http.Client {
-	if s.OAuthClient != nil {
-		return s.OAuthClient
+	base := s.OAuthClient
+	if base == nil {
+		base = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &http.Client{Timeout: 15 * time.Second}
+	c := *base
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	t := c.Transport
+	if t == nil {
+		t = http.DefaultTransport
+	}
+	c.Transport = limitBodies{t}
+	return &c
+}
+
+// limitBodies cuts every response body at a MiB.
+type limitBodies struct{ http.RoundTripper }
+
+func (l limitBodies) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := l.RoundTripper.RoundTrip(r)
+	if err == nil {
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.LimitReader(resp.Body, 1<<20), resp.Body}
+	}
+	return resp, err
 }
 
 // connectConnector starts adding a remote connector by signing in. It
@@ -162,6 +192,15 @@ func (s *Server) connectConnector(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, apiError{Error: err.Error()})
 		return
 	}
+	// Every endpoint at the issuer's own origin: a server mustn't send
+	// you to sign in at a real provider while heedle hands the code and
+	// its verifier to another host (a mix-up; review 29).
+	for _, e := range []string{asm.AuthorizationEndpoint, asm.TokenEndpoint, asm.RegistrationEndpoint} {
+		if e != "" && !sameOrigin(e, asm.Issuer) {
+			writeJSON(w, http.StatusBadGateway, apiError{Error: "its sign-in's endpoints aren't all at " + asm.Issuer + ", so heedle won't sign in there"})
+			return
+		}
+	}
 	if asm.RegistrationEndpoint == "" {
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "its sign-in doesn't let heedle register itself; paste a token from its settings instead"})
 		return
@@ -201,7 +240,8 @@ func (s *Server) connectConnector(w http.ResponseWriter, r *http.Request) {
 	}
 	s.signIns[state] = signIn{name: req.Name, url: req.URL, resource: prm.Resource, tokenName: tokenName, cfg: cfg, verifier: verifier, expires: time.Now().Add(SignInTimeout)}
 	s.signInsMu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{"signIn": true, "authorize": cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("resource", prm.Resource))})
+	au, _ := url.Parse(cfg.Endpoint.AuthURL)
+	writeJSON(w, http.StatusOK, map[string]any{"signIn": true, "at": au.Host, "authorize": cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("resource", prm.Resource))})
 }
 
 // nameFree says why name, or its token's name, is taken, or "".
@@ -385,10 +425,8 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		page(http.StatusBadGateway, "The sign-in didn't give heedle a token: "+err.Error())
 		return
 	}
-	g := grant{ClientID: in.cfg.ClientID, ClientSecret: in.cfg.ClientSecret, TokenURL: in.cfg.Endpoint.TokenURL, AuthStyle: in.cfg.Endpoint.AuthStyle, Refresh: tok.RefreshToken}
-	if !tok.Expiry.IsZero() {
-		g.Expiry = tok.Expiry.Unix()
-	}
+	g := grant{ClientID: in.cfg.ClientID, ClientSecret: in.cfg.ClientSecret, TokenURL: in.cfg.Endpoint.TokenURL, AuthStyle: in.cfg.Endpoint.AuthStyle,
+		Refresh: tok.RefreshToken, Resource: in.resource, Expiry: expiryOf(tok.Expiry, tok.RefreshToken)}
 	if err := s.finishConnect(r.Context(), in, tok.AccessToken, g); err != nil {
 		page(http.StatusConflict, "Signed in, but the connector wasn't added: "+err.Error())
 		return
@@ -479,30 +517,102 @@ func (v *OAuthVault) Lookup(ctx context.Context, name string) (string, bool, err
 	if c == nil {
 		c = &http.Client{Timeout: 15 * time.Second}
 	}
-	rctx := context.WithValue(ctx, oauth2.HTTPClient, c)
-	fresh, err := g.config().TokenSource(rctx, &oauth2.Token{RefreshToken: g.Refresh, Expiry: time.Unix(1, 0)}).Token()
+	access, refresh, expiry, err := refreshToken(ctx, c, g)
 	if err != nil {
 		if time.Now().Before(time.Unix(g.Expiry, 0)) {
 			return tok, true, nil // not expired yet: try again next time
 		}
-		return "", false, fmt.Errorf("refreshing %s failed (%v): sign in again from the connectors page", name, err)
+		var refused *refusedError
+		if errors.As(err, &refused) {
+			return "", false, fmt.Errorf("refreshing %s was refused (%v): sign in again from the connectors page", name, err)
+		}
+		return "", false, fmt.Errorf("refreshing %s failed for now: %v", name, err) // retried
 	}
-	if fresh.RefreshToken != "" {
-		g.Refresh = fresh.RefreshToken
+	if refresh != "" {
+		g.Refresh = refresh
 	}
-	g.Expiry = 0
-	if !fresh.Expiry.IsZero() {
-		g.Expiry = fresh.Expiry.Unix()
-	}
-	if err := pirn.CheckSecret(name, fresh.AccessToken); err != nil {
+	g.Expiry = expiryOf(expiry, g.Refresh)
+	if err := pirn.CheckSecret(name, access); err != nil {
 		return "", false, err
 	}
+	// The grant first: the provider may have retired the old refresh
+	// token, and without the new one every later refresh fails (review 29).
 	sctx := context.WithoutCancel(ctx)
-	if err := v.Keys.Store(sctx, name, fresh.AccessToken); err != nil {
-		return "", false, err
-	}
 	if err := v.Keys.Store(sctx, oauthName(name), g.encode()); err != nil {
+		return "", false, fmt.Errorf("keeping %s's new refresh token failed (%v): sign in again from the connectors page", name, err)
+	}
+	if err := v.Keys.Store(sctx, name, access); err != nil {
 		return "", false, err
 	}
-	return fresh.AccessToken, true, nil
+	return access, true, nil
+}
+
+// expiryOf is when a token is taken to expire: when the provider said,
+// or, if it said nothing but gave a refresh token, in an hour, so it is
+// refreshed before a server refuses it (review 29).
+func expiryOf(t time.Time, refresh string) int64 {
+	switch {
+	case !t.IsZero():
+		return t.Unix()
+	case refresh != "":
+		return time.Now().Add(time.Hour).Unix()
+	}
+	return 0
+}
+
+// refusedError is a refresh the authorization server refused: only a new
+// sign-in helps.
+type refusedError struct{ msg string }
+
+func (e *refusedError) Error() string { return e.msg }
+
+// refreshToken asks the token endpoint for a new access token with the
+// refresh token, naming the MCP server as the resource, as the MCP spec
+// requires of every token request (RFC 8707). golang.org/x/oauth2 sends
+// no resource on a refresh, so this one request heedle makes itself
+// (review 29).
+func refreshToken(ctx context.Context, c *http.Client, g grant) (access, refresh string, expiry time.Time, err error) {
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {g.Refresh}}
+	if g.Resource != "" {
+		form.Set("resource", g.Resource)
+	}
+	if g.AuthStyle != oauth2.AuthStyleInHeader {
+		form.Set("client_id", g.ClientID)
+		if g.ClientSecret != "" {
+			form.Set("client_secret", g.ClientSecret)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", g.TokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	if g.AuthStyle == oauth2.AuthStyleInHeader {
+		req.SetBasicAuth(url.QueryEscape(g.ClientID), url.QueryEscape(g.ClientSecret))
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	defer resp.Body.Close()
+	var t struct {
+		Access    string `json:"access_token"`
+		Refresh   string `json:"refresh_token"`
+		ExpiresIn int64  `json:"expires_in"`
+		Error     string `json:"error"`
+	}
+	derr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&t)
+	switch {
+	case resp.StatusCode == 400 || resp.StatusCode == 401:
+		return "", "", time.Time{}, &refusedError{strings.TrimSpace(resp.Status + " " + t.Error)}
+	case resp.StatusCode != 200:
+		return "", "", time.Time{}, fmt.Errorf("the token endpoint answered %s", resp.Status)
+	case derr != nil || t.Access == "":
+		return "", "", time.Time{}, fmt.Errorf("the token endpoint's answer wasn't understood")
+	}
+	if t.ExpiresIn > 0 {
+		expiry = time.Now().Add(time.Duration(t.ExpiresIn) * time.Second)
+	}
+	return t.Access, t.Refresh, expiry, nil
 }
