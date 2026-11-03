@@ -431,3 +431,16 @@ test("a skill's connectors are connected only with every key (review 31)", () =>
   assert.equal(states("maps", null), "maps:unknown");
   assert.equal(states("", v([])), "");
 });
+
+test("a run with no record says which steps stopped it (review 32)", () => {
+  const steps = [
+    { node: "n0", status: "Completed", attempts: 2, failure: "carrier API: 503 (attempt 1)" },
+    { node: "n1", status: "Failed", attempts: 1, failure: 'pirn: setup: the step asks for "maps", but this worker grants only "" of it (its connectors: "search")' },
+    { node: "n2", status: "TimedOut", attempts: 3, failure: "activity StartToClose timeout" },
+    { node: "n3", status: "Abandoned" },
+    { node: "n4", status: "Failed" },
+  ];
+  assert.deepEqual(DD.stoppedBy(steps).map((s) => s.node), ["n1", "n2"]);
+  assert.deepEqual(DD.connectorProblem(DD.stoppedBy(steps)[0].failure), { missing: ["maps"] });
+  assert.deepEqual(DD.stoppedBy(null), []);
+});
