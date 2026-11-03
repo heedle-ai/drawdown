@@ -400,12 +400,34 @@ test("schedules show only well-formed ones, and say when in words", () => {
 });
 
 test("a step's failure says which connector or key to set up", () => {
-  assert.deepEqual(DD.connectorProblem('pirn: setup: the step asks for "maps search", but this worker grants only "search" of it (its connectors: "search")'), { missing: ["maps"] });
-  assert.deepEqual(DD.connectorProblem('the step asks for "maps/directions search/web", but this worker grants only "" of it'), { missing: ["maps", "search"] });
-  assert.deepEqual(DD.connectorProblem('pirn: setup: connector "maps" needs HEEDLE_CONNECTOR_MAPS_TOKEN: store it with `heedle secret set HEEDLE_CONNECTOR_MAPS_TOKEN`'), { connector: "maps", key: "HEEDLE_CONNECTOR_MAPS_TOKEN" });
-  assert.deepEqual(DD.connectorProblem("pirn: setup: the worker has no Anthropic API key: run `heedle secret set ANTHROPIC_API_KEY`"), { key: "ANTHROPIC_API_KEY" });
-  assert.deepEqual(DD.connectorProblem('connector "maps": can\'t read MAPS_KEY now: locked'), { locked: true });
-  for (const other of ["exit status 1", "", null, 'the step asks for "x", but this worker grants only "x" of it', 'connector "Bad Name" needs X: store it']) {
+  const askedFor = (asked, got, has) => `pirn: setup: the step asks for "${asked}", but this worker grants only "${got}" of it (its connectors: "${has}")`;
+  assert.deepEqual(DD.connectorProblem(askedFor("maps search", "search", "search")), { missing: ["maps"] });
+  assert.deepEqual(DD.connectorProblem(askedFor("maps/directions search/web", "", "")), { missing: ["maps", "search"] });
+  // review 31: a connector the worker has, with fewer tools, isn't missing.
+  assert.deepEqual(DD.connectorProblem(askedFor("maps/directions", "", "maps/search")), { tools: ["maps"] });
+  const needs = (c, k) => `pirn: setup: connector "${c}" needs ${k}: store it with \`heedle secret set ${k}\` (or \`loom secret set ${k}\`), or set it where the worker runs`;
+  assert.deepEqual(DD.connectorProblem(needs("maps", "HEEDLE_CONNECTOR_MAPS_TOKEN")), { connector: "maps", key: "HEEDLE_CONNECTOR_MAPS_TOKEN" });
+  assert.deepEqual(DD.connectorProblem("pirn: setup: the worker has no Anthropic API key: run `heedle secret set ANTHROPIC_API_KEY`, or set ANTHROPIC_API_KEY where it runs"), { key: "ANTHROPIC_API_KEY" });
+  assert.deepEqual(DD.connectorProblem('connector "maps": can\'t read MAPS_KEY now: pirn: setup: keychain: the keyring holding MAPS_KEY is locked: unlock it (log in to the desktop, or run gnome-keyring-daemon --unlock in this session)'), { locked: true });
+  assert.deepEqual(DD.connectorProblem("the worker can't read its Anthropic API key now: pirn: setup: keychain: security didn't answer in 15s: is it waiting for you to allow access in a window, or locked?"), { locked: true });
+  assert.deepEqual(DD.connectorProblem('connector "maps": can\'t read MAPS_KEY now: pirn: setup: the keychain\'s MAPS_KEY isn\'t one line of printable ASCII (was it made outside heedle?): store it again with `heedle secret set MAPS_KEY`'), { connector: "maps", key: "MAPS_KEY", again: true });
+  // review 31: other reasons a keychain couldn't be read aren't "locked";
+  // a sentence inside other text (a tool's error) isn't pirn's.
+  for (const other of ["exit status 1", "", null, askedFor("x", "x", "x"), needs("Bad Name", "X"),
+    "the worker can't read its Anthropic API key now: pirn: setup: this system has no keychain heedle can use (macOS or Linux only)",
+    needs("github", "EVIL_TOKEN") + " and then some", 'tool said: connector "github" needs EVIL_TOKEN: store it']) {
     assert.equal(DD.connectorProblem(other), null, String(other));
   }
+});
+
+test("a skill's connectors are connected only with every key (review 31)", () => {
+  const v = (cs, error) => ({ file: "f", anthropic: { name: "ANTHROPIC_API_KEY", from: "keychain" }, connectors: cs, ...(error ? { error } : {}) });
+  const maps = (from) => ({ name: "maps", secrets: [{ name: "HEEDLE_CONNECTOR_MAPS_TOKEN", from }] });
+  const states = (g, view) => DD.skillConnectors(g, view).map((c) => c.name + ":" + c.state).join(" ");
+  assert.equal(states("maps/directions search", v([maps("keychain")])), "maps:connected search:absent");
+  assert.equal(states("maps", v([maps("missing")])), "maps:key");
+  assert.equal(states("maps", v([maps("environment")])), "maps:connected");
+  assert.equal(states("maps", v([], "connectors file: bad")), "maps:unknown");
+  assert.equal(states("maps", null), "maps:unknown");
+  assert.equal(states("", v([])), "");
 });

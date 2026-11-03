@@ -579,21 +579,53 @@ const DD = (() => {
 
   // connectorProblem is what a step's failure says is missing to reach a
   // connector, from pirn's own words, or null: {missing: [connector
-  // names]} for connectors the worker doesn't have, {key, connector} for
-  // a key not set, {locked: true} for a keychain that can't be read now.
+  // names]} for connectors the worker doesn't have, {tools: [connector
+  // names]} for connectors it has but without every tool the step asks
+  // for, {key, connector} for a key not set (again: it must be stored
+  // again), {locked: true} for a keychain locked or waiting to be
+  // allowed. Each sentence must be pirn's whole sentence, ending the
+  // failure, so text a tool returned can't easily pass for one (review 31).
   function connectorProblem(failure) {
     if (!str(failure)) return null;
-    let m = /the step asks for "([^"]*)", but this worker grants only "([^"]*)"/.exec(failure);
+    const NAME = /^[a-z0-9-]{1,24}$/;
+    const names = (g) => [...new Set(g.split(/\s+/).filter(Boolean).map((x) => x.split("/")[0]))];
+    let m = /the step asks for "([^"]*)", but this worker grants only "([^"]*)" of it \(its connectors: "([^"]*)"\)$/.exec(failure);
     if (m) {
-      const has = new Set(m[2].split(/\s+/).filter(Boolean).map((g) => g.split("/")[0]));
-      const missing = [...new Set(m[1].split(/\s+/).filter(Boolean).map((g) => g.split("/")[0]))].filter((n) => !has.has(n) && /^[a-z0-9-]{1,24}$/.test(n));
-      return missing.length ? { missing } : null;
+      // What the worker has is its connectors (the third), not what of
+      // the ask it covers (the second): a connector it has with fewer
+      // tools is not missing (review 31).
+      const has = new Set(names(m[3]));
+      const asked = names(m[1]).filter((n) => NAME.test(n));
+      const missing = asked.filter((n) => !has.has(n));
+      if (missing.length) return { missing };
+      const got = new Set(m[2].split(/\s+/).filter(Boolean));
+      const tools = names(m[1].split(/\s+/).filter((g) => g && !got.has(g)).join(" ")).filter((n) => NAME.test(n));
+      return tools.length ? { tools } : null;
     }
-    m = /connector "([a-z0-9-]{1,24})" needs ([A-Za-z_][A-Za-z0-9_]{0,63}): store it/.exec(failure);
+    m = /connector "([a-z0-9-]{1,24})" needs ([A-Za-z_][A-Za-z0-9_]{0,63}): store it with `heedle secret set \2` \(or `loom secret set \2`\), or set it where the worker runs$/.exec(failure);
     if (m) return { connector: m[1], key: m[2] };
-    if (/the worker has no Anthropic API key/.test(failure)) return { key: "ANTHROPIC_API_KEY" };
-    if (/keyring holding .* is locked|can't read [A-Za-z_][A-Za-z0-9_]* now|can't read its Anthropic API key now/.test(failure)) return { locked: true };
+    m = /connector "([a-z0-9-]{1,24})": can't read ([A-Za-z_][A-Za-z0-9_]{0,63}) now: .*the keychain's \2 isn't one line of printable ASCII \(was it made outside heedle\?\): store it again with `heedle secret set \2`$/.exec(failure);
+    if (m) return { connector: m[1], key: m[2], again: true };
+    if (/the worker has no Anthropic API key: run `heedle secret set ANTHROPIC_API_KEY`, or set ANTHROPIC_API_KEY where it runs$/.test(failure)) return { key: "ANTHROPIC_API_KEY" };
+    // Only a keychain that is locked, or waiting for a window to be
+    // answered, is fixed by unlocking it; other reasons it couldn't be
+    // read stand as they are (review 31).
+    if (/can't read (?:[A-Za-z_][A-Za-z0-9_]*|its Anthropic API key) now: .*(?:keychain: the keyring holding [A-Za-z_][A-Za-z0-9_]* is locked: unlock it|keychain: \S+ didn't answer in \S+: is it waiting for you to allow access in a window, or locked\?)/.test(failure)) return { locked: true };
     return null;
+  }
+
+  // skillConnectors is, for each connector a skill's grant names, whether
+  // this worker can use it: "connected" (it has it, every key found),
+  // "key" (it has it, a key missing), "absent", or "unknown" when the
+  // connectors couldn't be read or its file fails its check (review 31:
+  // a connector without its key isn't connected).
+  function skillConnectors(grant, v) {
+    const names = [...new Set(String(grant || "").split(/\s+/).filter(Boolean).map((g) => g.split("/")[0]))];
+    return names.map((name) => {
+      if (!v || v.error) return { name, state: "unknown" };
+      const c = v.connectors.find((x) => x.name === name);
+      return { name, state: !c ? "absent" : c.secrets.some((k) => k.from === "missing") ? "key" : "connected" };
+    });
   }
 
   // === Schedules ============================================================
@@ -633,6 +665,6 @@ const DD = (() => {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors };
 })();
 if (typeof module !== "undefined") module.exports = DD;
