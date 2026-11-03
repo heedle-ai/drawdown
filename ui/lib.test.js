@@ -358,3 +358,14 @@ test("the Connectors page reads only well-formed data, and never a value", () =>
     assert.equal(v.anthropic.from, "keychain");
   }
 });
+
+test("a registry page keeps only servers it can show safely", () => {
+  const ready = { name: "io.github.acme/maps-mcp", description: "Places", fit: "ready", url: "https://maps.acme.dev/mcp", suggest: "maps", link: "https://github.com/acme/maps" };
+  const no = { name: "a/b", description: "d", fit: "no", why: "Can't be added here: it needs the header X-API-Key.", suggest: "b" };
+  const v = DD.asRegistryPage({ servers: [ready, no,
+    { ...ready, url: "javascript:alert(1)" }, { ...ready, url: "http://x.dev/mcp" }, { ...ready, link: "javascript:x" },
+    { ...no, why: undefined }, { ...ready, fit: "maybe" }, null, { ...ready, name: 3 }], next: "c2" });
+  assert.deepEqual(v.servers, [ready, no]);
+  assert.equal(v.next, "c2");
+  assert.equal(DD.asRegistryPage({ servers: "x" }), null);
+});

@@ -549,12 +549,24 @@ const DD = (() => {
     return { ...v, connectors: good, unreadable: v.connectors.length - good.length };
   }
 
+  // asRegistryPage is a page of the MCP Registry as the server sends it,
+  // keeping only well-formed servers: name, description and fit, and an
+  // https:// address for one that's ready; else null.
+  function asRegistryPage(v) {
+    if (!v || typeof v !== "object" || !Array.isArray(v.servers) || !opt(v.next, str)) return null;
+    const https = (u) => str(u) && /^https:\/\/[^\s]+$/.test(u);
+    const servers = v.servers.filter((e) => e && typeof e === "object" && str(e.name) && opt(e.title, str) && str(e.description) &&
+      str(e.suggest) && opt(e.why, str) && opt(e.token, bool) && opt(e.link, (l) => l === "" || https(l)) &&
+      (e.fit === "ready" ? https(e.url) : e.fit === "no" && str(e.why)));
+    return { servers, next: v.next || "" };
+  }
+
   // keysMissing counts the keys, the Anthropic key's included, that are
   // found nowhere.
   function keysMissing(v) {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage };
 })();
 if (typeof module !== "undefined") module.exports = DD;

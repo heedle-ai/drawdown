@@ -768,6 +768,84 @@ function KeyRow({ k, onDone, note }) {
     </div>`;
 }
 
+// AddConnector searches the MCP Registry and adds a remote server: its
+// name (a connector name grants use), and a token, which goes to the
+// keychain, never the connectors file.
+function AddConnector({ onDone, taken }) {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [pick, setPick] = useState(null);
+  const [name, setName] = useState("");
+  const [token, setToken] = useState("");
+  const [done, setDone] = useState("");
+  const find = async (cursor) => {
+    setBusy(true); setErr(""); setDone("");
+    const r = await api("/api/connectors/catalog", { search, cursor: cursor || "" });
+    setBusy(false);
+    if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
+    const p = DD.asRegistryPage(r.data);
+    if (!p) { setErr("The registry's answer wasn't understood."); return; }
+    setPage((old) => (cursor && old ? { servers: [...old.servers, ...p.servers], next: p.next } : p));
+  };
+  const choose = (e) => { setPick(e); setName(taken.includes(e.suggest) ? e.suggest + "-2" : e.suggest); setToken(""); setErr(""); };
+  const add = async () => {
+    setBusy(true); setErr("");
+    const r = await api("/api/connectors/add", { name, url: pick.url, token });
+    setBusy(false);
+    if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
+    setDone(name); setPick(null); setToken("");
+    onDone();
+  };
+  return html`
+    <div class="panel add-connector">
+      <h3 style=${{ marginTop: 0 }}>Add from the MCP Registry</h3>
+      <form class="row" onSubmit=${(e) => { e.preventDefault(); find(); }}>
+        <label class="sr" for="registry-search">Search the MCP Registry</label>
+        <input id="registry-search" type="text" placeholder="maps, search, calendar…" value=${search} onInput=${(e) => setSearch(e.target.value)} />
+        <button class="primary" type="submit" disabled=${busy}>${busy && !pick ? "Searching…" : "Search"}</button>
+      </form>
+      ${done && html`<p role="status">Added <span class="mono">${done}</span>. A step can use it from now on, as its arguments grant: <span class="mono">(agent "…" "${done}")</span>.</p>`}
+      ${err && html`<p class="error" role="alert">${err}</p>`}
+      ${pick && html`
+        <div class="add-form">
+          <p><strong>${pick.title || pick.name}</strong> <span class="mono muted">${pick.url}</span></p>
+          <div class="row">
+            <label>Connector name<input type="text" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
+            <label>Access token${pick.token ? "" : " (if it signs you in)"}<input type="password" autocomplete="off" value=${token} onInput=${(e) => setToken(e.target.value)} /></label>
+          </div>
+          <div class="row">
+            <button class="primary" type="button" disabled=${busy || !name || (pick.token && !token)} onClick=${add}>${busy ? "Adding…" : "Add " + name}</button>
+            <button type="button" onClick=${() => setPick(null)}>Cancel</button>
+            <span class="muted">The token goes to your keychain; the address to your connectors file.</span>
+          </div>
+        </div>`}
+      ${page && page.servers.length === 0 && html`<p class="muted">Nothing found.</p>`}
+      ${page && page.servers.length > 0 && html`<ul class="registry">${page.servers.map((e) => html`
+        <li key=${e.name + e.url} class=${e.fit === "ready" ? "" : "cant"}>
+          <div><strong>${e.title || e.name}</strong> <span class="mono muted">${e.name}</span>
+            ${e.link && html` <a href=${e.link} target="_blank" rel="noopener noreferrer">about</a>`}</div>
+          <div class="muted">${e.description}</div>
+          ${e.fit === "ready" ? html`<div><button type="button" onClick=${() => choose(e)}>Add</button>
+              ${e.token && html` <${Pill} cls="k-other" plain>needs a token<//>`}</div>`
+            : html`<div class="muted">${e.why}</div>`}
+        </li>`)}</ul>`}
+      ${page && page.next && html`<button type="button" disabled=${busy} onClick=${() => find(page.next)}>More</button>`}
+    </div>`;
+}
+
+function RemoveConnector({ name, onDone }) {
+  const [sure, setSure] = useState(false);
+  const [err, setErr] = useState("");
+  if (!sure) return html`<button type="button" class="link-btn" style=${{ marginLeft: "auto" }} onClick=${() => setSure(true)}>Remove</button>`;
+  return html`<span style=${{ marginLeft: "auto" }} class="pills">
+    <span>Remove ${name} and its keys?</span>
+    <button type="button" onClick=${async () => { const r = await api("/api/connectors/remove", { name }); if (r.ok) onDone(); else setErr((r.data && r.data.error) || "failed"); }}>Remove</button>
+    <button type="button" onClick=${() => setSure(false)}>Keep</button>
+    ${err && html`<span class="error">${err}</span>`}</span>`;
+}
+
 function ConnectorsPage() {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
@@ -780,8 +858,9 @@ function ConnectorsPage() {
   const missing = DD.keysMissing(v);
   return html`
     <h2>Connectors</h2>
-    <p class="lede">Services agent steps can use, each through its MCP server, only as a step's arguments grant. Keys you save here go straight to this machine's keychain, are used from the next step with no restart, and are never shown again.</p>
+    <p class="lede">Services agent steps can use, each through its MCP server, only as a step's arguments grant. Add one from the MCP Registry, or list it in your connectors file. Keys you save here go straight to this machine's keychain, are used from the next step with no restart, and are never shown again.</p>
     ${missing > 0 && html`<p class="note">${missing} key${missing === 1 ? " isn't" : "s aren't"} set yet.</p>`}
+    <${AddConnector} onDone=${refresh} taken=${v.connectors.map((c) => c.name)} />
     <div class="panel connector">
       <div class="pills"><strong>Claude</strong><${Pill} cls="k-agent" plain>ask and agent steps<//></div>
       <${KeyRow} k=${v.anthropic} onDone=${refresh} />
@@ -797,6 +876,7 @@ function ConnectorsPage() {
           <strong class="mono">${c.name}</strong>
           <${Pill} cls="k-other" plain>${c.url ? "remote" : "local container"}<//>
           ${(c.writes || []).length > 0 && html`<${Pill} cls=${c.approve ? "s-Running" : "k-other"} plain>${c.writes.length} write${c.writes.length === 1 ? "" : "s"}${c.approve ? ", each waits for your approval" : ""}<//>`}
+          <${RemoveConnector} name=${c.name} onDone=${refresh} />
         </div>
         <p class="mono muted cg-wrap">${c.url || [c.image, ...(c.command || [])].join(" ")}</p>
         ${(c.tools || []).length > 0 && html`<p class="muted">Tools: <span class="mono">${c.tools.join(", ")}</span></p>`}
