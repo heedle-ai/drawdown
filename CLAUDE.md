@@ -55,11 +55,11 @@ why the existing tool can't do it.
   draft, submits through loom, and reads Temporal and warp. All writes go
   through loom's workflow.
 - **No build step.** The page is `static/index.html` plus `static/app.js`:
-  React 18 (UMD), htm, mermaid and diff2html from jsDelivr, each pinned to
+  React 18 (UMD), htm and diff2html from jsDelivr, each pinned to
   an exact version with a Subresource Integrity hash. To upgrade a library,
   change the version and recompute its hash from the npm package file.
-- **Never put unescaped data in HTML.** React escapes text; mermaid runs with
-  `securityLevel: "strict"`; diff2html escapes diff content.
+- **Never put unescaped data in HTML.** React escapes text (graphs are React too);
+  diff2html escapes diff content.
 - **Every API behaviour has a test** in `server_test.go`, using a fake
   Temporal that really runs plans in Temporal's test suite.
 - `go.mod` replaces the heedle-ai modules with `../` checkouts until they

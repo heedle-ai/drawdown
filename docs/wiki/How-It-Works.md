@@ -82,13 +82,15 @@ The home page weaves the recent runs: one column per run, its top edge coloured 
 
 ## Runs, steps and the graph
 
-[[/images/run-detail.png|alt=A run's page: status and info pills, the program, the timeline of its steps with a retry badge, the plan graph, and output cards for two web pages and Claude's answer]]
+[[/images/run-detail.png|alt=A run's page: status and info pills, the program, its provenance in Git, the timeline of its steps with a retry badge, the composition graph, and output cards for three sources and an assessment]]
 
 A run's page puts its **timeline** first: one lane per step, read from Temporal's own history (`/api/steps`). A hatched bar is the time a step waited for a worker; a solid bar, the time it ran; moving stripes, a step still running. A red badge counts attempts when Temporal retried a step. When a plan fails, shuttle stops at the first failure; the steps it never heard back from are shown faded as **Abandoned** at the moment the run ended. Hovering a bar shows its timings, attempts, the failure that caused a retry, and the start of its output.
 
-The **plan graph** is drawn small, coloured by the kind of each step. Every step in it opens that step, every arrow shows what it carries, and the expand button opens it full screen to pan, zoom and follow the links:
+The **composition graph** draws the program as it was written. Steps run one after another (`;`, a pipe) left to right, and side by side (`⊗`, a par) stacked in a shaded box; nested groups nest. Every group folds to one line that names its steps and counts them by status. Each step is a card in its kind's colour, with its status, its arguments, a red badge when Temporal retried it, how long it ran, the size of its output and the start of it, and badges for the files it changed, the writes it queued and an agent's turns. The chevron opens the card in place to show everything the record knows about the step: what it runs (with the skill's version badge), its arguments in full, which steps it waits for and which it feeds (each a link), its status, queue and run times, the failure Temporal recorded, its files, its writes, an agent's model, turns, commands and files, and its output. The icons under each card open the step inspector, the skill at the version the plan pins, the diff from this program's previous run, the record in Git, and the run's event history in Temporal. Hovering or focusing an arrow shows exactly what it hands over: each step's output, its size and its start. **Show every detail** opens every card, **Collapse all** closes them, **Fold groups** folds every group, and the corner button opens the graph full screen to pan and zoom (scroll, or `+` and `−`):
 
-[[/images/graph.png|alt=The plan graph opened full screen, with zoom, fit and close buttons]]
+[[/images/graph.png|alt=The composition graph full screen: a step, then three branches side by side (one of them two steps one after another), then a last step; one card is open, showing its waits, feeds, timings, the failure Temporal retried and its output]]
+
+The shape comes from draft (`draft.Composition`), compiled again from the run's program with the commands the server has now. The server sends it only if it names exactly the plan's steps, in order, and implies exactly what each waits for; otherwise (say a skill the program used is gone) the graph is drawn in layers from what each step waits for, and says so. The page checks the shape again before drawing it (`lib.js`'s `composition`, which `ui/lib.test.js` checks).
 
 Under the run's header, **Provenance** shows where its record sits in Git. It names the same program's previous run, the record before it, and this run's own commit, and a click on either earlier record opens the diff from it to this one. It also gives the full commit, the history (ref) it was recorded on, and the Temporal workflow and run that produced it, linked to their event history in Temporal's Web UI.
 
@@ -118,7 +120,7 @@ drawdown's own worker (`-worker`) takes the same `-connectors FILE` as `loom wor
 
 The **skills** link opens the Skills page (`#/skills`): every skill the store keeps ([treadle](https://github.com/heedle-ai/treadle/wiki)), with its description, newest version, and whether it was imported. A skill's page (`#/skill/<name>`) shows its `SKILL.md` as text, its files with their sizes, and every version, newest first, with where each was imported from; for a GitHub source, a link to the exact folder at the exact commit, built only from checked parts so it can only point at github.com.
 
-Wherever a step follows a skill, it says so with a badge naming the skill and the version its plan pins, linking to that version: on the graph (`n1 weather @72ba7cf "Boston"`), in hover cards, in the run's outputs and in the step inspector. A run that pinned an older version opens that version, marked *not the newest*.
+Wherever a step follows a skill, it says so with a badge naming the skill and the version its plan pins, linking to that version: on the graph (an opened step names `weather @72ba7cf`, and its arguments), in hover cards, in the run's outputs and in the step inspector. A run that pinned an older version opens that version, marked *not the newest*.
 
 **Browse a repository** lists every skill in a repository of Agent Skills, such as `github.com/anthropics/skills`: its name, its description and its folder, or why treadle can't import it. A worker does the listing (`loom.ListSkills`), fetching only the `SKILL.md` files; the page asks for whole https:// repositories only. Give a branch or tag to list that instead of the default branch. Choose any number and **Import** them: each goes through the ordinary import, so from a repository you haven't trusted each waits for your review, and the list says which. Nothing is imported until you choose. The list warns when two of its skills share a name (they'd replace each other, so only one of them can be chosen) and when one would replace a skill of yours from somewhere else. An import fetches the branch as it is then; if that isn't the commit that was listed, the list says *changed since it was listed*, and the review shows exactly what was fetched.
 
@@ -140,9 +142,9 @@ drawdown has no login. It's meant for your own machine, so it listens on `127.0.
 | An `Origin` header must match the host the UI was opened on (403 otherwise) | Scripts on another site calling the API |
 | The `Host` header must be localhost, a loopback address, or listed with `-hosts` (403 otherwise) | DNS rebinding: another site pointing its own name at your machine |
 
-All page content is rendered as text by React, mermaid runs with `securityLevel: "strict"` and graph IDs are positions rather than plan data, and diff2html escapes diff content.
+All page content is rendered as text by React (the composition graph included), and diff2html escapes diff content.
 
-Every response also carries a **Content-Security-Policy**: scripts only from drawdown itself and `cdn.jsdelivr.net`, network requests only to drawdown, no plugins, no framing. If a library were ever compromised past its integrity hash, it still couldn't send your data anywhere else. Inline styles are allowed because mermaid draws with them.
+Every response also carries a **Content-Security-Policy**: scripts only from drawdown itself and `cdn.jsdelivr.net`, network requests only to drawdown, no plugins, no framing. If a library were ever compromised past its integrity hash, it still couldn't send your data anywhere else. Inline styles are allowed for the page's own style sheet.
 
 The server reads warp only through the `History` interface (`Resolve`, `Log`, `Tree`, `Blob`, `Blobs`, `Parents`, `FindByTrailer`, `Diff`, `Refs`), so it has no way to write history: runs are recorded only by loom's workflow.
 
@@ -156,7 +158,6 @@ These checks are tested in `TestGuard_RefusesCrossSiteAndRebinding`, `TestPage` 
 |---|---|---|
 | React, ReactDOM | 18.3.1 (UMD) | Components |
 | htm | 3.1.1 | JSX-style markup without a compiler |
-| mermaid | 10.9.1 | Plan graphs, with `securityLevel: "strict"` |
 | diff2html | 3.4.48 | Diff view |
 
 Its two fonts, Bricolage Grotesque and JetBrains Mono, are served by drawdown itself from `static/fonts`, with their SIL Open Font License files, so the Content-Security-Policy keeps fonts to this server (`TestInv_FontsAreServedHere`).

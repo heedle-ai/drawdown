@@ -4,7 +4,7 @@
 // The server is a small JSON API over existing pieces (draft compiles,
 // loom submits, Temporal reports status, warp/Git holds the records) plus
 // one static page. The page is React from a CDN, with htm for JSX-style
-// markup, mermaid for plan graphs and diff2html for diffs: no build step.
+// markup and diff2html for diffs: no build step.
 package drawdown
 
 import (
@@ -204,8 +204,8 @@ func (s *Server) guard(next http.Handler) http.Handler {
 // ContentSecurityPolicy is sent with every response. Scripts come only from
 // this server and the pinned jsDelivr files (each also checked by its
 // integrity hash); the page can talk only to this server, can't be framed,
-// and loads no plugins. Inline styles are allowed because mermaid draws
-// its diagrams with them.
+// and loads no plugins. Inline styles are allowed for the page's own
+// style sheet, in index.html.
 const ContentSecurityPolicy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; " +
 	"style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src 'self' data:; " +
 	"connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
@@ -344,7 +344,86 @@ func (s *Server) compile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ce)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plan": p})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": s.shapeOf(r.Context(), req.Program, p)})
+}
+
+// shapeOf is a program's composition (draft.Composition), for drawing its
+// plan as it was written, or nil when it can't be had (a program the
+// commands no longer resolve, such as one using a removed skill) or
+// doesn't match plan exactly: the page then draws the plan from its
+// requires alone.
+func (s *Server) shapeOf(ctx context.Context, src string, p plan.Plan) *draft.Shape {
+	reg, err := s.registry(ctx)
+	if err != nil {
+		return nil
+	}
+	sh, err := draft.Composition(ctx, reg, draft.Source(src))
+	if err != nil || !shapeMatches(sh, p) {
+		return nil
+	}
+	return &sh
+}
+
+// shapeMatches reports whether a shape names exactly p's nodes, in order,
+// and implies exactly what each requires.
+func shapeMatches(sh draft.Shape, p plan.Plan) bool {
+	waits := map[plan.NodeID][]plan.NodeID{}
+	var walk func(draft.Shape) (steps, entries, exits []plan.NodeID, ok bool)
+	walk = func(s draft.Shape) (steps, entries, exits []plan.NodeID, ok bool) {
+		switch s.Kind {
+		case "step":
+			return []plan.NodeID{s.Node}, []plan.NodeID{s.Node}, []plan.NodeID{s.Node}, true
+		case "pipe", "par":
+			var prev []plan.NodeID
+			for i, part := range s.Parts {
+				st, en, ex, ok := walk(part)
+				if !ok {
+					return nil, nil, nil, false
+				}
+				steps = append(steps, st...)
+				if s.Kind == "par" {
+					entries, exits = append(entries, en...), append(exits, ex...)
+					continue
+				}
+				if i == 0 {
+					entries = en
+				} else {
+					for _, e := range en {
+						waits[e] = append(waits[e], prev...)
+					}
+				}
+				prev, exits = ex, ex
+			}
+			return steps, entries, exits, len(s.Parts) > 0
+		}
+		return nil, nil, nil, false
+	}
+	steps, _, _, ok := walk(sh)
+	if !ok || len(steps) != len(p.Nodes) {
+		return false
+	}
+	for i, n := range p.Nodes {
+		if steps[i] != n.ID || !sameIDs(waits[n.ID], n.Requires) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameIDs(a, b []plan.NodeID) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[plan.NodeID]int{}
+	for _, x := range a {
+		seen[x]++
+	}
+	for _, x := range b {
+		if seen[x]--; seen[x] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
@@ -509,6 +588,8 @@ type record struct {
 	MoreFiles bool                  `json:"moreFiles,omitempty"`
 	// Writes are the run's queued writes and what came of each.
 	Writes []loom.WriteOutcome `json:"writes,omitempty"`
+	// Shape is the program's composition, if it can be had (shapeOf).
+	Shape *draft.Shape `json:"shape,omitempty"`
 }
 
 func (s *Server) detail(w http.ResponseWriter, r *http.Request) {
@@ -535,6 +616,7 @@ func (s *Server) detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if found {
+		rec.Shape = s.shapeOf(ctx, rec.Program, rec.Plan)
 		resp["record"] = rec
 	}
 	if !found && terr != nil {

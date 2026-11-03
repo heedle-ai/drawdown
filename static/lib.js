@@ -439,6 +439,96 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes };
+
+  // === Composition ==========================================================
+  // A program's shape (draft.Composition): steps, run one after another in
+  // a pipe (`;`) or side by side in a par (`⊗`).
+
+  // asShape is v if it's a well-formed shape: every step names a node,
+  // every group has at least two parts, and nesting stays under 64 deep;
+  // else null.
+  function asShape(v, depth = 0) {
+    if (!v || typeof v !== "object" || depth > 64) return null;
+    if (v.kind === "step") return str(v.node) && v.node !== "" && v.parts === undefined ? v : null;
+    if (v.kind !== "pipe" && v.kind !== "par") return null;
+    if (!Array.isArray(v.parts) || v.parts.length < 2) return null;
+    return v.parts.every((p) => asShape(p, depth + 1)) ? v : null;
+  }
+
+  // stepsOf lists a shape's steps in order.
+  function stepsOf(sh) {
+    return sh.kind === "step" ? [sh.node] : sh.parts.flatMap(stepsOf);
+  }
+
+  // layered is the shape a plan's requires alone imply: its steps in
+  // layers, each layer side by side, the layers one after another. It is
+  // what the graph draws when there is no composition to draw.
+  function layered(plan) {
+    const nodes = (plan && plan.nodes) || [];
+    const ids = new Set(nodes.map((n) => n.id));
+    const depth = new Map();
+    const depthOf = (n, seen = new Set()) => {
+      if (depth.has(n.id)) return depth.get(n.id);
+      if (seen.has(n.id)) return 0; // a cycle: Validate refuses these
+      seen.add(n.id);
+      let d = 0;
+      for (const r of n.requires || []) {
+        const p = nodes.find((x) => x.id === r);
+        if (p && ids.has(r)) d = Math.max(d, depthOf(p, seen) + 1);
+      }
+      depth.set(n.id, d);
+      return d;
+    };
+    const layers = [];
+    for (const n of nodes) (layers[depthOf(n)] ||= []).push({ kind: "step", node: n.id });
+    const group = (kind, parts) => (parts.length === 1 ? parts[0] : { kind, parts });
+    const flat = layers.filter(Boolean).map((l) => group("par", l));
+    return flat.length ? group("pipe", flat) : null;
+  }
+
+  // composition is what the graph draws: the program's shape when it has
+  // one that names exactly the plan's steps, else the plan's layers. exact
+  // says which.
+  function composition(shape, plan) {
+    const want = ((plan && plan.nodes) || []).map((n) => n.id);
+    const sh = asShape(shape);
+    if (sh) {
+      const got = stepsOf(sh);
+      if (got.length === want.length && got.every((id, i) => id === want[i])) return { shape: sh, exact: true };
+    }
+    return { shape: layered(plan), exact: false };
+  }
+
+  // groupKeys names every group in a shape by its path ("0", "0.1", …),
+  // the keys the graph folds groups by.
+  function groupKeys(sh, path = "0") {
+    if (!sh || sh.kind === "step") return [];
+    return [path, ...sh.parts.flatMap((p, i) => groupKeys(p, path + "." + i))];
+  }
+
+  // flowsInto is every hand-over into the steps of part: each from a step
+  // that came before it to a step of part that waits for it.
+  function flowsInto(plan, before, part) {
+    const earlier = new Set(before);
+    const out = [];
+    for (const id of part) {
+      const n = ((plan && plan.nodes) || []).find((x) => x.id === id);
+      for (const r of (n && n.requires) || []) if (earlier.has(r)) out.push({ from: r, to: id });
+    }
+    return out;
+  }
+
+  // tally counts a group's steps by status ("Completed", "Failed", …;
+  // "none" for steps Temporal hasn't reported).
+  function tally(ids, statusOf) {
+    const out = {};
+    for (const id of ids) {
+      const s = statusOf(id) || "none";
+      out[s] = (out[s] || 0) + 1;
+    }
+    return out;
+  }
+
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally };
 })();
 if (typeof module !== "undefined") module.exports = DD;

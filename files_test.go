@@ -255,6 +255,10 @@ func TestInv_StepFilesCostFewGitProcesses(t *testing.T) {
 		b, _ := os.ReadFile(log)
 		return strings.Count(string(b), "run")
 	}
+	// Untimed first requests fill the caches (commands, records) that
+	// every later request shares.
+	runs("one", 1)
+	runs("deep", 200)
 	if deepRuns, oneRuns := runs("deep", 200), runs("one", 1); deepRuns != oneRuns {
 		t.Errorf("200 directories ran git %d times, one file %d", deepRuns, oneRuns)
 	}

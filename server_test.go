@@ -261,6 +261,9 @@ func TestCompile(t *testing.T) {
 	if code != 200 || len(m["plan"].(map[string]any)["nodes"].([]any)) != 4 {
 		t.Fatalf("compile shipment: %d %v", code, m)
 	}
+	if sh, ok := m["shape"].(map[string]any); !ok || sh["kind"] == "" {
+		t.Fatalf("compile shipment has no shape: %v", m["shape"])
+	}
 	code, m, _ = w.call("POST", "/api/compile", map[string]string{"program": "(pipe\n  (echo \"a\""})
 	if code != 200 || m["line"] != 2.0 || m["col"] != 12.0 || !strings.Contains(m["error"].(string), "unclosed") {
 		t.Errorf("syntax error: %d %v", code, m)
