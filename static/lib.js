@@ -577,6 +577,25 @@ const DD = (() => {
     return typeof u === "string" && /^(https:\/\/[^\s]+|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/[^\s]*)$/.test(u) ? u : "";
   }
 
+  // connectorProblem is what a step's failure says is missing to reach a
+  // connector, from pirn's own words, or null: {missing: [connector
+  // names]} for connectors the worker doesn't have, {key, connector} for
+  // a key not set, {locked: true} for a keychain that can't be read now.
+  function connectorProblem(failure) {
+    if (!str(failure)) return null;
+    let m = /the step asks for "([^"]*)", but this worker grants only "([^"]*)"/.exec(failure);
+    if (m) {
+      const has = new Set(m[2].split(/\s+/).filter(Boolean).map((g) => g.split("/")[0]));
+      const missing = [...new Set(m[1].split(/\s+/).filter(Boolean).map((g) => g.split("/")[0]))].filter((n) => !has.has(n) && /^[a-z0-9-]{1,24}$/.test(n));
+      return missing.length ? { missing } : null;
+    }
+    m = /connector "([a-z0-9-]{1,24})" needs ([A-Za-z_][A-Za-z0-9_]{0,63}): store it/.exec(failure);
+    if (m) return { connector: m[1], key: m[2] };
+    if (/the worker has no Anthropic API key/.test(failure)) return { key: "ANTHROPIC_API_KEY" };
+    if (/keyring holding .* is locked|can't read [A-Za-z_][A-Za-z0-9_]* now|can't read its Anthropic API key now/.test(failure)) return { locked: true };
+    return null;
+  }
+
   // === Schedules ============================================================
 
   const RUN_ID = /^[A-Za-z0-9._:\-]{1,300}$/;
@@ -614,6 +633,6 @@ const DD = (() => {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem };
 })();
 if (typeof module !== "undefined") module.exports = DD;

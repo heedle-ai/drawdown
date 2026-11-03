@@ -617,7 +617,7 @@ function StepCard({ id, ctx }) {
           ${took(step.started, step.closed) && html`<dt>Ran</dt><dd>${took(step.started, step.closed)}</dd>`}
           ${when(step.started) && html`<dt>Started</dt><dd>${when(step.started)}</dd>`}
           ${when(step.closed) && html`<dt>Finished</dt><dd>${when(step.closed)}</dd>`}
-          ${step.failure && html`<dt>Failure</dt><dd class="mono cg-wrap">${step.failure}</dd>`}`}
+          ${step.failure && html`<dt>Failure</dt><dd class="mono cg-wrap">${step.failure}<${ConnectPrompt} failure=${step.failure} /></dd>`}`}
         ${files.length > 0 && html`<dt>Files</dt><dd>${DD.fileSummary(files)}</dd>`}
         ${writes.map((w) => html`<dt key=${w.id}>Write</dt><dd key=${w.id + "v"}><span class="mono">${w.connector} ${w.tool}</span> <${Pill} cls=${w.status === "done" ? "s-Completed" : w.status === "waiting" ? "s-Running" : "s-Failed"}>${w.status}<//></dd>`)}
         ${agent && html`<dt>Agent</dt><dd>${agent.model}, ${agent.turns} turns, ${agent.commands.length} commands, ${agent.files.length} files</dd>`}
@@ -972,6 +972,29 @@ function RemoveConnector({ name, onDone }) {
     ${err && html`<span class="error">${err}</span>`}</span>`;
 }
 
+// SkillConnectors shows the connectors a skill asks for, each marked as
+// this worker has it or not, with a link to connect the ones it hasn't.
+function SkillConnectors({ grant }) {
+  const [have, setHave] = useState(null);
+  useEffect(() => { api("/api/connectors").then((r) => { const v = r.ok && DD.asConnectors(r.data); setHave(v ? v.connectors.map((c) => c.name) : null); }); }, [grant]);
+  const names = [...new Set(grant.split(/\s+/).filter(Boolean).map((g) => g.split("/")[0]))];
+  const missing = have ? names.filter((n) => !have.includes(n)) : [];
+  return html`<div class="pills" style=${{ marginTop: "8px" }}><span class="muted">Its steps use</span>
+    ${names.map((n) => html`<${Pill} key=${n} cls=${!have ? "k-other" : have.includes(n) ? "s-Completed" : "s-Failed"} mono>${n}${have ? (have.includes(n) ? ", connected" : ", not connected") : ""}<//>`)}
+    ${missing.length > 0 && html`<a href="#/connectors">Connect ${missing.join(" and ")}</a>`}</div>`;
+}
+
+// ConnectPrompt turns a step's failure for want of a connector or a key
+// into what to do about it, with a link to the Connectors page.
+function ConnectPrompt({ failure }) {
+  const p = DD.connectorProblem(failure);
+  if (!p) return null;
+  const msg = p.missing ? html`This step needs the connector${p.missing.length > 1 ? "s" : ""} ${p.missing.map((n, i) => html`${i ? " and " : ""}<span class="mono">${n}</span>`)}, which this worker doesn't have. Add ${p.missing.length > 1 ? "them" : "it"} with that name.`
+    : p.key ? html`This step needs the key <span class="mono">${p.key}</span>${p.connector ? html` for <span class="mono">${p.connector}</span>` : ""}, which isn't set.`
+    : html`The keychain holding this step's keys was locked when it ran. Unlock it (log in to your desktop), then run it again.`;
+  return html`<div class="note connect-prompt" role="note"><span>${msg}</span> ${!p.locked && html`<a class="btn" href="#/connectors">${p.missing ? "Connect" : "Set it up"} on the connectors page</a>`}</div>`;
+}
+
 function ConnectorsPage() {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
@@ -1216,7 +1239,7 @@ function SkillPage({ name, version }) {
       <div class="pills"><${Pill} cls="k-skill" big>${name}<//>${cur && html`<${Pill} cls="k-other" plain mono>@${cur.version.slice(0, 12)}<//>`}
         ${cur && version && list[0] && list[0].version !== cur.version && html`<${Pill} cls="s-Failed" plain>not the newest<//>`}</div>
       ${cur && html`<p>${cur.description}</p>`}
-      ${cur && cur.connectors && html`<p class="muted">Its steps may use <span class="mono">${cur.connectors}</span> (as far as the worker's connectors allow).</p>`}
+      ${cur && cur.connectors && html`<${SkillConnectors} grant=${cur.connectors} />`}
       ${cur && cur.created && html`<p class="muted">Created by Claude from: “${cur.created}”</p>`}
       ${cur && cur.source && html`<p class="muted">Imported from <span class="mono">${cur.source.repo}${cur.source.path ? " " + cur.source.path : ""}</span>
         ${cur.source.commit && html` at <span class="mono">${cur.source.commit.slice(0, 12)}</span>`}${link && html` · <a href=${link} target="_blank" rel="noopener noreferrer">view the source ↗</a>`}</p>`}
@@ -1806,6 +1829,7 @@ function StepPage({ workflow, run, node, history: ref }) {
           <div class="panel"><dl class="meta">${dec.map(([k, v]) => html`<dt key=${k} class="muted">${k}</dt><dd key=${k + "v"}>${v}</dd>`)}</dl></div>`}
         ${step && step.failure && html`
           <h3>Went wrong first</h3>
+          <${ConnectPrompt} failure=${step.failure} />
           <div class="panel"><pre class="error">${step.failure}</pre>
             <p class="muted" style=${{ margin: "8px 0 0" }}>${step.status === "Completed" ? `Temporal retried it; attempt ${step.attempts} succeeded.` : "This is the last attempt's failure."}</p></div>`}
       </section>

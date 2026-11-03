@@ -398,3 +398,14 @@ test("schedules show only well-formed ones, and say when in words", () => {
   assert.equal(DD.when({ every: 90 * 60e9 }), "every 90 minutes");
   assert.equal(DD.when({ cron: "0 9 * * 1-5", timeZone: "Europe/Lisbon" }), "at cron 0 9 * * 1-5 (Europe/Lisbon)");
 });
+
+test("a step's failure says which connector or key to set up", () => {
+  assert.deepEqual(DD.connectorProblem('pirn: setup: the step asks for "maps search", but this worker grants only "search" of it (its connectors: "search")'), { missing: ["maps"] });
+  assert.deepEqual(DD.connectorProblem('the step asks for "maps/directions search/web", but this worker grants only "" of it'), { missing: ["maps", "search"] });
+  assert.deepEqual(DD.connectorProblem('pirn: setup: connector "maps" needs HEEDLE_CONNECTOR_MAPS_TOKEN: store it with `heedle secret set HEEDLE_CONNECTOR_MAPS_TOKEN`'), { connector: "maps", key: "HEEDLE_CONNECTOR_MAPS_TOKEN" });
+  assert.deepEqual(DD.connectorProblem("pirn: setup: the worker has no Anthropic API key: run `heedle secret set ANTHROPIC_API_KEY`"), { key: "ANTHROPIC_API_KEY" });
+  assert.deepEqual(DD.connectorProblem('connector "maps": can\'t read MAPS_KEY now: locked'), { locked: true });
+  for (const other of ["exit status 1", "", null, 'the step asks for "x", but this worker grants only "x" of it', 'connector "Bad Name" needs X: store it']) {
+    assert.equal(DD.connectorProblem(other), null, String(other));
+  }
+});
