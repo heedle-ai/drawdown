@@ -505,7 +505,7 @@ function CompositionGraph({ plan, shape, rec, steps, wf, run, temporalLink }) {
     <div class="cg">
       ${bar(false)}
       <div class="cg-scroll"><${ShapeView} sh=${state.sh} path="0" ctx=${ctx} top /></div>
-      ${full && html`<${Viewer} title="Composition" info=${`${n} steps. Drag to pan, scroll or + and − to zoom, Escape to close.`}
+      ${full && html`<${Viewer} title="Composition" info=${`${n} steps. Drag to pan, scroll or + and − to zoom, Fit to see it whole, Escape to close.`}
         onClose=${() => { setFull(false); setTimeout(() => fullRef.current && fullRef.current.focus(), 0); }}>
         ${bar(true)}<${ShapeView} sh=${state.sh} path="0" ctx=${ctx} top /><//>`}
     </div>`;
@@ -651,6 +651,14 @@ function Viewer({ title, info, onClose, children }) {
   });
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+  const canvas = useRef(null);
+  // fit shows the whole drawing, never larger than its own size.
+  const fit = () => {
+    const r = stage.current.getBoundingClientRect(), c = canvas.current;
+    const k = Math.max(0.25, Math.min(1, r.width / c.offsetWidth, r.height / c.offsetHeight));
+    setView({ k, x: Math.max(0, (r.width - c.offsetWidth * k) / 2), y: 0 });
+  };
+  useLayoutEffect(fit, []);
   useEffect(() => {
     const key = (e) => {
       if (e.key === "Escape") onClose();
@@ -681,7 +689,8 @@ function Viewer({ title, info, onClose, children }) {
         <span class="spacer"></span>
         <button type="button" onClick=${() => zoom(1.25)} aria-label="Zoom in">+</button>
         <button type="button" onClick=${() => zoom(0.8)} aria-label="Zoom out">−</button>
-        <button type="button" onClick=${() => setView({ x: 0, y: 0, k: 1 })}>Reset</button>
+        <button type="button" onClick=${fit}>Fit</button>
+        <button type="button" onClick=${() => setView({ x: 0, y: 0, k: 1 })}>100%</button>
         <button type="button" ref=${closeRef} onClick=${onClose}>Close</button>
       </div>
       <div class="viewer-stage" ref=${stage}
@@ -695,7 +704,7 @@ function Viewer({ title, info, onClose, children }) {
         onPointerUp=${() => { drag.current = null; }}
         onPointerCancel=${() => { drag.current = null; }}
         onLostPointerCapture=${() => { drag.current = null; }}>
-        <div class="viewer-canvas" style=${{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>${children}</div>
+        <div class="viewer-canvas" ref=${canvas} style=${{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>${children}</div>
       </div>
     </div>`;
 }
