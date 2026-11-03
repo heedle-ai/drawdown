@@ -204,6 +204,15 @@
   .answer-text { font-family:var(--sans); font-size:15px; line-height:1.6; }
   .answer .muted { margin-top:8px; font-size:13px; }
   .live img { width:100%; max-width:960px; border:1px solid var(--line); border-radius:8px; margin-top:8px; }
+  /* Connectors */
+  .connector { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+  .connector > p { margin:0; }
+  .key-row { border-top:1px solid var(--line); padding-top:10px; display:flex; flex-direction:column; gap:6px; }
+  .key-row p { margin:0; }
+  .key-row input[type=password] { font:13.5px var(--mono); padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--sunk); color:var(--ink); flex:1 1 260px; min-width:0; }
+  .note { padding:8px 12px; border-radius:8px; background:color-mix(in srgb, var(--bad) 10%, var(--surface)); }
+  .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
   /* Composition graph: ; runs left to right, ⊗ stacks */
   .cg-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
   .cg-bar .spacer { flex:1; }

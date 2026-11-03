@@ -338,3 +338,18 @@ test("every group has a key, and steps tally by status", () => {
   const st = { n0: "Completed", n1: "Failed" };
   assert.deepEqual(DD.tally(DD.stepsOf(sh), (id) => st[id]), { Completed: 1, Failed: 1, none: 1 });
 });
+
+// === Connectors (roadmap 7.2) ===
+test("the Connectors page reads only well-formed data, and never a value", () => {
+  const good = { file: "/h/connectors.json", keychain: true, anthropic: { name: "ANTHROPIC_API_KEY", from: "keychain" },
+    connectors: [{ name: "maps", url: "https://maps.example/mcp", secrets: [{ name: "MAPS_KEY", from: "missing" }] },
+      { name: "search", image: "i@sha256:aa", command: ["srv"], writes: ["post"], approve: true, secrets: [{ name: "K", from: "environment" }, { name: "L", from: "missing", error: "locked" }] }] };
+  assert.equal(DD.asConnectors(good), good);
+  assert.equal(DD.keysMissing(good), 2);
+  for (const bad of [null, {}, { ...good, connectors: "x" }, { ...good, anthropic: { name: "ANTHROPIC_API_KEY", from: "somewhere" } },
+    { ...good, connectors: [{ name: "m", secrets: [{ name: "bad name", from: "keychain" }] }] },
+    { ...good, connectors: [{ name: "m", secrets: [{ name: "K", from: "keychain" }], tools: [1] }] },
+    { ...good, connectors: [{ name: 7, secrets: [] }] }]) {
+    assert.equal(DD.asConnectors(bad), null, JSON.stringify(bad));
+  }
+});

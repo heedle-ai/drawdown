@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -85,18 +86,22 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 
 	reg := shipment.Registry()
 	browser := reed.Browser{Image: *browserImage, Network: *browserNetwork}
+	// Keys come from the environment, else the keychain (heedle secret set,
+	// or the Connectors page).
+	vault := pirn.Keychain{}
 	if *runWorker {
 		w := worker.New(c, *queue, reed.WorkerOptions(worker.Options{}))
 		if err := reed.Register(reg, w, browser); err != nil {
 			return err
 		}
-		// Keys come from the environment, else the keychain (heedle secret set).
-		vault := pirn.Keychain{}
-		key, err := pirn.LookupSecret(ctx, vault, "ANTHROPIC_API_KEY")
-		if err != nil {
+		// The key and the connectors are read again for every step, so a key
+		// stored or a connector added while the worker runs needs no restart.
+		if _, err := pirn.LookupSecret(ctx, vault, "ANTHROPIC_API_KEY"); err != nil {
 			log.Printf("ANTHROPIC_API_KEY: %v; ask and agent steps will fail until the worker can read it", err)
 		}
-		claude := pirn.Claude{APIKey: key, Model: *askModel}
+		claude := pirn.Claude{Model: *askModel, KeyFrom: func(ctx context.Context) (string, error) {
+			return pirn.LookupSecret(ctx, vault, "ANTHROPIC_API_KEY")
+		}}
 		if err := pirn.Register(reg, w, claude); err != nil {
 			return err
 		}
@@ -107,7 +112,8 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors, Vault: vault}
+		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors, Vault: vault,
+			LoadConnectors: func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) }}
 		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
 			return err
 		}
@@ -168,14 +174,17 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		}
 	}
 	srv := &drawdown.Server{
-		Skills:     &treadle.Library{Store: s},
-		Commands:   commands,
-		Store:      s,
-		Ref:        *ref,
-		Registry:   reg,
-		Temporal:   drawdown.TemporalClient{Client: c, Queue: *queue},
-		TemporalUI: *temporalUI,
-		Namespace:  *namespace,
+		Connectors:     func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) },
+		ConnectorsFile: *connectorsFile,
+		Secrets:        vault,
+		Skills:         &treadle.Library{Store: s},
+		Commands:       commands,
+		Store:          s,
+		Ref:            *ref,
+		Registry:       reg,
+		Temporal:       drawdown.TemporalClient{Client: c, Queue: *queue},
+		TemporalUI:     *temporalUI,
+		Namespace:      *namespace,
 		Examples: map[string]string{
 			"shipment": shipment.Program,
 			"echo":     `(pipe (par (echo "a") (echo "b")) echo)`,
@@ -243,12 +252,16 @@ func commands() *registry.Registry {
 	return reg
 }
 
-// readConnectors reads the worker's connectors file, if it has one.
+// readConnectors reads the worker's connectors file, if it has one: a
+// file that isn't there (yet) is no connectors.
 func readConnectors(path string) (pirn.Connectors, error) {
 	if path == "" {
 		return nil, nil
 	}
 	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil // not made yet: no connectors until it is
+	}
 	if err != nil {
 		return nil, err
 	}

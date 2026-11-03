@@ -728,6 +728,81 @@ function nodeCard(n, step, output) {
   ${output != null && html`<pre>${preview(output).slice(0, 400)}</pre>`}`;
 }
 
+
+// === Connectors ============================================================
+// The MCP servers agent steps may be granted, as the worker's connectors
+// file has them now, and where each key is found. A key typed here goes
+// straight to this machine's keychain: never to Temporal, Git or a log,
+// and the page never gets one back.
+
+const FROM_LABEL = { environment: "in the environment", keychain: "in your keychain", missing: "not set" };
+const FROM_CLASS = { environment: "s-Completed", keychain: "s-Completed", missing: "s-Failed" };
+
+function KeyRow({ k, onDone, note }) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const send = async (path, body) => {
+    setBusy(true); setErr("");
+    const r = await api(path, body);
+    setBusy(false);
+    if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
+    setValue("");
+    onDone();
+  };
+  const id = "key-" + k.name;
+  return html`
+    <div class="key-row">
+      <div class="pills"><span class="mono">${k.name}</span><${Pill} cls=${k.error ? "s-Failed" : FROM_CLASS[k.from]}>${k.error ? "can't read the keychain" : FROM_LABEL[k.from]}<//></div>
+      ${k.error && html`<p class="error mono">${k.error}</p>`}
+      ${k.from === "environment" ? html`<p class="muted">Set where heedle runs; it's used before your keychain.</p>` : html`
+        <form class="row" onSubmit=${(e) => { e.preventDefault(); if (value) send("/api/secrets", { name: k.name, value }); }}>
+          <label class="sr" for=${id}>${k.name}</label>
+          <input id=${id} type="password" autocomplete="off" spellcheck="false" placeholder=${k.from === "keychain" ? "Paste a new key to replace it" : "Paste the key"}
+            value=${value} onInput=${(e) => setValue(e.target.value)} />
+          <button class="primary" type="submit" disabled=${busy || !value}>${busy ? "Saving…" : k.from === "keychain" ? "Replace" : "Save"}</button>
+          ${k.from === "keychain" && html`<button type="button" disabled=${busy} onClick=${() => send("/api/secrets/delete", { name: k.name })}>Remove</button>`}
+        </form>`}
+      ${note && html`<p class="muted">${note}</p>`}
+      ${err && html`<p class="error" role="alert">${err}</p>`}
+    </div>`;
+}
+
+function ConnectorsPage() {
+  const [data, setData] = useState(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => { api("/api/connectors").then(setData); }, [tick]);
+  if (!data) return html`<p class="muted">Loading…</p>`;
+  if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
+  const v = DD.asConnectors(data.data);
+  if (!v) return html`<p class="error">The server's answer wasn't understood.</p>`;
+  const refresh = () => setTick((t) => t + 1);
+  const missing = DD.keysMissing(v);
+  return html`
+    <h2>Connectors</h2>
+    <p class="lede">Services agent steps can use, each through its MCP server, only as a step's arguments grant. Keys you save here go straight to this machine's keychain, are used from the next step with no restart, and are never shown again.</p>
+    ${missing > 0 && html`<p class="note">${missing} key${missing === 1 ? " isn't" : "s aren't"} set yet.</p>`}
+    <div class="panel connector">
+      <div class="pills"><strong>Claude</strong><${Pill} cls="k-agent" plain>ask and agent steps<//></div>
+      <${KeyRow} k=${v.anthropic} onDone=${refresh} />
+    </div>
+    ${v.error && html`<p class="error mono" role="alert">${v.file}: ${v.error}</p>`}
+    ${v.connectors.length === 0 && !v.error && html`<div class="panel muted" style=${{ marginTop: "12px" }}>
+      No connectors yet. They're listed in <span class="mono">${v.file || "the worker's -connectors file"}</span>, which the worker reads before every step:
+      <pre>${'{"connectors": [\n  {"name": "maps", "url": "<the MCP server\'s address>", "tokenEnv": "MAPS_KEY"}\n]}'}</pre></div>`}
+    ${v.connectors.map((c) => html`
+      <div class="panel connector" key=${c.name}>
+        <div class="pills">
+          <strong class="mono">${c.name}</strong>
+          <${Pill} cls="k-other" plain>${c.url ? "remote" : "local container"}<//>
+          ${(c.writes || []).length > 0 && html`<${Pill} cls=${c.approve ? "s-Running" : "k-other"} plain>${c.writes.length} write${c.writes.length === 1 ? "" : "s"}${c.approve ? ", each waits for your approval" : ""}<//>`}
+        </div>
+        <p class="mono muted cg-wrap">${c.url || [c.image, ...(c.command || [])].join(" ")}</p>
+        ${(c.tools || []).length > 0 && html`<p class="muted">Tools: <span class="mono">${c.tools.join(", ")}</span></p>`}
+        ${c.secrets.length === 0 ? html`<p class="muted">Needs no key.</p>` : c.secrets.map((k) => html`<${KeyRow} key=${k.name} k=${k} onDone=${refresh} />`)}
+      </div>`)}`;
+}
+
 // === Skills ================================================================
 
 // SkillBadge names a skill at the version a plan pins, linking to it.
@@ -1718,6 +1793,7 @@ function App() {
   else if (route[0] === "step" && route.length === 4) body = html`<${StepPage} key=${route.join("/")} workflow=${route[1]} run=${route[2]} node=${route[3]} history=${current} />`;
   else if (route[0] === "diff" && route.length === 3) body = html`<${Diff} from=${route[1]} to=${route[2]} />`;
   else if (route[0] === "skills" && route.length === 1) body = html`<${SkillsPage} />`;
+  else if (route[0] === "connectors" && route.length === 1) body = html`<${ConnectorsPage} />`;
   else if (route[0] === "review" && route.length === 2) body = html`<${ReviewPage} key=${route[1]} name=${route[1]} />`;
   else if (route[0] === "skill" && (route.length === 2 || route.length === 3)) body = html`<${SkillPage} key=${route.join("/")} name=${route[1]} version=${route[2]} />`;
   else body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;
@@ -1738,6 +1814,7 @@ function App() {
             </select></label>`}
       <span class="spacer"></span>
       <a href="#/skills">skills</a>
+      <a href="#/connectors">connectors</a>
       <${Pill} cls="k-other" plain>${(info.commands || []).length} commands<//>
       <a href=${info.temporalUI} target="_blank" rel="noopener">Temporal Web UI ↗</a>
     </header>
