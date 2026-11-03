@@ -335,6 +335,7 @@ func (s *Server) addConnector(w http.ResponseWriter, r *http.Request) {
 			used := slices.ContainsFunc(cs, func(c pirn.Connector) bool { return slices.Contains(secretNames(c), n) })
 			if strings.HasPrefix(n, TokenPrefix) && !used && s.Secrets != nil {
 				s.Secrets.Delete(ctx, n)
+				s.Secrets.Delete(ctx, oauthName(n)) // what refreshed it, if it was signed in
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"name": req.Name, "removed": true})

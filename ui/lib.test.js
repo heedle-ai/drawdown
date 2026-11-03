@@ -378,3 +378,10 @@ test("a suggested name is free and short enough; tokens get the server's name", 
   assert.ok(n.length <= 24 && n !== long && /^[a-z0-9]([a-z0-9-]{0,22}[a-z0-9])?$/.test(n), n);
   assert.equal(DD.tokenName("travel-guide"), "HEEDLE_CONNECTOR_TRAVEL_GUIDE_TOKEN");
 });
+
+test("a sign-in only ever opens an https:// page", () => {
+  assert.equal(DD.signInURL("https://auth.example.dev/authorize?x=1"), "https://auth.example.dev/authorize?x=1");
+  for (const bad of ["javascript:alert(1)", "http://evil.dev/authorize", "data:text/html,x", "https://a b", "//evil.dev", null, 3]) {
+    assert.equal(DD.signInURL(bad), "", String(bad));
+  }
+});

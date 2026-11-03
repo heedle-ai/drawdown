@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/heedle-ai/pirn"
@@ -34,6 +35,8 @@ type connectorView struct {
 	Writes  []string     `json:"writes,omitempty"`
 	Approve bool         `json:"approve,omitempty"`
 	Secrets []secretView `json:"secrets"`
+	// SignedIn: its token came from signing in, and is refreshed.
+	SignedIn bool `json:"signedIn,omitempty"`
 }
 
 type secretView struct {
@@ -93,6 +96,9 @@ func (s *Server) connectors(w http.ResponseWriter, r *http.Request) {
 			v := connectorView{Name: c.Name, URL: c.URL, Image: c.Image, Command: c.Command, Tools: c.Tools, Writes: c.Writes, Approve: c.Approve, Secrets: []secretView{}}
 			for _, n := range secretNames(c) {
 				v.Secrets = append(v.Secrets, secretView{Name: n})
+			}
+			if strings.HasPrefix(c.TokenEnv, TokenPrefix) && s.Secrets != nil {
+				_, v.SignedIn, _ = s.Secrets.Lookup(r.Context(), oauthName(c.TokenEnv))
 			}
 			views = append(views, v)
 		}

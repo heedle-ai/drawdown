@@ -535,7 +535,7 @@ const DD = (() => {
   const isKey = (k) => k && str(k.name) && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(k.name) && FROM.includes(k.from) && opt(k.error, str);
 
   const isConnector = (c) => c && typeof c === "object" && str(c.name) && opt(c.url, str) && opt(c.image, str) && strs(c.command) &&
-    strs(c.tools) && strs(c.writes) && opt(c.approve, bool) && objs(c.secrets, isKey);
+    strs(c.tools) && strs(c.writes) && opt(c.approve, bool) && opt(c.signedIn, bool) && objs(c.secrets, isKey);
 
   // asConnectors is the Connectors page's data if its frame is well formed
   // (the file, Claude's key, a list), else null. Each connector a name with
@@ -571,6 +571,12 @@ const DD = (() => {
     }
   }
 
+  // signInURL is u if it's somewhere a sign-in may send the browser: an
+  // https:// address (or this machine's, for testing); else "".
+  function signInURL(u) {
+    return typeof u === "string" && /^(https:\/\/[^\s]+|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/[^\s]*)$/.test(u) ? u : "";
+  }
+
   // tokenName is the keychain name the server keeps a connector's token
   // under (drawdown.TokenName).
   const tokenName = (name) => "HEEDLE_CONNECTOR_" + name.toUpperCase().replace(/-/g, "_") + "_TOKEN";
@@ -581,6 +587,6 @@ const DD = (() => {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL };
 })();
 if (typeof module !== "undefined") module.exports = DD;

@@ -150,10 +150,15 @@ type Server struct {
 	// (DefaultMCPRegistry if empty); RegistryClient, if set, reaches it.
 	MCPRegistry    string
 	RegistryClient *http.Client
+	// OAuthClient, if set, reaches MCP and authorization servers when a
+	// connector is added by signing in.
+	OAuthClient *http.Client
 
 	programs sync.Map // tree ID -> program text; trees never change
 
 	connectorsMu sync.Mutex // one change to the connectors file at a time
+	signInsMu    sync.Mutex
+	signIns      map[string]signIn // sign-ins waiting, by state
 
 	mu          sync.Mutex
 	commands    *registry.Registry // Commands with the skills, as of commandsKey
@@ -195,6 +200,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/connectors/catalog", s.connectorCatalog)
 	mux.HandleFunc("POST /api/connectors/add", s.addConnector)
 	mux.HandleFunc("POST /api/connectors/remove", s.addConnector)
+	mux.HandleFunc("POST /api/connectors/connect", s.connectConnector)
+	mux.HandleFunc("GET /oauth/callback", s.oauthCallback)
 	return s.guard(mux)
 }
 
