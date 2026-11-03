@@ -56,9 +56,9 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	sources := fs.String("sources", shipment.SourcesDir(), "directory for the source command's files")
 	browserImage := fs.String("browser-image", "", "reed browser image ID for the browse command (scripts/build-image.sh in heedle-ai/reed)")
 	browserNetwork := fs.String("browser-network", "", "Podman network browse containers join (default: Podman's)")
-	askModel := fs.String("ask-model", pirn.DefaultModel, "Claude model ask and agent use (key from ANTHROPIC_API_KEY)")
+	askModel := fs.String("ask-model", pirn.DefaultModel, "Claude model ask and agent use (key from ANTHROPIC_API_KEY, or the keychain: heedle secret set ANTHROPIC_API_KEY)")
 	agentImage := fs.String("agent-image", "", "content-pinned image ID agent steps run in (needs /bin/sh)")
-	connectorsFile := fs.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by environment variable name)")
+	connectorsFile := fs.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by name: an environment variable, or a keychain secret set with `loom secret set NAME`)")
 	imageRegistry := fs.String("image-registry", "", "OCI repository (such as ghcr.io/acme/heedle-images) that (image … \"push\") pushes to, with the worker's podman login")
 	agentRegistry := fs.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
 	if err := fs.Parse(args); err != nil {
@@ -90,7 +90,9 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if err := reed.Register(reg, w, browser); err != nil {
 			return err
 		}
-		claude := pirn.Claude{APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: *askModel}
+		// Keys come from the environment, else the keychain (heedle secret set).
+		vault := pirn.Keychain{}
+		claude := pirn.Claude{APIKey: pirn.LookupSecret(ctx, vault, "ANTHROPIC_API_KEY"), Model: *askModel}
 		if err := pirn.Register(reg, w, claude); err != nil {
 			return err
 		}
@@ -101,7 +103,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors}
+		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors, Vault: vault}
 		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
 			return err
 		}
