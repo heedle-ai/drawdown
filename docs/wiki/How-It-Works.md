@@ -24,10 +24,12 @@ All responses are JSON except the diffs, which are plain text.
 | `GET /api/info` | | `ref` (the default history), `temporalUI`, `namespace`, `commands`, `examples` |
 | `GET /api/refs` | | `{"refs": [...], "default", "heads"}`: every history under `refs/loom/`, the default one even before its first run, and each one's head commit |
 | `GET /api/beliefs?ref=` | | `{"ref", "beliefs": [...]}`: the latest run of every question asked on that history (`loom.Beliefs`), each with `program`, `outputs` and `leaves` |
-| `POST /api/compile` | `{"program": "…"}` | `{"plan": …}`, or `{"error", "line", "col"}` (200 either way; `line` and `col` only for syntax errors) |
+| `POST /api/compile` | `{"program": "…"}` | `{"plan": …, "shape": …}` (`shape` is the program's composition, or null; see [the graph](#runs-steps-and-the-graph)), or `{"error", "line", "col"}` (200 either way; `line` and `col` only for syntax errors) |
 | `POST /api/runs` | `{"program": "…", "ref": "…"}` (`ref` optional) | 202 `{"workflowId", "runId"}`; 422 with the compile error; 502 if Temporal refuses |
 | `GET /api/runs?ref=` | | `{"runs": [...]}`, newest first, plus `temporalError` if Temporal is unreachable. Merge commits are rows with status `Merged`, the commit merged in (`merged`), the first parent (`parent`) and the number of resolved conflicts (`resolved`) |
 | `GET /api/runs/{workflow}/{run}?ref=` | | `execution` (from Temporal), `record` (from warp: commit, program, plan, outputs, `previous`, `parent`, and `files`: for each step, the files its record holds under `files/<node>/`, each with `path`, `size`, `blob`, `before` and `status` (`added`, `changed`, `same` or `deleted`) against `previous`; every file of both runs is compared, then at most 500 are listed in all, in node then path order, then `moreFiles`). 404 with Temporal's error if neither knows the run |
+| `GET /api/connectors` | | `{"file", "connectors": [...], "anthropic", "keychain", "error"}`: the worker's connectors as its file has them now, each with `secrets`: where each key is found (`environment`, `keychain` or `missing`, with `error` if the keychain can't be read). Never a value |
+| `POST /api/secrets`, `POST /api/secrets/delete` | `{"name", "value"}` (`value` only to set) | where the key is found now; 403 unless from a loopback address, 400 for a name no connector uses (other than `ANTHROPIC_API_KEY`) or a value the keychain won't keep |
 | `GET /api/live/{workflow}` | | `{"frames": [{"activity", "attempt", "url", "image"}]}`: the latest heartbeat frame of each browsing step the run is executing, read with `DescribeWorkflowExecution` on its plan (`<workflow>/plan`); `temporalError` if Temporal is unreachable |
 | `GET /api/steps/{workflow}/{run}` | | `{"steps": [...]}`: each step as Temporal's history records it, in order, then loom's record: `node`, `activity`, `status`, `attempts`, `scheduled`, `started`, `closed`, and the last `failure` (at most 2 KiB). With Temporal unreachable: no steps and `temporalError`, still 200 |
 | `GET /api/diff/{from}/{to}` | | Unified diff text. 400 unless both are full commit IDs |
@@ -115,6 +117,12 @@ Clicking a step, here or in the drawdown on the home page, opens the **step insp
 A run whose agent steps queued writes ([loom → Writes](https://github.com/heedle-ai/loom/wiki/How-It-Works#writes)) shows them under **Writes** on its page: each connector and tool, its input, its status, and what came of it. While the run waits for approval, a write that needs it has **Approve** and **Decline** buttons; deciding signals the run, which runs the write once if approved. An agent step's own page lists every connector call it made (run by Anthropic's MCP connector or on the worker) and every write it queued, with what the step was granted. Inputs, outputs and errors are shown as text, with control and invisible format characters as `⟨U+XXXX⟩`.
 
 drawdown's own worker (`-worker`) takes the same `-connectors FILE` as `loom worker`.
+
+## Connectors
+
+[[/images/connectors.png|alt=The Connectors page: Claude's key, not set, with a field to paste it; a remote maps connector whose one write waits for approval, its key in the keychain, with Replace and Remove; a local search connector in a container, its key in the keychain]]
+
+The **connectors** link opens the Connectors page (`#/connectors`): the MCP servers agent steps can be granted ([pirn → Connectors](https://github.com/heedle-ai/pirn/wiki/How-It-Works#connectors)), as the worker's connectors file (`-connectors`) has them now, and Claude's own key. Each connector shows whether it's remote or a local container, its tools, and its writes, and whether they wait for approval. Each key it needs shows where it's found: in the environment where heedle runs (which comes first), in your keychain, or not set. Paste a key and **Save** (or **Replace**), or **Remove** it: it goes straight from this page to this machine's keychain (pirn's `Keychain`), never to Temporal, Git or a log, and the page never gets a value back. Only a name a connector uses, or `ANTHROPIC_API_KEY`, can be set, and only from the machine heedle runs on. The worker reads its connectors file and its keys again for every step, so a key saved here, or a connector added to the file, is used from the next step, with no restart.
 
 ## Skills
 

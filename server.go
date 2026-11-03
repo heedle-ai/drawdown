@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/heedle-ai/pirn"
 	"io/fs"
 	"mime"
 	"net"
@@ -139,6 +140,12 @@ type Server struct {
 	// localhost and loopback addresses. Requests for any other host are
 	// refused, which defeats DNS rebinding.
 	Hosts []string
+	// Connectors, if set, reads the worker's connectors as they are now
+	// (its connectors file, ConnectorsFile), for the Connectors page.
+	Connectors     func() (pirn.Connectors, error)
+	ConnectorsFile string
+	// Secrets, if set, is the keychain the Connectors page keeps keys in.
+	Secrets Secrets
 
 	programs sync.Map // tree ID -> program text; trees never change
 
@@ -176,6 +183,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/skills/add", s.addSkill)
 	mux.HandleFunc("POST /api/skills/{name}/approve", s.approveSkill)
 	mux.HandleFunc("POST /api/skills/{name}/reject", s.rejectSkill)
+	mux.HandleFunc("GET /api/connectors", s.connectors)
+	mux.HandleFunc("POST /api/secrets", s.setSecret)
+	mux.HandleFunc("POST /api/secrets/delete", s.setSecret)
 	return s.guard(mux)
 }
 

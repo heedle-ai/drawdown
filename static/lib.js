@@ -529,6 +529,27 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally };
+  // === Connectors ===========================================================
+
+  const FROM = ["environment", "keychain", "missing"];
+  const isKey = (k) => k && str(k.name) && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(k.name) && FROM.includes(k.from) && opt(k.error, str);
+
+  // asConnectors is the Connectors page's data if it's well formed: each
+  // connector a name with its keys, each key a name and where it's found;
+  // else null. A value is never sent, so none is read.
+  function asConnectors(v) {
+    if (!v || typeof v !== "object" || !str(v.file) || !isKey(v.anthropic) || !opt(v.error, str)) return null;
+    if (!objs(v.connectors, (c) => str(c.name) && opt(c.url, str) && opt(c.image, str) && strs(c.command) && strs(c.tools) &&
+      strs(c.writes) && opt(c.approve, bool) && objs(c.secrets, isKey))) return null;
+    return v;
+  }
+
+  // keysMissing counts the keys, the Anthropic key's included, that are
+  // found nowhere.
+  function keysMissing(v) {
+    return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
+  }
+
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing };
 })();
 if (typeof module !== "undefined") module.exports = DD;
