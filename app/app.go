@@ -58,7 +58,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	browserNetwork := fs.String("browser-network", "", "Podman network browse containers join (default: Podman's)")
 	askModel := fs.String("ask-model", pirn.DefaultModel, "Claude model ask and agent use (key from ANTHROPIC_API_KEY, or the keychain: heedle secret set ANTHROPIC_API_KEY)")
 	agentImage := fs.String("agent-image", "", "content-pinned image ID agent steps run in (needs /bin/sh)")
-	connectorsFile := fs.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by name: an environment variable, or a keychain secret set with `loom secret set NAME`)")
+	connectorsFile := fs.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by name: an environment variable, or a keychain secret set with `heedle secret set NAME`)")
 	imageRegistry := fs.String("image-registry", "", "OCI repository (such as ghcr.io/acme/heedle-images) that (image … \"push\") pushes to, with the worker's podman login")
 	agentRegistry := fs.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
 	if err := fs.Parse(args); err != nil {
@@ -92,7 +92,11 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		}
 		// Keys come from the environment, else the keychain (heedle secret set).
 		vault := pirn.Keychain{}
-		claude := pirn.Claude{APIKey: pirn.LookupSecret(ctx, vault, "ANTHROPIC_API_KEY"), Model: *askModel}
+		key, err := pirn.LookupSecret(ctx, vault, "ANTHROPIC_API_KEY")
+		if err != nil {
+			log.Printf("ANTHROPIC_API_KEY: %v; ask and agent steps will fail until the worker can read it", err)
+		}
+		claude := pirn.Claude{APIKey: key, Model: *askModel}
 		if err := pirn.Register(reg, w, claude); err != nil {
 			return err
 		}
