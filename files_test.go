@@ -255,8 +255,9 @@ func TestInv_StepFilesCostFewGitProcesses(t *testing.T) {
 		b, _ := os.ReadFile(log)
 		return strings.Count(string(b), "run")
 	}
-	// Untimed first requests fill the caches (commands, records) that
-	// every later request shares.
+	// An untimed first request for each record pays what is paid once
+	// (the command cache among it), so only the files differ in what is
+	// measured.
 	runs("one", 1)
 	runs("deep", 200)
 	if deepRuns, oneRuns := runs("deep", 200), runs("one", 1); deepRuns != oneRuns {

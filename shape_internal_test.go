@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/heedle-ai/draft"
+	"github.com/heedle-ai/draft/registry"
 	"github.com/heedle-ai/shuttle/plan"
 )
 
@@ -34,9 +35,15 @@ func TestInv_ShapesMatchTheirPlans(t *testing.T) {
 		"an extra step":   {Kind: "pipe", Parts: []draft.Shape{{Kind: "par", Parts: []draft.Shape{step("n0"), step("n1")}}, step("n2"), step("n3")}},
 		"an unknown kind": {Kind: "loop", Parts: []draft.Shape{step("n0"), step("n1"), step("n2")}},
 		"an empty group":  {Kind: "pipe", Parts: []draft.Shape{{Kind: "par", Parts: []draft.Shape{step("n0"), step("n1")}}, step("n2"), {Kind: "par"}}},
+		"a group of one":  {Kind: "pipe", Parts: []draft.Shape{{Kind: "par", Parts: []draft.Shape{step("n0"), step("n1")}}, {Kind: "pipe", Parts: []draft.Shape{step("n2")}}}},
 	} {
 		if shapeMatches(bad, p) {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	// A program the commands no longer resolve (a removed skill) has no
+	// composition: the page draws its plan from requires.
+	if sh := shapeWith(ctx, registry.New(), src, p); sh != nil {
+		t.Errorf("a program whose commands are gone has a shape: %v", sh)
 	}
 }

@@ -7,7 +7,7 @@
 | **Drawdown** | Recent runs, woven: one column per run, one square per step, coloured by the kind of step, with the run's status along the top. Hover for details; click a column to open the run, a square to open the step |
 | **New run** | An editor that compiles as you type: errors with line and column, or the program's composition as a graph. Example programs, and a button per command that inserts it |
 | **Runs** | Every run, newest first: status, the program with its commands coloured, when it started, how long it took relative to the others, and its warp commit |
-| **Run** | Status and IDs, the timeline of every step as Temporal ran it, the composition graph (every group folds, every step opens in place, with links to its inspector, skill, diff, record and Temporal history) and each step's output |
+| **Run** | Status and IDs, the timeline of every step as Temporal ran it, the composition graph (groups fold, every step opens in place, with links to its inspector, skill, diff, record and Temporal history) and each step's output |
 | **Step** | What one step was given, where it ran and what it could touch, what it decided, what it produced, and which steps it never saw |
 | **Compare** | A diff between this run and the previous run of the same program, or the record before it |
 

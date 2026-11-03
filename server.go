@@ -317,20 +317,27 @@ func (s *Server) registry(ctx context.Context) (*registry.Registry, error) {
 }
 
 func (s *Server) compileProgram(ctx context.Context, src string) (plan.Plan, *apiError) {
+	p, _, ce := s.compileWith(ctx, src)
+	return p, ce
+}
+
+// compileWith is compileProgram, also giving the registry it compiled
+// with, so the composition can be had without listing refs again.
+func (s *Server) compileWith(ctx context.Context, src string) (plan.Plan, *registry.Registry, *apiError) {
 	reg, err := s.registry(ctx)
 	if err != nil {
-		return plan.Plan{}, &apiError{Error: err.Error()}
+		return plan.Plan{}, nil, &apiError{Error: err.Error()}
 	}
 	p, err := draft.Compile(ctx, reg, draft.Source(src))
 	if err == nil {
-		return p, nil
+		return p, reg, nil
 	}
 	ce := &apiError{Error: err.Error()}
 	var se sexpr.SyntaxError
 	if errors.As(err, &se) {
 		ce.Line, ce.Col = se.Pos.Line, se.Pos.Col
 	}
-	return plan.Plan{}, ce
+	return plan.Plan{}, nil, ce
 }
 
 func (s *Server) compile(w http.ResponseWriter, r *http.Request) {
@@ -339,12 +346,12 @@ func (s *Server) compile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A program with errors is a successful check: report it with 200.
-	p, ce := s.compileProgram(r.Context(), req.Program)
+	p, reg, ce := s.compileWith(r.Context(), req.Program)
 	if ce != nil {
 		writeJSON(w, http.StatusOK, ce)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": s.shapeOf(r.Context(), req.Program, p)})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p)})
 }
 
 // shapeOf is a program's composition (draft.Composition), for drawing its
@@ -357,6 +364,11 @@ func (s *Server) shapeOf(ctx context.Context, src string, p plan.Plan) *draft.Sh
 	if err != nil {
 		return nil
 	}
+	return shapeWith(ctx, reg, src, p)
+}
+
+// shapeWith is shapeOf with the registry already in hand.
+func shapeWith(ctx context.Context, reg *registry.Registry, src string, p plan.Plan) *draft.Shape {
 	sh, err := draft.Composition(ctx, reg, draft.Source(src))
 	if err != nil || !shapeMatches(sh, p) {
 		return nil
@@ -394,7 +406,9 @@ func shapeMatches(sh draft.Shape, p plan.Plan) bool {
 				}
 				prev, exits = ex, ex
 			}
-			return steps, entries, exits, len(s.Parts) > 0
+			// draft never makes a group of fewer than two parts; the page
+			// refuses one too (lib.js asShape).
+			return steps, entries, exits, len(s.Parts) > 1
 		}
 		return nil, nil, nil, false
 	}

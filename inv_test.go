@@ -119,9 +119,6 @@ func TestInv_AnswersAreShownAsText(t *testing.T) {
 	for _, want := range []string{
 		"const { agent, answer, page } = DD.parse(text);",
 		"<pre class=\"answer-text\">${answer.text}</pre>",
-		// The composition graph is React elements, full screen too: no
-		// third way into the page's HTML.
-		"${children}</div>",
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("static/app.js lacks %s", want)
@@ -370,5 +367,46 @@ func TestInv_RegistryPatternsAgree(t *testing.T) {
 	bobbin := read("../bobbin/build.go", "imageRepo = regexp.MustCompile\\(`([^`]+)`\\)")
 	if pirn != loom || pirn != page || pirn != bobbin {
 		t.Errorf("registry patterns differ:\npirn %s\nloom %s\npage %s\nbobbin %s", pirn, loom, page, bobbin)
+	}
+}
+
+// TestInv_NoSecondRenderer: the graphs are React elements; no library that
+// draws its own HTML (Mermaid was one) is loaded or called.
+func TestInv_NoSecondRenderer(t *testing.T) {
+	for _, f := range []string{"static/app.js", "static/index.html"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(strings.ToLower(string(b)), "mermaid") {
+			t.Errorf("%s still uses mermaid", f)
+		}
+	}
+}
+
+// TestInv_CompositionGraphKeepsItsPlace: folding keeps focus on the same
+// button; what is open or folded belongs to one drawing and starts afresh
+// when the program changes shape; a drawing from requires shows each
+// step's waits; the record link needs a record before it; and the full
+// screen view keeps focus inside it. (Review 25.)
+func TestInv_CompositionGraphKeepsItsPlace(t *testing.T) {
+	b, err := os.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"<button type=\"button\" class=\"cg-fold\" aria-expanded=${!folded}",
+		"const sig = JSON.stringify([sh, exact]);",
+		"${!ctx.exact && !open && html`<div class=\"cg-waits\">",
+		"${ctx.rec && ctx.rec.parent && html`<${IconLink}",
+		"// A modal keeps focus inside it.",
+		"const shown = plan ? lastGood.current : err ? lastGood.current : null;",
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("static/app.js lacks %s", want)
+		}
+	}
+	if strings.Contains(string(b), "cg-folded") {
+		t.Error("a folded group is a different element from the fold button again")
 	}
 }
