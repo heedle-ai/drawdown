@@ -367,5 +367,14 @@ test("a registry page keeps only servers it can show safely", () => {
     { ...no, why: undefined }, { ...ready, fit: "maybe" }, null, { ...ready, name: 3 }], next: "c2" });
   assert.deepEqual(v.servers, [ready, no]);
   assert.equal(v.next, "c2");
+  assert.equal(v.hidden, 7);
   assert.equal(DD.asRegistryPage({ servers: "x" }), null);
+});
+
+test("a suggested name is free and short enough; tokens get the server's name", () => {
+  assert.equal(DD.freeName("maps", ["maps", "maps-2"]), "maps-3");
+  const long = "a".repeat(24);
+  const n = DD.freeName(long, [long]);
+  assert.ok(n.length <= 24 && n !== long && /^[a-z0-9]([a-z0-9-]{0,22}[a-z0-9])?$/.test(n), n);
+  assert.equal(DD.tokenName("travel-guide"), "HEEDLE_CONNECTOR_TRAVEL_GUIDE_TOKEN");
 });
