@@ -779,11 +779,11 @@ function SchedulesPage() {
   const [tick, setTick] = useState(0);
   const [err, setErr] = useState("");
   const [sure, setSure] = useState("");
+  const [note, setNote] = useState("");
   useEffect(() => { api("/api/schedules").then(setData); }, [tick]);
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
   const ss = DD.asSchedules(data.data);
-  const [note, setNote] = useState("");
   const act = async (name, action) => {
     setErr(""); setSure(""); setNote("");
     const r = await api(`/api/schedules/${encodeURIComponent(name)}/${action}`, {});

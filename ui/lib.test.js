@@ -444,3 +444,21 @@ test("a run with no record says which steps stopped it (review 32)", () => {
   assert.deepEqual(DD.connectorProblem(DD.stoppedBy(steps)[0].failure), { missing: ["maps"] });
   assert.deepEqual(DD.stoppedBy(null), []);
 });
+
+// review 32: SchedulesPage called useState after its early returns, so
+// React threw (#310) as soon as the list loaded. Every component calls its
+// hooks before any return, every render.
+test("components call hooks before any early return (review 32)", () => {
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "static", "app.js"), "utf8");
+  const bad = [];
+  for (const chunk of src.split(/^function /m).slice(1)) {
+    const name = chunk.slice(0, chunk.indexOf("("));
+    const body = chunk.slice(0, chunk.search(/^}/m) + 1 || undefined).split("\n");
+    const first = body.findIndex((l) => /^  (if \(.*\) )?return\b/.test(l));
+    if (first < 0) continue;
+    body.slice(first + 1).forEach((l, i) => {
+      if (/^  (const|let) .*\buse(State|Effect|Ref|Memo|Callback|Reducer|Context|LayoutEffect)\(|^  use(Effect|LayoutEffect)\(/.test(l)) bad.push(`${name}: line ${first + 2 + i} of it`);
+    });
+  }
+  assert.deepEqual(bad, []);
+});
