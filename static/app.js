@@ -814,9 +814,10 @@ function AddConnector({ onDone, taken }) {
     if (r.data.signIn === false) { add(); return; } // it needs no sign-in
     const u = DD.signInURL(r.data.authorize);
     if (!u) { setErr("The sign-in page's address wasn't https://."); return; }
-    window.open(u, "_blank", "noopener,noreferrer");
-    setWaiting(name);
+    setConfirm({ url: u, at: String(r.data.at || "") }); // say where before going there (review 29)
   };
+  const [confirm, setConfirm] = useState(null);
+  const go = () => { window.open(confirm.url, "_blank", "noopener,noreferrer"); setConfirm(null); setWaiting(name); };
   const add = async () => {
     setBusy(true); setErr("");
     const r = await api("/api/connectors/add", { name, url: pick.url, token });
@@ -842,7 +843,10 @@ function AddConnector({ onDone, taken }) {
             <label>Connector name<input type="text" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
             <label>Or paste an access token from its settings<input type="password" autocomplete="off" value=${token} onInput=${(e) => setToken(e.target.value)} /></label>
           </div>
-          ${waiting ? html`<p role="status">Finish signing in to <strong>${pick.title || pick.name}</strong> in the new tab; this page picks it up when you're done.</p>` : html`
+          ${confirm ? html`<div class="row"><span>${pick.title || pick.name} signs you in at <strong class="mono">${confirm.at}</strong>. Sign in there only if that's who you expect.</span>
+              <button class="primary" type="button" onClick=${go}>Open the sign-in at ${confirm.at}</button>
+              <button type="button" onClick=${() => setConfirm(null)}>Cancel</button></div>`
+          : waiting ? html`<p role="status">Finish signing in to <strong>${pick.title || pick.name}</strong> in the new tab; this page picks it up when you're done.</p>` : html`
           <div class="row">
             <button class="primary" type="button" disabled=${busy || !name || !!token} onClick=${signIn}>${busy ? "Working…" : "Sign in and add " + name}</button>
             <button type="button" disabled=${busy || !name || (pick.token && !token)} onClick=${add}>${token ? "Add with this token" : "Add without signing in"}</button>

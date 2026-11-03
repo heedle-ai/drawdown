@@ -156,6 +156,11 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 		err = s.Secrets.Delete(r.Context(), req.Name)
 	} else {
 		err = s.Secrets.Store(r.Context(), req.Name, req.Value)
+		if err == nil && strings.HasPrefix(req.Name, TokenPrefix) {
+			// A token pasted over a signed-in one: nothing may refresh it
+			// from the old sign-in (review 29).
+			err = s.Secrets.Delete(r.Context(), oauthName(req.Name))
+		}
 	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, apiError{Error: err.Error()})
