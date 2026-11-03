@@ -44,6 +44,65 @@ type fakeTemporal struct {
 	create  func(context.Context, string) (map[string][]byte, error)
 	catalog loom.Catalog
 	listed  []treadle.Source
+	sched   map[string]*loom.Schedule
+	schedIn map[string]loom.RunInput
+}
+
+func (f *fakeTemporal) CreateSchedule(ctx context.Context, name string, in loom.RunInput, spec loom.ScheduleSpec) error {
+	if _, err := loom.ScheduleOptions(ctx, "loom", name, in, spec); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sched == nil {
+		f.sched, f.schedIn = map[string]*loom.Schedule{}, map[string]loom.RunInput{}
+	}
+	if f.sched[name] != nil {
+		return errors.New("schedule already exists")
+	}
+	f.sched[name] = &loom.Schedule{Name: name, Program: in.Program, Ref: in.Ref, Spec: spec, Recent: []loom.ScheduleRun{}}
+	f.schedIn[name] = in
+	return nil
+}
+
+func (f *fakeTemporal) Schedules(context.Context) ([]loom.Schedule, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []loom.Schedule
+	for _, s := range f.sched {
+		out = append(out, *s)
+	}
+	return out, nil
+}
+
+// ScheduleAction runs a schedule now as Temporal would: a run of exactly
+// its input.
+func (f *fakeTemporal) ScheduleAction(ctx context.Context, name, action string) error {
+	f.mu.Lock()
+	s, in := f.sched[name], f.schedIn[name]
+	f.mu.Unlock()
+	if s == nil {
+		return errors.New("schedule not found")
+	}
+	switch action {
+	case "pause", "resume":
+		f.mu.Lock()
+		s.Paused = action == "pause"
+		f.mu.Unlock()
+	case "delete":
+		f.mu.Lock()
+		delete(f.sched, name)
+		f.mu.Unlock()
+	case "run":
+		wf, run, err := f.Submit(ctx, in)
+		if err != nil {
+			return err
+		}
+		f.mu.Lock()
+		s.Recent = append(s.Recent, loom.ScheduleRun{WorkflowID: wf, RunID: run, At: time.Now()})
+		f.mu.Unlock()
+	}
+	return nil
 }
 
 func (f *fakeTemporal) Live(_ context.Context, wf string) ([]drawdown.LiveFrame, error) {
