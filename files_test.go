@@ -177,9 +177,18 @@ func (w *world) commitFiles(wf, run string, i int, files map[string]map[string]s
 	}
 	ft, _ := w.store.PutTree(ctx, nodes)
 	es, _ := w.store.Tree(ctx, tree)
+	// Each wf is its own program, named in the record as loom names it.
+	src := `(echo "` + wf + `")`
+	prog, _ := w.store.PutBlob(ctx, []byte(src))
+	p, _ := loom.Compile(ctx, draft.DefaultRegistry(), `(echo "x")`)
+	programID, _ := loom.WorkflowID(ctx, loom.RunInput{Program: src, Plan: p, Ref: loom.DefaultRef})
 	var keep []warp.Entry
 	for _, e := range es {
-		if e.Name != loom.FilesDir {
+		switch e.Name {
+		case loom.FilesDir:
+		case "program.draft":
+			keep = append(keep, warp.Entry{Name: e.Name, Kind: warp.KindBlob, ID: prog})
+		default:
 			keep = append(keep, e)
 		}
 	}
@@ -188,7 +197,7 @@ func (w *world) commitFiles(wf, run string, i int, files map[string]map[string]s
 		w.t.Fatal(err)
 	}
 	c, err := w.store.Commit(ctx, warp.CommitSpec{Tree: root, Parents: []warp.ID{head}, Message: "run " + wf,
-		Trailers: []warp.Trailer{{Key: loom.TrailerWorkflow, Value: wf}, {Key: loom.TrailerRun, Value: run}},
+		Trailers: []warp.Trailer{{Key: loom.TrailerWorkflow, Value: wf}, {Key: loom.TrailerRun, Value: run}, {Key: loom.TrailerProgram, Value: programID}},
 		Author:   warp.Signature{Name: "t", Email: "t@x", When: time.Unix(1700000100+int64(i), 0)}})
 	if err != nil || w.store.Advance(ctx, loom.DefaultRef, head, c) != nil {
 		w.t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
@@ -58,7 +59,7 @@ func (f *fakeTemporal) CreateSchedule(ctx context.Context, name string, in loom.
 		f.sched, f.schedIn = map[string]*loom.Schedule{}, map[string]loom.RunInput{}
 	}
 	if f.sched[name] != nil {
-		return errors.New("schedule already exists")
+		return temporal.ErrScheduleAlreadyRunning
 	}
 	f.sched[name] = &loom.Schedule{Name: name, Program: in.Program, Ref: in.Ref, Spec: spec, Recent: []loom.ScheduleRun{}}
 	f.schedIn[name] = in
@@ -82,7 +83,7 @@ func (f *fakeTemporal) ScheduleAction(ctx context.Context, name, action string) 
 	s, in := f.sched[name], f.schedIn[name]
 	f.mu.Unlock()
 	if s == nil {
-		return errors.New("schedule not found")
+		return serviceerror.NewNotFound("schedule not found")
 	}
 	switch action {
 	case "pause", "resume":
@@ -94,7 +95,8 @@ func (f *fakeTemporal) ScheduleAction(ctx context.Context, name, action string) 
 		delete(f.sched, name)
 		f.mu.Unlock()
 	case "run":
-		wf, run, err := f.Submit(ctx, in)
+		// As Temporal does: the workflow ID with the time added.
+		wf, run, err := f.start(ctx, in, time.Now().UTC().Format("-2006-01-02T15:04:05.000000000Z"))
 		if err != nil {
 			return err
 		}
@@ -113,6 +115,12 @@ func (f *fakeTemporal) Live(_ context.Context, wf string) ([]drawdown.LiveFrame,
 }
 
 func (f *fakeTemporal) Submit(ctx context.Context, in loom.RunInput) (string, string, error) {
+	return f.start(ctx, in, "")
+}
+
+// start runs and records in, its workflow ID with suffix added: a
+// schedule's runs have the time Temporal adds.
+func (f *fakeTemporal) start(ctx context.Context, in loom.RunInput, suffix string) (string, string, error) {
 	// Real Temporal only starts the workflow here; a worker runs and records
 	// it later. The fake does both now, so it mustn't be bound by the
 	// server's Temporal timeout (DRAW-18).
@@ -135,6 +143,7 @@ func (f *fakeTemporal) Submit(ctx context.Context, in loom.RunInput) (string, st
 	if err != nil {
 		return "", "", err
 	}
+	wf += suffix
 	run := fmt.Sprintf("run-%d", len(f.execs)+1)
 	start := time.Unix(1761900000+int64(len(f.execs))*60, 0).UTC()
 	if _, err := (&loom.Recorder{Store: f.store}).Record(ctx, loom.RecordInput{
