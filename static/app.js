@@ -13,14 +13,7 @@ mermaid.initialize({
   flowchart: { curve: "basis", nodeSpacing: 28, rankSpacing: 44 },
 });
 
-async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
-  const ct = res.headers.get("Content-Type") || "";
-  const data = ct.includes("application/json") ? await res.json() : await res.text();
-  return { ok: res.ok, status: res.status, data };
-}
+const api = (path, body) => DD.request(fetch, path, body);
 
 // === Routing: #/, #/run/<workflow>/<run>, #/diff/<from>/<to>, #/agent/<ref> ==
 
@@ -649,7 +642,7 @@ function SkillBadge({ skill }) {
 // AddSkill imports a skill from a link, or adds one pasted or uploaded.
 // Each runs on a worker (loom's skills workflow); the page never writes.
 // An import from a repository that isn't trusted waits for review.
-function AddSkill({ onDone }) {
+function AddSkill({ onDone, library }) {
   const [mode, setMode] = useState("import");
   const [link, setLink] = useState("");
   const [path, setPath] = useState("");
@@ -696,7 +689,7 @@ function AddSkill({ onDone }) {
         </div>
         <div class="row"><button class="primary" disabled=${busy || !link.trim()} onClick=${() => send("/api/skills/import", { link, path, branch })}>${busy ? "Importing…" : "Import"}</button>
           <span class="muted">From a repository that isn't trusted, it waits for your review before any program can use it.</span></div>`}
-      ${mode === "browse" && html`<${BrowseRepo} onDone=${onDone} />`}
+      ${mode === "browse" && html`<${BrowseRepo} onDone=${onDone} library=${library} />`}
       ${mode === "paste" && html`
         <textarea aria-label="SKILL.md" value=${text} onInput=${(e) => setText(e.target.value)} placeholder=${"---\nname: brief\ndescription: Writes a short brief.\n---\nKeep it under 200 words."}></textarea>
         <div class="row"><button class="primary" disabled=${busy || !text.trim()} onClick=${() => send("/api/skills/add", { files: { "SKILL.md": DD.base64(text) } })}>${busy ? "Adding…" : "Add"}</button>
@@ -716,8 +709,9 @@ function AddSkill({ onDone }) {
 // BrowseRepo lists a repository's skills (on a worker) and imports the
 // ones chosen, one by one, each through the ordinary import: from a
 // repository that isn't trusted, each waits for review.
-function BrowseRepo({ onDone }) {
+function BrowseRepo({ onDone, library }) {
   const [link, setLink] = useState("");
+  const [branch, setBranch] = useState("");
   const [busy, setBusy] = useState("");
   const [cat, setCat] = useState(null);
   const [error, setError] = useState("");
@@ -726,27 +720,39 @@ function BrowseRepo({ onDone }) {
   const keyOf = (e) => e.source.repo + "#" + (e.source.path || "");
   const list = async () => {
     setBusy("list"); setError(""); setCat(null); setChosen(new Set()); setDone({});
-    const r = await api("/api/skills/catalog", { link });
+    const r = await api("/api/skills/catalog", { link, branch });
     setBusy("");
     const c = r.ok ? DD.asCatalog(r.data) : null;
     if (c) setCat(c); else setError((r.data && r.data.error) || String(r.data));
   };
-  const toggle = (k) => setChosen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  // Of several skills with one name, at most one is chosen.
+  const toggle = (e) => setChosen((s) => {
+    const n = new Set(s), k = keyOf(e);
+    if (n.has(k)) n.delete(k);
+    else { cat.entries.forEach((o) => o.name === e.name && n.delete(keyOf(o))); n.add(k); }
+    return n;
+  });
   const importChosen = async () => {
     setBusy("import");
     for (const e of cat.entries.filter((e) => chosen.has(keyOf(e)))) {
       const r = await api("/api/skills/import", { link: e.source.repo, path: e.source.path || "", branch: e.source.ref || "" });
       const sk = r.ok ? DD.asSkill(r.data.skill) : null;
-      setDone((d) => ({ ...d, [keyOf(e)]: sk ? { skill: sk } : { error: (r.data && r.data.error) || String(r.data) } }));
+      // The import fetches the branch as it is now: say if that isn't
+      // what was listed (review 24).
+      const moved = sk && sk.source && e.source.commit && sk.source.commit && sk.source.commit !== e.source.commit;
+      setDone((d) => ({ ...d, [keyOf(e)]: sk ? { skill: sk, moved } : { error: (r.data && r.data.error) || String(r.data) } }));
     }
     setBusy(""); setChosen(new Set()); onDone();
   };
-  const usable = cat ? cat.entries.filter((e) => !e.problem) : [];
+  const notes = cat ? DD.catalogNotes(cat.entries, library) : {};
+  // "Choose all" takes the first of each name.
+  const usable = cat ? cat.entries.filter((e, i, all) => !e.problem && all.findIndex((o) => !o.problem && o.name === e.name) === i) : [];
   return html`
     <div class="row">
-      <label>A GitHub repository of skills<input type="text" value=${link} onInput=${(e) => setLink(e.target.value)}
+      <label>A GitHub link or https:// repository of skills<input type="text" value=${link} onInput=${(e) => setLink(e.target.value)}
         onKeyDown=${(e) => { if (e.key === "Enter" && link.trim() && !busy) list(); }}
         placeholder="github.com/anthropics/skills" /></label>
+      <label style=${{ flex: "0 1 140px" }}>Branch or tag<input type="text" value=${branch} onInput=${(e) => setBranch(e.target.value)} /></label>
     </div>
     <div class="row"><button class="primary" disabled=${!!busy || !link.trim()} onClick=${list}>${busy === "list" ? "Listing its skills…" : "List its skills"}</button>
       <span class="muted">A worker fetches only the SKILL.md files. Nothing is imported until you choose.</span></div>
@@ -762,10 +768,11 @@ function BrowseRepo({ onDone }) {
         <ul class="catalog-list">${cat.entries.map((e) => {
           const k = keyOf(e), d = done[k];
           return html`<li key=${k} class=${e.problem ? "catalog-bad" : ""}>
-            <label><input type="checkbox" disabled=${!!e.problem || !!busy} checked=${chosen.has(k)} onChange=${() => toggle(k)} />
+            <label><input type="checkbox" disabled=${!!e.problem || !!busy} checked=${chosen.has(k)} onChange=${() => toggle(e)} />
               <span class="mono catalog-name">${e.name || e.source.path}</span></label>
-            <span class="catalog-desc">${e.problem ? html`<span class="error">${e.problem}</span>` : e.description}</span>
-            <span class="catalog-state">${d && d.skill ? (d.skill.pending
+            <span class="catalog-desc"><span class="catalog-text">${e.problem ? html`<span class="error">${e.problem}</span>` : e.description}</span>
+              ${notes[k] && html`<span class="catalog-note">${notes[k].text}</span>`}</span>
+            <span class="catalog-state">${d && d.moved ? html`<span class="catalog-note">changed since it was listed </span>` : ""}${d && d.skill ? (d.skill.pending
               ? html`<a href=${"#/review/" + encodeURIComponent(d.skill.name)}><${Pill} cls="s-Running">waiting for review<//></a>`
               : html`<a href=${"#/skill/" + encodeURIComponent(d.skill.name)}><${Pill} cls="s-Completed">added<//></a>`)
               : d && d.error ? html`<span class="error">${d.error}</span>` : html`<span class="muted mono">${e.source.path || "/"}</span>`}</span>
@@ -786,7 +793,7 @@ function SkillsPage() {
   return html`
     <h2>Skills</h2>
     <p class="lede">What steps can do by name: each skill is a folder whose SKILL.md tells Claude how. A program that uses one pins its exact version.</p>
-    <${AddSkill} onDone=${() => setTick((t) => t + 1)} />
+    <${AddSkill} onDone=${() => setTick((t) => t + 1)} library=${skills} />
     ${skills.length === 0 && html`<div class="panel muted" style=${{ marginTop: "12px" }}>No skills yet. Import, paste or upload one above.</div>`}
     <div class="skills" style=${{ marginTop: "12px" }}>${skills.map((s) => html`
       <a key=${s.name} class="panel skill-card" href=${"#/skill/" + encodeURIComponent(s.name)}>

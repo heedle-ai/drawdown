@@ -191,6 +191,43 @@ const DD = (() => {
     return v;
   }
 
+  // request calls the API with fetchFn (the browser's fetch): a GET, or a
+  // POST of body as JSON. It never throws: a network failure is
+  // { ok: false, status: 0, data: { error } }, so no button is left busy
+  // (review 24).
+  async function request(fetchFn, path, body) {
+    try {
+      const res = await fetchFn(path, body === undefined ? {} : {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const ct = (res.headers && res.headers.get("Content-Type")) || "";
+      const data = ct.includes("application/json") ? await res.json() : await res.text();
+      return { ok: res.ok, status: res.status, data };
+    } catch (e) {
+      return { ok: false, status: 0, data: { error: `The page couldn't reach drawdown: ${e && e.message ? e.message : e}` } };
+    }
+  }
+
+  // catalogNotes says, for each entry of a listing (by repo#path), what
+  // to know before importing it: another entry has the same name (only
+  // one can be imported: they'd replace each other), or the library has a
+  // skill of that name from elsewhere, which it would replace (review 24).
+  function catalogNotes(entries, library) {
+    const notes = {}, count = {};
+    for (const e of entries) if (e.name && !e.problem) count[e.name] = (count[e.name] || 0) + 1;
+    const mine = new Map((library || []).map((s) => [s.name, s]));
+    for (const e of entries) {
+      if (!e.name || e.problem) continue;
+      const k = e.source.repo + "#" + (e.source.path || "");
+      if (count[e.name] > 1) notes[k] = { dup: true, text: `another skill here is also named ${e.name}: import one of them` };
+      const have = mine.get(e.name);
+      if (have && !(have.source && have.source.repo === e.source.repo && (have.source.path || "") === (e.source.path || ""))) {
+        notes[k] = { ...(notes[k] || {}), replaces: true, text: (notes[k] ? notes[k].text + "; " : "") + `would replace your ${e.name}, ${have.source ? "from " + have.source.repo : "added by hand"}` };
+      }
+    }
+    return notes;
+  }
+
   // asCatalog is a repository's listing from the API, keeping only the
   // entries whose fields have the right shapes: { entries, omitted }, or
   // null for anything that isn't a listing.
@@ -402,6 +439,6 @@ const DD = (() => {
     return out;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes };
 })();
 if (typeof module !== "undefined") module.exports = DD;

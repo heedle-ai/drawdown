@@ -276,3 +276,25 @@ test("a repository's listing keeps only well-formed entries", () => {
   for (const v of [null, {}, { entries: "x" }, { entries: [], omitted: -1 }, { entries: [], omitted: 1.5 }]) assert.equal(DD.asCatalog(v), null, JSON.stringify(v));
   assert.deepEqual(DD.asCatalog({ entries: [] }), { entries: [], omitted: 0 });
 });
+
+test("the API helper never throws, so no button is left busy", async () => {
+  // Review 24: a failed fetch left "Listing…" and "Importing…" stuck.
+  const down = await DD.request(() => Promise.reject(new TypeError("Failed to fetch")), "/api/x");
+  assert.equal(down.ok, false); assert.equal(down.status, 0); assert.match(down.data.error, /couldn't reach drawdown: Failed to fetch/);
+  const json = { ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ a: 1 }) };
+  assert.deepEqual(await DD.request(async () => json, "/api/x", { b: 2 }), { ok: true, status: 200, data: { a: 1 } });
+  const badJSON = { ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => { throw new SyntaxError("bad"); } };
+  assert.equal((await DD.request(async () => badJSON, "/api/x")).ok, false);
+});
+
+test("a listing says which skills share a name, and which would replace yours", () => {
+  // Review 24: two folders named pdf imported over each other, silently.
+  const e = (path, name, repo = "https://github.com/a/b") => ({ source: { repo, path }, name, description: "x" });
+  const entries = [e("x/pdf", "pdf"), e("y/pdf", "pdf"), e("docx", "docx"), e("brief", "brief"), { source: { repo: "https://github.com/a/b", path: "bad" }, name: "pdf", problem: "no" }];
+  const library = [{ name: "docx", source: { repo: "https://github.com/a/b", path: "docx" } }, { name: "brief" }];
+  const n = DD.catalogNotes(entries, library);
+  assert.ok(n["https://github.com/a/b#x/pdf"].dup && n["https://github.com/a/b#y/pdf"].dup);
+  assert.equal(n["https://github.com/a/b#docx"], undefined, "the same skill from the same place replaces nothing new");
+  assert.ok(n["https://github.com/a/b#brief"].replaces && /added by hand/.test(n["https://github.com/a/b#brief"].text));
+  assert.equal(n["https://github.com/a/b#bad"], undefined);
+});
