@@ -1,17 +1,9 @@
-// drawdown: React (UMD) with htm for JSX-style markup, mermaid for plan
-// graphs, diff2html for diffs. No build step.
+// drawdown: React (UMD) with htm for JSX-style markup, diff2html for
+// diffs. No build step.
 const { useState, useEffect, useRef, useLayoutEffect, useContext, createContext } = React;
 const html = htm.bind(React.createElement);
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: "strict",
-  theme: "base",
-  themeVariables: { fontFamily: "Bricolage Grotesque, system-ui, sans-serif", lineColor: css("--muted"), primaryTextColor: css("--ink") },
-  flowchart: { curve: "basis", nodeSpacing: 28, rankSpacing: 44 },
-});
 
 const api = (path, body) => DD.request(fetch, path, body);
 
@@ -443,163 +435,247 @@ function Calendar({ runs, day, onDay }) {
 
 const statusVar = (s) => ({ Completed: "ok", Running: "run", Recorded: "rec", Merged: "merge" }[s] || "bad");
 
-// === Plan graph ============================================================
+// === Composition graph =====================================================
+// A program drawn as it was written: steps one after another (`;`, a pipe)
+// left to right, side by side (`⊗`, a par) stacked. Every group folds,
+// every step opens in place to show all the record knows about it, and
+// every link the page has for a step is one click away.
 
-function hexMix(a, b, t) {
-  const p = (h) => { h = h.replace("#", ""); if (h.length === 3) h = h.replace(/./g, "$&$&"); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); };
-  try {
-    const x = p(a), y = p(b);
-    if (x.some(isNaN) || y.some(isNaN)) return a;
-    return "#" + x.map((v, i) => Math.round(v * t + y[i] * (1 - t)).toString(16).padStart(2, "0")).join("");
-  } catch { return a; }
+const OPS = { pipe: { sym: ";", name: "one after another" }, par: { sym: "⊗", name: "side by side" } };
+
+const Icon = ({ d, label }) => html`<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><title>${label}</title>
+  <path d=${d} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICONS = {
+  open: "M9 2h5v5M14 2 7.5 8.5M12 9.5V14H2V4h4.5",
+  skill: "M3 2.5h7.5L13 5v8.5H3zM10.5 2.5V5H13M5.5 8h5M5.5 10.5h3.5",
+  diff: "M4 2v8M1 6h6M9.5 11h5.5M4 13.5h0M12 2v5",
+  temporal: "M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 5v3l2 1.5",
+  record: "M2 8h3.5M10.5 8H14M8 5.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z",
+  more: "M4 6l4 4 4-4",
+  fold: "M3 8h10",
+  unfold: "M3 8h10M8 3v10",
+  full: "M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4",
+};
+
+function IconLink({ href, icon, label, external }) {
+  return html`<a class="cg-icon" href=${href} aria-label=${label} title=${label}
+    target=${external ? "_blank" : undefined} rel=${external ? "noopener" : undefined}><${Icon} d=${ICONS[icon]} label=${label} /></a>`;
 }
 
-function mermaidText(plan) {
-  // Graph IDs are positions (g0, g1, …), never node IDs from the plan, so
-  // nothing from the plan is parsed as mermaid syntax except quoted labels.
-  const nodes = plan.nodes || [];
-  const gid = new Map(nodes.map((n, i) => [n.id, `g${i}`]));
-  const label = (n) => {
-    const sk = DD.skillOf(n);
-    if (sk) return [n.id, `${sk.name} @${sk.version.slice(0, 7)}`, ...sk.args.map((a) => JSON.stringify(a))].join(" ");
-    return [n.id, n.activity, ...(n.args || []).map((a) => JSON.stringify(a))].join(" ");
+// useComposition holds what the graph shows open and folded, so the page
+// and its full-screen view stay in step.
+function useComposition(plan, shape) {
+  const { shape: sh, exact } = DD.composition(shape, plan);
+  const [open, setOpen] = useState(() => new Set());
+  const [folded, setFolded] = useState(() => new Set());
+  const flip = (set, setter) => (k) => setter((s) => { const t = new Set(s); t.has(k) ? t.delete(k) : t.add(k); return t; });
+  return {
+    sh, exact, open, folded,
+    toggle: flip(open, setOpen), fold: flip(folded, setFolded),
+    expandAll: () => { setOpen(new Set(sh ? DD.stepsOf(sh) : [])); setFolded(new Set()); },
+    collapseAll: () => { setOpen(new Set()); setFolded(new Set()); },
+    foldAll: () => setFolded(new Set(DD.groupKeys(sh).filter((k) => k !== "0"))),
   };
-  const safe = (s) => s.replace(/[\\"<>&#;`{}[\]()|]/g, (c) => `#${c.charCodeAt(0)};`);
-  const lines = ["graph LR"];
-  for (const n of nodes) {
-    lines.push(`  ${gid.get(n.id)}["${safe(label(n).slice(0, 80))}"]`);
-    for (const r of n.requires || []) if (gid.has(r)) lines.push(`  ${gid.get(r)} --> ${gid.get(n.id)}`);
-  }
-  const surface = css("--surface"), ink = css("--ink");
-  for (const k of Object.keys(KIND_LABEL)) {
-    const c = kindColor(k);
-    lines.push(`  classDef k_${k} fill:${hexMix(c, surface, 0.16)},stroke:${c},stroke-width:2px,color:${ink}`);
-  }
-  nodes.forEach((n, i) => lines.push(`  class g${i} k_${kindOf(n.activity)}`));
-  return lines.join("\n");
 }
 
-let graphSeq = 0;
-
-// wireGraph adds hover cards to a rendered plan graph, and, when onNode is
-// given, makes nodes and edges open their steps. Mermaid names each node
-// "…-g<i>-…" and each edge "L-g<i>-g<j>-…", after the graph IDs.
-function wireGraph(root, plan, tip, describe, onNode) {
-  const nodes = plan.nodes || [];
-  for (const g of root.querySelectorAll("g.node")) {
-    const m = /-g(\d+)-/.exec(g.id || "");
-    const n = m && nodes[Number(m[1])];
-    if (!n) continue;
-    const show = () => tip.show(g, describe ? describe(n) : nodeCard(n), kindColor(kindOf(n.activity)));
-    g.addEventListener("mouseenter", show);
-    g.addEventListener("mouseleave", tip.hide);
-    if (onNode) {
-      g.style.cursor = "pointer";
-      g.setAttribute("tabindex", "0");
-      g.setAttribute("role", "link");
-      g.setAttribute("aria-label", `Open step ${n.id}, ${n.activity}`);
-      g.addEventListener("click", () => onNode(n));
-      g.addEventListener("keydown", (e) => { if (e.key === "Enter") onNode(n); });
-      g.addEventListener("focus", show);
-      g.addEventListener("blur", tip.hide);
-    }
-  }
-  for (const e of root.querySelectorAll("path.flowchart-link, path[id^='L-']")) {
-    const m = /L-g(\d+)-g(\d+)/.exec(e.id || "");
-    const from = m && nodes[Number(m[1])], to = m && nodes[Number(m[2])];
-    if (!from || !to) continue;
-    e.style.strokeWidth = "2.5px";
-    const card = html`<${Card} title=${html`<span class="mono">${from.id}</span> → <span class="mono">${to.id}</span>`}>
-      <${Field} k="Means">${to.id} waits for ${from.id}, and is given its output<//>
-      <${Field} k="Shared">only ${from.id}'s output, as text<//><//>`;
-    e.addEventListener("mouseenter", () => tip.show(e, card, kindColor(kindOf(from.activity))));
-    e.addEventListener("mouseleave", tip.hide);
-    if (onNode) { e.style.cursor = "pointer"; e.addEventListener("click", () => onNode(to)); }
-  }
-}
-
-// PlanGraph draws a plan small, with a button that opens it full screen
-// to pan, zoom and follow its links.
-function PlanGraph({ plan, describe, onNode }) {
-  const ref = useRef(null);
-  const expandRef = useRef(null);
-  const [svg, setSvg] = useState(null);
-  const [open, setOpen] = useState(false);
-  const tip = useContext(TipContext);
-  const describeRef = useRef(describe);
-  describeRef.current = describe;
-  useEffect(() => {
-    if (!plan || !ref.current) return;
-    let live = true;
-    mermaid.render(`plan-${++graphSeq}`, mermaidText(plan)).then(({ svg }) => {
-      if (live && ref.current) ref.current.innerHTML = svg;
-      if (!live || !ref.current) return;
-      const el = ref.current.querySelector("svg");
-      setSvg(el);
-      wireGraph(ref.current, plan, tip, (n) => (describeRef.current ? describeRef.current(n) : nodeCard(n)), onNode);
-    }).catch((e) => { if (live && ref.current) ref.current.textContent = String(e); });
-    return () => { live = false; tip.hide(); };
-  }, [JSON.stringify(plan)]);
+// CompositionGraph draws a plan's composition. rec, steps, wf, run and
+// temporalLink are optional: the editor's preview has none of them.
+function CompositionGraph({ plan, shape, rec, steps, wf, run, temporalLink }) {
+  const state = useComposition(plan, shape);
+  const [full, setFull] = useState(false);
+  const fullRef = useRef(null);
+  if (!state.sh) return html`<p class="muted">No steps.</p>`;
+  const ctx = makeCtx(plan, rec, steps, wf, run, temporalLink, state);
+  const n = DD.stepsOf(state.sh).length;
+  const bar = (inViewer) => html`
+    <div class="cg-bar">
+      <span class="muted">${n} step${n === 1 ? "" : "s"}${state.exact ? ", drawn as the program composes them" : ", drawn from what each step waits for"}</span>
+      <span class="spacer"></span>
+      <button type="button" onClick=${state.expandAll}>Show every detail</button>
+      <button type="button" onClick=${state.collapseAll}>Collapse all</button>
+      ${DD.groupKeys(state.sh).length > 1 && html`<button type="button" onClick=${state.foldAll}>Fold groups</button>`}
+      ${!inViewer && html`<button type="button" class="cg-full" ref=${fullRef} onClick=${() => setFull(true)} aria-label="Open the graph full screen" title="Full screen"><${Icon} d=${ICONS.full} label="Full screen" /></button>`}
+    </div>`;
   return html`
-    <div class="graph-box">
-      <div class="graph" ref=${ref}></div>
-      ${svg && html`<button class="expand" type="button" ref=${expandRef} onClick=${() => setOpen(true)} aria-label="Expand the graph" title="Expand">
-        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>`}
-      ${open && svg && html`<${GraphViewer} source=${svg} plan=${plan} describe=${describeRef.current} onNode=${onNode}
-        onClose=${() => { setOpen(false); setTimeout(() => expandRef.current && expandRef.current.focus(), 0); }} />`}
+    <div class="cg">
+      ${bar(false)}
+      <div class="cg-scroll"><${ShapeView} sh=${state.sh} path="0" ctx=${ctx} top /></div>
+      ${full && html`<${Viewer} title="Composition" info=${`${n} steps. Drag to pan, scroll or + and − to zoom, Escape to close.`}
+        onClose=${() => { setFull(false); setTimeout(() => fullRef.current && fullRef.current.focus(), 0); }}>
+        ${bar(true)}<${ShapeView} sh=${state.sh} path="0" ctx=${ctx} top /><//>`}
     </div>`;
 }
 
-// GraphViewer shows a copy of a rendered graph over the page: drag to pan,
-// scroll or the buttons to zoom, Escape to close. The copy is made with
-// cloneNode, so nothing is parsed as HTML.
-function GraphViewer({ source, plan, describe, onNode, onClose }) {
-  const stage = useRef(null);
+function makeCtx(plan, rec, steps, wf, run, temporalLink, state) {
+  const nodes = (plan && plan.nodes) || [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const stepOf = new Map((steps || []).map((s) => [s.node, s]));
+  const feeds = new Map();
+  for (const n of nodes) for (const r of n.requires || []) feeds.set(r, [...(feeds.get(r) || []), n.id]);
+  const writes = rec ? DD.asWrites(rec.writes) : [];
+  const stepHref = wf && run ? (id) => "#/step/" + [wf, run, id].map(encodeURIComponent).join("/") : null;
+  return { plan, byId, stepOf, feeds, writes, rec, stepHref, temporalLink, ...state };
+}
+
+function ShapeView({ sh, path, ctx, top }) {
+  if (sh.kind === "step") return html`<${StepCard} id=${sh.node} ctx=${ctx} />`;
+  const op = OPS[sh.kind];
+  const ids = DD.stepsOf(sh);
+  if (ctx.folded.has(path)) {
+    const t = DD.tally(ids, (id) => ctx.stepOf.get(id) && ctx.stepOf.get(id).status);
+    return html`<button type="button" class=${"cg-folded cg-" + sh.kind} aria-expanded="false" onClick=${() => ctx.fold(path)}
+      aria-label=${`Unfold ${ids.length} steps ${op.name}`}>
+      <span class="cg-sym">${op.sym}</span>
+      <span>${ids.length} steps ${op.name}</span>
+      <span class="cg-ids mono">${ids.slice(0, 6).join(" ")}${ids.length > 6 ? " …" : ""}</span>
+      ${Object.entries(t).filter(([s]) => s !== "none").map(([s, c]) => html`<${Pill} key=${s} cls=${"s-" + s}>${c} ${s.toLowerCase()}<//>`)}
+    </button>`;
+  }
+  const parts = [];
+  sh.parts.forEach((p, i) => {
+    if (sh.kind === "pipe" && i > 0) {
+      const before = sh.parts.slice(0, i).flatMap(DD.stepsOf);
+      parts.push(html`<${Flow} key=${"f" + i} flows=${DD.flowsInto(ctx.plan, ctx.exact ? DD.stepsOf(sh.parts[i - 1]) : before, DD.stepsOf(p))} ctx=${ctx} />`);
+    }
+    parts.push(html`<${ShapeView} key=${i} sh=${p} path=${path + "." + i} ctx=${ctx} />`);
+  });
+  return html`
+    <div class=${"cg-group cg-" + sh.kind + (top ? " cg-top" : "")} role="group" aria-label=${`${ids.length} steps ${op.name}`}>
+      ${!top && html`<div class="cg-op">
+        <button type="button" class="cg-fold" aria-expanded="true" onClick=${() => ctx.fold(path)} aria-label=${`Fold these ${ids.length} steps`} title="Fold">
+          <${Icon} d=${ICONS.fold} label="Fold" /></button>
+        <span class="cg-sym">${op.sym}</span><span class="muted">${op.name}</span></div>`}
+      <div class="cg-parts">${parts}</div>
+    </div>`;
+}
+
+// Flow is the arrow between two stages of a pipe: hover or focus it for
+// exactly what is handed over, and how much.
+function Flow({ flows, ctx }) {
+  const out = ctx.rec ? ctx.rec.outputs : null;
+  const froms = [...new Set(flows.map((f) => f.from))];
+  const total = out ? froms.reduce((a, id) => a + new Blob([out[id] || ""]).size, 0) : null;
+  const card = html`<${Card} title="Handed over">
+    ${flows.length === 0 ? html`<${Field} k="Nothing">these steps wait for nothing before them<//>` : flows.map((f) => html`
+      <${Field} key=${f.from + f.to} k=${html`<span class="mono">${f.from} → ${f.to}</span>`}>
+        ${out ? html`${bytes(out[f.from])}<pre>${preview(out[f.from]).slice(0, 200)}</pre>` : `${f.to} is given ${f.from}'s output, as text`}<//>`)}<//>`;
+  return html`<${Tip} class="cg-flow" content=${card} color=${css("--muted")} aria-label=${`${flows.length} hand-overs`}>
+    <span class="cg-line"></span>
+    ${total != null && html`<span class="cg-bytes mono">${DD.size(total)}</span>`}
+    <span class="cg-head-arrow" aria-hidden="true">▶</span>
+  <//>`;
+}
+
+function StepCard({ id, ctx }) {
+  const n = ctx.byId.get(id) || { id, activity: "" };
+  const kind = kindOf(n.activity);
+  const sk = DD.skillOf(n);
+  const args = sk ? sk.args : n.args || [];
+  const step = ctx.stepOf.get(id);
+  const out = ctx.rec ? ctx.rec.outputs[id] : undefined;
+  const files = ctx.rec ? DD.asFiles((ctx.rec.files || {})[id]) : [];
+  const writes = ctx.writes.filter((w) => w.node === id);
+  const agent = out != null ? DD.parse(out).agent : null;
+  const open = ctx.open.has(id);
+  const argText = args.map((a) => JSON.stringify(a)).join(" ");
+  const idEl = ctx.stepHref ? html`<a class="mono cg-id" href=${ctx.stepHref(id)}>${id}</a>` : html`<span class="mono cg-id">${id}</span>`;
+  const link = (x) => (ctx.stepHref ? html`<a class="mono" href=${ctx.stepHref(x)}>${x}</a>` : html`<span class="mono">${x}</span>`);
+  const list = (xs) => xs.map((x, i) => html`${i ? ", " : ""}${link(x)}`);
+  return html`
+    <article class=${"cg-card k-" + kind + (step && step.status === "Failed" ? " cg-bad" : "") + (open ? " cg-open" : "")}
+      style=${{ "--c": kindColor(kind) }} aria-label=${`Step ${id}, ${sk ? sk.name : n.activity}`}>
+      <div class="cg-head">
+        <span class="cg-title">${idEl}
+          <${KindPill} kind=${kind}>${sk ? sk.name : n.activity}<//>
+          ${step && html`<${StatusPill} status=${step.status} />`}</span>
+        <button type="button" class="cg-more" aria-expanded=${open} onClick=${() => ctx.toggle(id)}
+          aria-label=${(open ? "Hide" : "Show") + ` everything about ${id}`} title=${open ? "Hide details" : "Show every detail"}>
+          <${Icon} d=${ICONS.more} label="Details" /></button>
+      </div>
+      ${argText && html`<div class="cg-args mono" title=${argText}>${argText}</div>`}
+      <div class="cg-chips">
+        ${step && step.attempts > 1 && html`<${Pill} cls="s-Failed">${step.attempts} attempts<//>`}
+        ${step && took(step.started, step.closed) && html`<${Pill} cls="k-other" plain>ran ${took(step.started, step.closed)}<//>`}
+        ${out != null && html`<${Pill} cls="k-record" plain>${bytes(out)}<//>`}
+        ${files.length > 0 && html`<${Pill} cls="k-other" plain>${files.length} file${files.length === 1 ? "" : "s"}<//>`}
+        ${writes.length > 0 && html`<${Pill} cls="s-Running">${writes.length} write${writes.length === 1 ? "" : "s"}<//>`}
+        ${agent && html`<${Pill} cls="k-agent" plain>${agent.turns} turns<//>`}
+      </div>
+      ${out != null && !open && html`<div class="cg-peek">${preview(out).slice(0, 140)}</div>`}
+      ${open && html`<dl class="cg-detail">
+        <dt>Runs</dt><dd>${sk ? html`<${SkillBadge} skill=${sk} />` : html`<span class="mono">${n.activity}</span>`}</dd>
+        <dt>Arguments</dt><dd>${argText ? html`<span class="mono cg-wrap">${argText}</span>` : "none"}</dd>
+        <dt>Waits for</dt><dd>${(n.requires || []).length ? list(n.requires) : "nothing: starts at once"}</dd>
+        <dt>Feeds</dt><dd>${(ctx.feeds.get(id) || []).length ? list(ctx.feeds.get(id)) : "no later step"}</dd>
+        ${step && html`
+          <dt>Status</dt><dd>${step.status}${step.attempts > 1 ? `, after ${step.attempts} attempts (Temporal retried it)` : ""}</dd>
+          ${took(step.scheduled, step.started) && html`<dt>Queued</dt><dd>${took(step.scheduled, step.started)}</dd>`}
+          ${took(step.started, step.closed) && html`<dt>Ran</dt><dd>${took(step.started, step.closed)}</dd>`}
+          ${when(step.started) && html`<dt>Started</dt><dd>${when(step.started)}</dd>`}
+          ${when(step.closed) && html`<dt>Finished</dt><dd>${when(step.closed)}</dd>`}
+          ${step.failure && html`<dt>Failure</dt><dd class="mono cg-wrap">${step.failure}</dd>`}`}
+        ${files.length > 0 && html`<dt>Files</dt><dd>${DD.fileSummary(files)}</dd>`}
+        ${writes.map((w) => html`<dt key=${w.id}>Write</dt><dd key=${w.id + "v"}><span class="mono">${w.connector} ${w.tool}</span> <${Pill} cls=${w.status === "done" ? "s-Completed" : w.status === "waiting" ? "s-Running" : "s-Failed"}>${w.status}<//></dd>`)}
+        ${agent && html`<dt>Agent</dt><dd>${agent.model}, ${agent.turns} turns, ${agent.commands.length} commands, ${agent.files.length} files</dd>`}
+        ${out != null && html`<dt>Output</dt><dd>${bytes(out)}, in <span class="mono">outputs/${id}</span> of ${short(ctx.rec.commit)}</dd>`}
+      </dl>
+      ${out != null && html`<pre class="cg-out">${preview(out).slice(0, 2000)}</pre>`}`}
+      ${(ctx.stepHref || sk || ctx.temporalLink) && html`<nav class="cg-links" aria-label=${`Links for ${id}`}>
+        ${ctx.stepHref && html`<${IconLink} href=${ctx.stepHref(id)} icon="open" label=${`Inspect ${id}: inputs, sandbox, files`} />`}
+        ${sk && html`<${IconLink} href=${"#/skill/" + encodeURIComponent(sk.name) + "/" + encodeURIComponent(sk.version)} icon="skill" label=${`The skill ${sk.name} at @${sk.version.slice(0, 7)}`} />`}
+        ${ctx.rec && ctx.rec.previous && html`<${IconLink} href=${"#/diff/" + encodeURIComponent(ctx.rec.previous) + "/" + encodeURIComponent(ctx.rec.commit)} icon="diff" label="What changed since this program's previous run" />`}
+        ${ctx.rec && html`<${IconLink} href=${"#/diff/" + encodeURIComponent(ctx.rec.parent || ctx.rec.commit) + "/" + encodeURIComponent(ctx.rec.commit)} icon="record" label=${`The record ${short(ctx.rec.commit)} in Git`} />`}
+        ${ctx.temporalLink && html`<${IconLink} href=${ctx.temporalLink} icon="temporal" label="The run's event history in Temporal" external />`}
+      </nav>`}
+    </article>`;
+}
+
+// Viewer shows its children over the page: drag to pan, scroll or the
+// buttons to zoom, Escape to close.
+function Viewer({ title, info, onClose, children }) {
   const tip = useContext(TipContext);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const drag = useRef(null);
   const closeRef = useRef(null);
-  const stageBox = useRef(null);
-  useEffect(() => {
-    const copy = source.cloneNode(true);
-    copy.removeAttribute("style");
-    copy.setAttribute("width", "100%");
-    copy.setAttribute("height", "100%");
-    stage.current.replaceChildren(copy);
-    wireGraph(stage.current, plan, tip, describe, onNode && ((n) => { onClose(); onNode(n); }));
-    const esc = (e) => { if (e.key === "Escape") onClose(); };
-    addEventListener("keydown", esc);
-    // React's wheel listener is passive, so preventDefault there is ignored
-    // and a trackpad pinch would zoom the whole page instead.
-    const wheel = (e) => { e.preventDefault(); zoomRef.current(e.deltaY < 0 ? 1.12 : 0.89, e.clientX, e.clientY); };
-    const box = stageBox.current;
-    box.addEventListener("wheel", wheel, { passive: false });
-    closeRef.current && closeRef.current.focus();
-    return () => { removeEventListener("keydown", esc); box.removeEventListener("wheel", wheel); tip.hide(); };
-  }, [source]);
+  const stage = useRef(null);
   const zoom = (f, cx, cy) => setView((v) => {
-    const k = Math.min(6, Math.max(0.3, v.k * f));
+    const k = Math.min(4, Math.max(0.25, v.k * f));
     const r = stage.current.getBoundingClientRect();
     const px = (cx ?? r.left + r.width / 2) - r.left, py = (cy ?? r.top + r.height / 2) - r.top;
     return { k, x: px - ((px - v.x) * k) / v.k, y: py - ((py - v.y) * k) / v.k };
   });
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key === "Escape") onClose();
+      else if ((e.key === "+" || e.key === "=") && !e.target.closest("input, textarea")) zoomRef.current(1.2);
+      else if (e.key === "-" && !e.target.closest("input, textarea")) zoomRef.current(1 / 1.2);
+    };
+    addEventListener("keydown", key);
+    // React's wheel listener is passive, so preventDefault there is ignored
+    // and a trackpad pinch would zoom the whole page instead.
+    const wheel = (e) => { e.preventDefault(); zoomRef.current(e.deltaY < 0 ? 1.12 : 0.89, e.clientX, e.clientY); };
+    const box = stage.current;
+    box.addEventListener("wheel", wheel, { passive: false });
+    closeRef.current && closeRef.current.focus();
+    return () => { removeEventListener("keydown", key); box.removeEventListener("wheel", wheel); tip.hide(); };
+  }, []);
   return html`
-    <div class="viewer" role="dialog" aria-modal="true" aria-label="Plan graph">
+    <div class="viewer" role="dialog" aria-modal="true" aria-label=${title}>
       <div class="viewer-bar">
-        <strong>Plan</strong>
-        <span class="muted">${(plan.nodes || []).length} steps. Drag to pan, scroll to zoom${onNode ? ", click a step to open it" : ""}.</span>
+        <strong>${title}</strong>
+        <span class="muted">${info}</span>
         <span class="spacer"></span>
         <button type="button" onClick=${() => zoom(1.25)} aria-label="Zoom in">+</button>
         <button type="button" onClick=${() => zoom(0.8)} aria-label="Zoom out">−</button>
-        <button type="button" onClick=${() => setView({ x: 0, y: 0, k: 1 })}>Fit</button>
+        <button type="button" onClick=${() => setView({ x: 0, y: 0, k: 1 })}>Reset</button>
         <button type="button" ref=${closeRef} onClick=${onClose}>Close</button>
       </div>
-      <div class="viewer-stage" ref=${stageBox}
+      <div class="viewer-stage" ref=${stage}
         onPointerDown=${(e) => {
-          // Steps and arrows are links: leave their clicks alone.
-          if (e.target.closest("g.node, path[id^='L-']")) return;
+          // Links, buttons and text stay clickable and selectable.
+          if (e.target.closest("a, button, [tabindex], pre, .cg-detail")) return;
           drag.current = { x: e.clientX - view.x, y: e.clientY - view.y };
           e.currentTarget.setPointerCapture(e.pointerId);
         }}
@@ -607,7 +683,7 @@ function GraphViewer({ source, plan, describe, onNode, onClose }) {
         onPointerUp=${() => { drag.current = null; }}
         onPointerCancel=${() => { drag.current = null; }}
         onLostPointerCapture=${() => { drag.current = null; }}>
-        <div class="viewer-canvas" ref=${stage} style=${{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}></div>
+        <div class="viewer-canvas" style=${{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>${children}</div>
       </div>
     </div>`;
 }
@@ -1037,7 +1113,7 @@ function NewRun({ info, history: ref }) {
           <${Pill} cls="k-other" plain>${plan.nodes.length} step${plan.nodes.length === 1 ? "" : "s"}<//>
           ${kinds.map((k) => html`<${KindPill} key=${k} kind=${k} />`)}
         </div>
-        <${PlanGraph} plan=${plan} />`}
+        <${CompositionGraph} plan=${plan} shape=${result && result.ok ? result.data.shape : null} />`}
     </div>`;
 }
 
@@ -1287,11 +1363,10 @@ function RunDetail({ workflow, run, history: ref }) {
     ${!rec && html`<p class="muted">${status === "Running" ? "Running… the record appears when the run finishes."
       : status === "Completed" ? "Recording…" : "No record: only completed runs are recorded."}</p>`}
     ${rec && html`
-      <h2>Plan</h2>
-      <p class="lede">Arrows point from a step to the steps that wait for it. Click a step to open it; expand to explore.</p>
-      <div class="panel"><${PlanGraph} plan=${rec.plan}
-        describe=${(n) => nodeCard(n, stepOf.get(n.id), rec.outputs[n.id])}
-        onNode=${(n) => go("step", workflow, run, n.id)} /></div>
+      <h2>Composition</h2>
+      <p class="lede">The program as it was written: <span class="mono">;</span> runs one after another, <span class="mono">⊗</span> side by side. Hover an arrow for what it hands over; open a step for everything the record knows about it.</p>
+      <div class="panel"><${CompositionGraph} plan=${rec.plan} shape=${rec.shape} rec=${rec} steps=${stepList}
+        wf=${workflow} run=${run} temporalLink=${temporalLink} /></div>
       <h2>Outputs</h2>
       <div class="outputs">${Object.keys(rec.outputs).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map((k) => {
         const n = (rec.plan.nodes || []).find((x) => x.id === k) || { id: k, activity: "", args: [] };

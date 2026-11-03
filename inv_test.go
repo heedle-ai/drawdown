@@ -108,9 +108,8 @@ func TestInv_AgentTabs(t *testing.T) {
 
 // TestInv_AnswersAreShownAsText: an ask step's answer (pirn's JSON) is shown
 // as its text with the model and token counts. The page inserts HTML only
-// in the known places: clearing, or HTML made by a library that sanitizes or escapes what
-// it renders (Mermaid at securityLevel strict, diff2html); model text and
-// page text are always data.
+// in the known places: clearing, or HTML made by diff2html, which escapes
+// what it renders; model text and page text are always data.
 func TestInv_AnswersAreShownAsText(t *testing.T) {
 	b, err := os.ReadFile("static/app.js")
 	if err != nil {
@@ -120,8 +119,9 @@ func TestInv_AnswersAreShownAsText(t *testing.T) {
 	for _, want := range []string{
 		"const { agent, answer, page } = DD.parse(text);",
 		"<pre class=\"answer-text\">${answer.text}</pre>",
-		`securityLevel: "strict",`,
-		"const copy = source.cloneNode(true);",
+		// The composition graph is React elements, full screen too: no
+		// third way into the page's HTML.
+		"${children}</div>",
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("static/app.js lacks %s", want)
@@ -129,7 +129,6 @@ func TestInv_AnswersAreShownAsText(t *testing.T) {
 	}
 	sinks := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|dangerouslySetInnerHTML|DOMParser|createContextualFragment`).FindAllStringIndex(js, -1)
 	allowed := []string{
-		"if (live && ref.current) ref.current.innerHTML = svg;",
 		`ref.current.innerHTML = Diff2Html.html(r.data, { drawFileList: true, matching: "lines", outputFormat: "line-by-line", colorScheme: "auto" });`,
 		// Clearing a file's diff before showing another: no data.
 		`if (ref.current) ref.current.innerHTML = "";`,
@@ -308,18 +307,19 @@ func TestInv_FontsAreServedHere(t *testing.T) {
 }
 
 // TestInv_GraphViewerLeavesLinksAlone: in the full-screen graph, dragging
-// never captures a press on a step or an arrow, so both stay clickable;
-// the wheel listener isn't passive, so zooming the graph doesn't zoom the
-// page; and closing returns focus to the expand button.
+// never captures a press on a link, a button or anything focusable, so a
+// step's links, its chevron and the arrows stay usable; the wheel listener
+// isn't passive, so zooming the graph doesn't zoom the page; and closing
+// returns focus to the full-screen button.
 func TestInv_GraphViewerLeavesLinksAlone(t *testing.T) {
 	b, err := os.ReadFile("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`if (e.target.closest("g.node, path[id^='L-']")) return;`,
+		`if (e.target.closest("a, button, [tabindex], pre, .cg-detail")) return;`,
 		`box.addEventListener("wheel", wheel, { passive: false });`,
-		`setTimeout(() => expandRef.current && expandRef.current.focus(), 0);`,
+		`setTimeout(() => fullRef.current && fullRef.current.focus(), 0);`,
 		"onPointerCancel=${() => { drag.current = null; }}",
 	} {
 		if !strings.Contains(string(b), want) {

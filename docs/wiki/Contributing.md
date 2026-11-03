@@ -1,8 +1,8 @@
 ## Ground rules
 
-- **Reuse, never rewrite.** The server composes draft, loom, Temporal's SDK and warp; the page uses React, htm, mermaid and diff2html unmodified. If something seems to need modifying one of them, stop and ask first.
+- **Reuse, never rewrite.** The server composes draft, loom, Temporal's SDK and warp; the page uses React, htm and diff2html unmodified. If something seems to need modifying one of them, stop and ask first.
 - **Read and submit only.** No endpoint edits history.
-- **No unescaped data in HTML.** Let React render text; keep mermaid's `securityLevel: "strict"`.
+- **No unescaped data in HTML.** Let React render text, the graphs included; never set HTML from data.
 - **Pin and hash every CDN file.** To upgrade one, change the version in `static/index.html` and recompute its hash from the npm package file:
 
   ```bash

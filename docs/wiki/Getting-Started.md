@@ -53,10 +53,10 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 
 ## 3. Try the hello world
 
-1. Click **Example: shipment**. The plan appears as a graph: three sources feeding one assessment.
+1. Click **Example: shipment**. The composition appears as a graph: three sources side by side (`⊗`), then (`;`) one assessment.
 2. Click **Run**. The run page shows *Running*, then *Completed*, with each output. The conclusion is *SUPPORTED, for: factory, weather*.
 
-   [[/images/run-detail.png|alt=A completed run: status, timeline, plan graph and outputs]]
+   [[/images/run-detail.png|alt=A completed run: status, provenance, timeline, composition graph and outputs]]
 
 3. The storm passes. In `~/src/heedle-ai/loom`:
 

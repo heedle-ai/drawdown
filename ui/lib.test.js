@@ -298,3 +298,43 @@ test("a listing says which skills share a name, and which would replace yours", 
   assert.ok(n["https://github.com/a/b#brief"].replaces && /added by hand/.test(n["https://github.com/a/b#brief"].text));
   assert.equal(n["https://github.com/a/b#bad"], undefined);
 });
+
+// === Composition (roadmap 5.12) ===
+const step = (node) => ({ kind: "step", node });
+const plan3 = { nodes: [{ id: "n0" }, { id: "n1" }, { id: "n2", requires: ["n0", "n1"] }] };
+
+test("a shape is drawn only if it names exactly the plan's steps, in order", () => {
+  const good = { kind: "pipe", parts: [{ kind: "par", parts: [step("n0"), step("n1")] }, step("n2")] };
+  assert.deepEqual(DD.composition(good, plan3), { shape: good, exact: true });
+  const moved = { kind: "pipe", parts: [{ kind: "par", parts: [step("n1"), step("n0")] }, step("n2")] };
+  const missing = { kind: "pipe", parts: [step("n0"), step("n2")] };
+  for (const bad of [moved, missing, null, { kind: "pipe", parts: [step("n0")] }, { kind: "loop", parts: [] },
+    { kind: "step", node: "" }, { kind: "step", node: "n0", parts: [] }, { kind: "pipe", parts: "n0" }]) {
+    const c = DD.composition(bad, plan3);
+    assert.equal(c.exact, false, JSON.stringify(bad));
+    assert.deepEqual(c.shape, good, "falls back to the layers of requires");
+  }
+});
+
+test("a shape nested too deep is refused, not walked", () => {
+  let deep = step("n0");
+  for (let i = 0; i < 100; i++) deep = { kind: "pipe", parts: [deep, step("x")] };
+  assert.equal(DD.asShape(deep), null);
+});
+
+test("layers come from requires, including steps that wait across layers", () => {
+  const p = { nodes: [{ id: "a" }, { id: "b", requires: ["a"] }, { id: "c", requires: ["a", "b"] }, { id: "d" }] };
+  assert.deepEqual(DD.layered(p), { kind: "pipe", parts: [{ kind: "par", parts: [step("a"), step("d")] }, step("b"), step("c")] });
+  assert.deepEqual(DD.layered({ nodes: [{ id: "a" }] }), step("a"));
+  assert.equal(DD.layered({ nodes: [] }), null);
+  assert.deepEqual(DD.flowsInto(p, ["a", "d", "b"], ["c"]), [{ from: "a", to: "c" }, { from: "b", to: "c" }]);
+  assert.deepEqual(DD.flowsInto(p, ["d"], ["b"]), []);
+});
+
+test("every group has a key, and steps tally by status", () => {
+  const sh = { kind: "pipe", parts: [{ kind: "par", parts: [step("n0"), step("n1")] }, step("n2")] };
+  assert.deepEqual(DD.groupKeys(sh), ["0", "0.0"]);
+  assert.deepEqual(DD.stepsOf(sh), ["n0", "n1", "n2"]);
+  const st = { n0: "Completed", n1: "Failed" };
+  assert.deepEqual(DD.tally(DD.stepsOf(sh), (id) => st[id]), { Completed: 1, Failed: 1, none: 1 });
+});
