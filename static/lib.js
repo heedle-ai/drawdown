@@ -577,6 +577,33 @@ const DD = (() => {
     return typeof u === "string" && /^(https:\/\/[^\s]+|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/[^\s]*)$/.test(u) ? u : "";
   }
 
+  // === Schedules ============================================================
+
+  const RUN_ID = /^[A-Za-z0-9._:\-]{1,300}$/;
+
+  // asSchedules is the schedules the API lists, keeping only well-formed
+  // ones: a name, a program, when it runs, and runs with workflow and run
+  // IDs fit for a link; else [].
+  function asSchedules(v) {
+    if (!v || !Array.isArray(v.schedules)) return [];
+    return v.schedules.filter((s) => s && str(s.name) && /^[a-z0-9-]{1,40}$/.test(s.name) && str(s.program) && str(s.ref) &&
+      s.spec && typeof s.spec === "object" && opt(s.spec.every, num) && opt(s.spec.cron, str) && opt(s.spec.timeZone, str) &&
+      bool(s.paused) && (s.next === null || strs(s.next)) &&
+      (s.recent === null || objs(s.recent, (r) => str(r.workflowId) && RUN_ID.test(r.workflowId) && str(r.runId) && RUN_ID.test(r.runId) && str(r.at))));
+  }
+
+  // when says when a schedule runs, for people: its spec's every (Go's
+  // nanoseconds) or cron times and zone.
+  function when(spec) {
+    if (spec.every) {
+      const m = Math.round(spec.every / 6e10);
+      if (m % 1440 === 0) return m === 1440 ? "every day" : `every ${m / 1440} days`;
+      if (m % 60 === 0) return m === 60 ? "every hour" : `every ${m / 60} hours`;
+      return m === 1 ? "every minute" : `every ${m} minutes`;
+    }
+    return `at cron ${spec.cron} (${spec.timeZone || "UTC"})`;
+  }
+
   // tokenName is the keychain name the server keeps a connector's token
   // under (drawdown.TokenName).
   const tokenName = (name) => "HEEDLE_CONNECTOR_" + name.toUpperCase().replace(/-/g, "_") + "_TOKEN";
@@ -587,6 +614,6 @@ const DD = (() => {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when };
 })();
 if (typeof module !== "undefined") module.exports = DD;

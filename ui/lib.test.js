@@ -385,3 +385,16 @@ test("a sign-in only ever opens an https:// page", () => {
     assert.equal(DD.signInURL(bad), "", String(bad));
   }
 });
+
+// === Schedules (roadmap 7.3) ===
+test("schedules show only well-formed ones, and say when in words", () => {
+  const good = { name: "digest", program: "(echo \"x\")", ref: "refs/loom/runs", spec: { every: 86400e9 }, paused: false, next: ["2026-11-04T09:00:00Z"],
+    recent: [{ workflowId: "loom-abc-2026-11-03T09:00:00Z", runId: "r1", at: "2026-11-03T09:00:01Z" }] };
+  assert.deepEqual(DD.asSchedules({ schedules: [good, { ...good, name: "Bad Name" }, { ...good, recent: [{ workflowId: "../x y", runId: "r", at: "t" }] }, { ...good, paused: "no" }, null] }), [good]);
+  assert.deepEqual(DD.asSchedules({}), []);
+  assert.equal(DD.when({ every: 86400e9 }), "every day");
+  assert.equal(DD.when({ every: 3 * 3600e9 }), "every 3 hours");
+  assert.equal(DD.when({ every: 60e9 }), "every minute");
+  assert.equal(DD.when({ every: 90 * 60e9 }), "every 90 minutes");
+  assert.equal(DD.when({ cron: "0 9 * * 1-5", timeZone: "Europe/Lisbon" }), "at cron 0 9 * * 1-5 (Europe/Lisbon)");
+});

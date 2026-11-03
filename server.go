@@ -79,6 +79,11 @@ type Temporal interface {
 	// ListSkills lists a repository's skills on a worker
 	// (loom.ListSkills); nothing changes.
 	ListSkills(ctx context.Context, src treadle.Source) (loom.Catalog, error)
+	// Schedules: loom's (loom.CreateSchedule, loom.Schedules and
+	// loom.ScheduleAction), each run recorded like any other.
+	CreateSchedule(ctx context.Context, name string, in loom.RunInput, spec loom.ScheduleSpec) error
+	Schedules(ctx context.Context) ([]loom.Schedule, error)
+	ScheduleAction(ctx context.Context, name, action string) error
 }
 
 // LiveFrame is what a browsing step last showed.
@@ -194,6 +199,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/skills/add", s.addSkill)
 	mux.HandleFunc("POST /api/skills/{name}/approve", s.approveSkill)
 	mux.HandleFunc("POST /api/skills/{name}/reject", s.rejectSkill)
+	mux.HandleFunc("GET /api/schedules", s.schedules)
+	mux.HandleFunc("POST /api/schedules", s.createSchedule)
+	mux.HandleFunc("POST /api/schedules/{name}/{action}", s.scheduleAction)
 	mux.HandleFunc("GET /api/connectors", s.connectors)
 	mux.HandleFunc("POST /api/secrets", s.setSecret)
 	mux.HandleFunc("POST /api/secrets/delete", s.setSecret)

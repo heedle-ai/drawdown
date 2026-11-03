@@ -158,3 +158,18 @@ func statusName(s enums.WorkflowExecutionStatus) string {
 
 // ensure the adapter satisfies the interface.
 var _ Temporal = TemporalClient{}
+
+// CreateSchedule creates a loom schedule on this task queue.
+func (t TemporalClient) CreateSchedule(ctx context.Context, name string, in loom.RunInput, spec loom.ScheduleSpec) error {
+	return loom.CreateSchedule(ctx, t.Client, t.Queue, name, in, spec)
+}
+
+// Schedules lists loom's schedules.
+func (t TemporalClient) Schedules(ctx context.Context) ([]loom.Schedule, error) {
+	return loom.Schedules(ctx, t.Client)
+}
+
+// ScheduleAction pauses, resumes, deletes or runs a schedule now.
+func (t TemporalClient) ScheduleAction(ctx context.Context, name, action string) error {
+	return loom.ScheduleAction(ctx, t.Client, name, action)
+}

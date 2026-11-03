@@ -729,6 +729,89 @@ function nodeCard(n, step, output) {
 }
 
 
+// === Schedules =============================================================
+// Programs Temporal runs on a timer (loom's schedules). Each run is a
+// run like any other: on the runs list, recorded in Git.
+
+const localZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } };
+const EVERY = [["1h", "every hour"], ["6h", "every 6 hours"], ["24h", "every day"], ["168h", "every week"]];
+
+function ScheduleForm({ program, history, onDone }) {
+  const [name, setName] = useState("");
+  const [how, setHow] = useState("every");
+  const [every, setEvery] = useState("24h");
+  const [cron, setCron] = useState("0 9 * * 1-5");
+  const [zone, setZone] = useState(localZone());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [made, setMade] = useState("");
+  const make = async () => {
+    setBusy(true); setErr("");
+    const body = { name, program, ref: history, ...(how === "every" ? { every } : { cron, timeZone: zone }) };
+    const r = await api("/api/schedules", body);
+    setBusy(false);
+    if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
+    setMade(name);
+  };
+  if (made) return html`<p role="status">Scheduled <a href="#/schedules" class="mono">${made}</a>. Its runs appear with the others. <button class="link-btn" onClick=${onDone}>Close</button></p>`;
+  return html`
+    <div class="add-form schedule-form">
+      <div class="row">
+        <label>Name<input type="text" value=${name} placeholder="weekly-digest" onInput=${(e) => setName(e.target.value)} /></label>
+        <label>When<select value=${how} onChange=${(e) => setHow(e.target.value)}>
+          <option value="every">every so often</option><option value="cron">at set times (cron)</option></select></label>
+        ${how === "every" ? html`<label>How often<select value=${every} onChange=${(e) => setEvery(e.target.value)}>
+            ${EVERY.map(([v, l]) => html`<option key=${v} value=${v}>${l}</option>`)}</select></label>`
+          : html`<label>Cron (minute hour day month weekday)<input type="text" value=${cron} onInput=${(e) => setCron(e.target.value)} /></label>
+            <label>Time zone<input type="text" value=${zone} onInput=${(e) => setZone(e.target.value)} /></label>`}
+      </div>
+      <div class="row">
+        <button class="primary" type="button" disabled=${busy || !name} onClick=${make}>${busy ? "Scheduling…" : "Schedule it"}</button>
+        <button type="button" onClick=${onDone}>Cancel</button>
+        <span class="muted">Temporal runs it as written now; a run still going when the next is due skips that one.</span>
+      </div>
+      ${err && html`<p class="error" role="alert">${err}</p>`}
+    </div>`;
+}
+
+function SchedulesPage() {
+  const [data, setData] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [err, setErr] = useState("");
+  const [sure, setSure] = useState("");
+  useEffect(() => { api("/api/schedules").then(setData); }, [tick]);
+  if (!data) return html`<p class="muted">Loading…</p>`;
+  if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
+  const ss = DD.asSchedules(data.data);
+  const act = async (name, action) => {
+    setErr(""); setSure("");
+    const r = await api(`/api/schedules/${encodeURIComponent(name)}/${action}`, {});
+    if (!r.ok) setErr((r.data && r.data.error) || String(r.data));
+    setTick((t) => t + 1);
+  };
+  return html`
+    <h2>Schedules</h2>
+    <p class="lede">Programs Temporal runs on a timer. Each run is a run like any other: on the runs list, recorded in Git, its writes waiting for your approval. Make one with <strong>Schedule…</strong> beside <strong>Run</strong>.</p>
+    ${err && html`<p class="error" role="alert">${err}</p>`}
+    ${ss.length === 0 && html`<div class="panel muted">No schedules yet. Write a program on the home page, then <strong>Schedule…</strong>.</div>`}
+    ${ss.map((s) => html`
+      <div class="panel connector" key=${s.name}>
+        <div class="pills">
+          <strong class="mono">${s.name}</strong>
+          <${Pill} cls=${s.paused ? "s-Scheduled" : "s-Completed"}>${s.paused ? "paused" : DD.when(s.spec)}<//>
+          ${!s.paused && (s.next || []).length > 0 && html`<${Pill} cls="k-other" plain>next ${when(s.next[0])}<//>`}
+          <span style=${{ marginLeft: "auto" }} class="pills">
+            <button type="button" onClick=${() => act(s.name, "run")}>Run now</button>
+            <button type="button" onClick=${() => act(s.name, s.paused ? "resume" : "pause")}>${s.paused ? "Resume" : "Pause"}</button>
+            ${sure === s.name ? html`<span>Delete ${s.name}? Its runs stay.</span><button type="button" onClick=${() => act(s.name, "delete")}>Delete</button><button type="button" onClick=${() => setSure("")}>Keep</button>`
+              : html`<button type="button" class="link-btn" onClick=${() => setSure(s.name)}>Delete</button>`}
+          </span>
+        </div>
+        <${Program} text=${s.program} max=${400} />
+        ${(s.recent || []).length > 0 && html`<p class="muted">Recent runs: ${s.recent.slice(-8).reverse().map((r, i) => html`${i ? ", " : ""}<a key=${r.runId} href=${"#/run/" + encodeURIComponent(r.workflowId) + "/" + encodeURIComponent(r.runId)}>${when(r.at)}</a>`)}</p>`}
+      </div>`)}`;
+}
+
 // === Connectors ============================================================
 // The MCP servers agent steps may be granted, as the worker's connectors
 // file has them now, and where each key is found. A key typed here goes
@@ -1274,6 +1357,7 @@ function NewRun({ info, history: ref }) {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [scheduling, setScheduling] = useState(false);
   const area = useRef(null);
 
   useEffect(() => {
@@ -1313,9 +1397,11 @@ function NewRun({ info, history: ref }) {
         onInput=${(e) => setProgram(e.target.value)}></textarea>
       <div class="row">
         <button class="primary" disabled=${!plan || busy} onClick=${run}>${busy ? "Starting…" : "Run"}</button>
+        <button disabled=${!plan || busy} onClick=${() => setScheduling((x) => !x)} aria-expanded=${scheduling}>Schedule…</button>
         ${Object.entries(info.examples || {}).map(([name, src]) => html`
           <button key=${name} onClick=${() => setProgram(src)}>Example: ${name}</button>`)}
       </div>
+      ${scheduling && plan && html`<${ScheduleForm} program=${program} history=${ref} onDone=${() => setScheduling(false)} />`}
       <div class="row">
         <span class="muted">Insert a command:</span>
         ${(info.commands || []).map((c) => {
@@ -1912,6 +1998,7 @@ function App() {
   else if (route[0] === "diff" && route.length === 3) body = html`<${Diff} from=${route[1]} to=${route[2]} />`;
   else if (route[0] === "skills" && route.length === 1) body = html`<${SkillsPage} />`;
   else if (route[0] === "connectors" && route.length === 1) body = html`<${ConnectorsPage} />`;
+  else if (route[0] === "schedules" && route.length === 1) body = html`<${SchedulesPage} />`;
   else if (route[0] === "review" && route.length === 2) body = html`<${ReviewPage} key=${route[1]} name=${route[1]} />`;
   else if (route[0] === "skill" && (route.length === 2 || route.length === 3)) body = html`<${SkillPage} key=${route.join("/")} name=${route[1]} version=${route[2]} />`;
   else body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;
@@ -1932,6 +2019,7 @@ function App() {
             </select></label>`}
       <span class="spacer"></span>
       <a href="#/skills">skills</a>
+      <a href="#/schedules">schedules</a>
       <a href="#/connectors">connectors</a>
       <${Pill} cls="k-other" plain>${(info.commands || []).length} commands<//>
       <a href=${info.temporalUI} target="_blank" rel="noopener">Temporal Web UI ↗</a>
