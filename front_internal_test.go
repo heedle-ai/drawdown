@@ -21,9 +21,10 @@ import (
 // would (with the store's newest skills) and says whether it can run now:
 // each connector its skills and agent steps ask for, ready or why not,
 // and the Anthropic key; a program that doesn't compile is 422 and a
-// connectors file that fails its check is said, never "ready". So a
-// proposal's card can check again after something is connected.
-// (Roadmap 8.2.)
+// connectors file that fails its check is said, never "ready"; keys are
+// read as steps read them, and agent and skill steps need an agent image.
+// So a proposal's card can check again after something is connected.
+// (Roadmap 8.2; review 33.)
 func TestInv_ReadyChecksAsARunWould(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	ctx := context.Background()
@@ -60,9 +61,21 @@ func TestInv_ReadyChecksAsARunWould(t *testing.T) {
 		t.Errorf("maps without its key: %+v", r)
 	}
 	keys["MAPS_KEY"] = "m"
+	if _, r := call(`(trip "Lisbon")`); r.Ready || r.Agent == "" {
+		t.Errorf("no agent image: %+v", r)
+	}
+	s.Agents = true
 	if _, r := call(`(trip "Lisbon")`); !r.Ready {
 		t.Errorf("all there: %+v", r)
 	}
+	// Keys are read as steps read them (StepKeys, such as the OAuth vault
+	// that refreshes a signed-in token), not from the keychain directly
+	// (review 33).
+	s.StepKeys = memSecrets{"SEARCH_KEY": "s", "ANTHROPIC_API_KEY": "k"}
+	if _, r := call(`(trip "Lisbon")`); r.Ready || r.Needs[0].Problem != "key" {
+		t.Errorf("steps can't read the maps key: %+v", r)
+	}
+	s.StepKeys = nil
 	if _, r := call(`(echo "hi")`); !r.Ready || len(r.Needs) != 0 || r.Claude != "" {
 		t.Errorf("needs nothing: %+v", r)
 	}

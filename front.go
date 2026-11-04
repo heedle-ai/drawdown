@@ -3,11 +3,13 @@ package drawdown
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/pirn"
+	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
 )
 
@@ -60,15 +62,15 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var v pirn.Vault
-	if s.Secrets != nil {
+	var v pirn.Vault = s.StepKeys
+	if v == nil && s.Secrets != nil {
 		v = s.Secrets
 	}
-	files, _ := s.Skills.(loom.SkillFiles)
-	if files == nil {
-		files = noSkills{}
+	skills, _ := s.Skills.(loom.SkillGrants)
+	if skills == nil {
+		skills = noSkills{}
 	}
-	out, err := loom.CheckReady(r.Context(), p, files, cs, v)
+	out, err := loom.CheckReady(r.Context(), p, skills, loom.Worker{Connectors: cs, Keys: v, Agents: s.Agents})
 	if err != nil {
 		out = loom.Readiness{Needs: []pirn.Need{}, Error: err.Error()}
 	}
@@ -78,6 +80,6 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 // noSkills is a library with no skill versions.
 type noSkills struct{}
 
-func (noSkills) Files(context.Context, warp.ID) (map[string][]byte, error) {
-	return nil, errors.New("this server has no skills")
+func (noSkills) StepGrant(context.Context, string, warp.ID) (pirn.Grant, error) {
+	return nil, fmt.Errorf("%w: this server has no skills", treadle.ErrInvalid)
 }

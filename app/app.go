@@ -89,6 +89,10 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	// Keys come from the environment, else the keychain (heedle secret set,
 	// or the Connectors page).
 	vault := pirn.Keychain{}
+	// Steps read keys through this, which refreshes a signed-in
+	// connector's token; the front door's ready check reads them the
+	// same way (review 33).
+	stepKeys := &drawdown.OAuthVault{Keys: vault}
 	if *runWorker {
 		w := worker.New(c, *queue, reed.WorkerOptions(worker.Options{}))
 		if err := reed.Register(reg, w, browser); err != nil {
@@ -122,7 +126,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if _, err := os.Stat(*connectorsFile); *connectorsFile != "" && err != nil {
 			log.Printf("connectors: %s isn't there yet, so no connectors until it is", *connectorsFile)
 		}
-		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors, Vault: &drawdown.OAuthVault{Keys: vault},
+		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors, Vault: stepKeys,
 			LoadConnectors: loadConnectors}
 		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
 			return err
@@ -169,7 +173,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 			if err != nil {
 				return loom.Readiness{}, err
 			}
-			return loom.CheckReady(ctx, p, lib, cs, agent.Vault)
+			return loom.CheckReady(ctx, p, lib, loom.Worker{Connectors: cs, Keys: agent.Vault, Agents: agent.Image != ""})
 		}}
 		loom.RegisterWriter(w, writer)
 		loom.RegisterAsk(w, writer)
@@ -197,6 +201,8 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		Connectors:     func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) },
 		ConnectorsFile: *connectorsFile,
 		Secrets:        vault,
+		StepKeys:       stepKeys,
+		Agents:         *agentImage != "",
 		Skills:         &treadle.Library{Store: s},
 		Commands:       commands,
 		Store:          s,
