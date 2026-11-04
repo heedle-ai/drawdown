@@ -516,3 +516,81 @@ test("the conversation survives a visit to the connectors page (review 34)", () 
   assert.deepEqual(DD.restoreConversation(null), []);
   assert.equal(DD.restoreConversation(JSON.stringify(Array.from({ length: 14 }, (_, i) => ({ request: String(i), error: "e" })))).length, 10);
 });
+
+test("every route the app shows is one page in one section (DRAW-68)", () => {
+  // App picks what to show by DD.page's name, so the names its switch
+  // handles must be exactly PAGES' names, and every page is in a section.
+  const app = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "static", "app.js"), "utf8");
+  const sw = /switch \(pg\.name\) \{([\s\S]*?)\n  \}/.exec(app);
+  assert.ok(sw, "App chooses its page with switch (pg.name)");
+  const cases = [...sw[1].matchAll(/case "([a-z]+)":/g)].map((m) => m[1]).sort();
+  assert.deepEqual(cases, Object.keys(DD.PAGES).sort());
+  assert.match(sw[1], /default: body = html`<\$\{Home\} /);
+  assert.ok(!/route\[0\] === "(run|step|diff|skills?|review|schedules|connectors)"/.test(app), "no page is chosen outside DD.page");
+  for (const [name, p] of Object.entries(DD.PAGES)) assert.ok(DD.SECTIONS.includes(p.section), name);
+  const cases2 = {
+    "": "runs", "agent/refs/loom/main": "runs", "run/w/r": "runs", "step/w/r/n0": "runs", "diff/a/b": "runs",
+    skills: "skills", "skill/pdf": "skills", "skill/pdf/abc": "skills", "review/pdf": "skills",
+    schedules: "schedules", connectors: "connectors",
+  };
+  for (const [hash, section] of Object.entries(cases2)) assert.equal(DD.page(hash.split("/")).section, section, hash);
+  assert.deepEqual(DD.page(["agent", "refs/loom/main"]), { name: "agent", section: "runs" });
+  assert.deepEqual(DD.page(["review", "pdf"]), { name: "review", section: "skills" });
+  // Anything no page takes is the home page: wrong lengths, unknown names,
+  // and names that only an object's prototype has.
+  for (const r of [[""], ["run", "w"], ["skills", "x"], ["skill"], ["skill", "a", "b", "c"], ["nowhere"], ["constructor"], ["__proto__"],
+    ["toString"], ["hasOwnProperty", "x"], [], null, undefined, "skills", [7], [["skills"]]]) {
+    assert.deepEqual(DD.page(r), { name: "home", section: "runs" }, JSON.stringify(r));
+  }
+});
+
+test("the top bar counts only from answers it understands (DRAW-69)", () => {
+  const H = (c) => c.repeat(40);
+  const ok = (data) => ({ ok: true, status: 200, data });
+  const waiting = { name: "pdf", description: "d", version: H("a"), commit: H("b"), pending: true };
+  assert.equal(DD.skillsWaiting(ok({ skills: [], pending: [waiting, { ...waiting, name: "two" }], problems: [] })), 2);
+  assert.equal(DD.skillsWaiting(ok({ skills: [], problems: [] })), 0, "a server with no skills store sends no pending");
+  // A malformed entry, or one not marked pending, isn't counted, as the
+  // Skills page doesn't list it.
+  assert.equal(DD.skillsWaiting(ok({ skills: [], pending: [waiting, { ...waiting, version: "x" }, { ...waiting, pending: false }, null, 7] })), 1);
+
+  const key = (name, from) => ({ name, from });
+  const conn = (secrets) => ({ name: "maps", url: "https://m.example/mcp", tools: [], writes: [], secrets });
+  const frame = (anthropic, connectors) => ok({ file: "/c.json", keychain: true, anthropic, connectors });
+  assert.equal(DD.keysToSet(frame(key("ANTHROPIC_API_KEY", "missing"), [conn([key("MAPS_KEY", "missing"), key("HEEDLE_CONNECTOR_MAPS_TOKEN", "missing")])])), 3);
+  assert.equal(DD.keysToSet(frame(key("ANTHROPIC_API_KEY", "keychain"), [conn([key("MAPS_KEY", "environment")])])), 0);
+  // One unreadable connector is left out, as on the Connectors page.
+  assert.equal(DD.keysToSet(frame(key("ANTHROPIC_API_KEY", "keychain"), [conn([key("MAPS_KEY", "missing")]), { name: "bad", secrets: "x" }])), 1);
+
+  const sched = (name, paused, note) => ({ name, program: "(echo)", ref: "refs/loom/main", spec: { every: 6e10 }, paused, note, next: [], recent: [] });
+  // Temporal's notes for a pause after a failed or timed-out run, from
+  // both its schedulers; heedle's pause and Temporal's others aren't.
+  const all = [
+    sched("a", true, "paused due to workflow failure: sched-a-2026: activity error"),
+    sched("b", true, "paused due to workflow timeout: sched-b-2026"),
+    sched("c", true, "paused, workflow failed: sched-c-2026"),
+    sched("d", true, "paused, workflow timedout: sched-d-2026"),
+    sched("e", true, "paused from heedle"),
+    sched("f", true, "paused for migration to workflow-backed scheduler"),
+    sched("g", false, "paused due to workflow failure: resumed since"),
+    sched("h", true, "the run paused due to workflow failure: x"),
+    sched("i", true, undefined),
+  ];
+  assert.equal(DD.schedulesStopped(ok({ schedules: all })), 4);
+  assert.equal(DD.schedulesStopped(ok({ schedules: [] })), 0);
+  assert.equal(DD.schedulesStopped(ok({ schedules: [{ ...all[0], name: "Bad Name" }, all[1]] })), 1, "a malformed schedule isn't counted");
+
+  // Failed, malformed or missing answers give no count at all.
+  for (const bad of [undefined, null, {}, { ok: false, status: 500, data: { error: "x" } }, { ok: false, status: 0, data: { error: "offline" } },
+    ok(null), ok("text"), ok([]), ok(7), { ok: "yes", data: { skills: [], pending: [] } }]) {
+    assert.equal(DD.skillsWaiting(bad), null, JSON.stringify(bad));
+    assert.equal(DD.keysToSet(bad), null, JSON.stringify(bad));
+    assert.equal(DD.schedulesStopped(bad), null, JSON.stringify(bad));
+  }
+  assert.equal(DD.skillsWaiting(ok({ pending: [waiting] })), null, "no skills list");
+  assert.equal(DD.skillsWaiting(ok({ skills: [], pending: "x" })), null);
+  assert.equal(DD.keysToSet(ok({ file: "/c.json", connectors: [] })), null, "no Claude key");
+  assert.equal(DD.keysToSet(ok({ file: "/c.json", anthropic: key("ANTHROPIC_API_KEY", "missing"), connectors: "x" })), null);
+  assert.equal(DD.schedulesStopped(ok({ schedules: "not a list" })), null);
+  assert.equal(DD.schedulesStopped(ok({})), null);
+});

@@ -777,6 +777,69 @@ const DD = (() => {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation };
+  // === The top bar ==========================================================
+
+  // SECTIONS are the top bar's sections, in its order.
+  const SECTIONS = ["runs", "skills", "schedules", "connectors"];
+
+  // PAGES is every page the app shows other than the home page: the
+  // route's first segment, the lengths of route it takes, and the section
+  // it belongs to. App picks what to show from page(), so a page and its
+  // section can't disagree.
+  const PAGES = {
+    agent: { sizes: [2], section: "runs" },
+    run: { sizes: [3], section: "runs" },
+    step: { sizes: [4], section: "runs" },
+    diff: { sizes: [3], section: "runs" },
+    skills: { sizes: [1], section: "skills" },
+    skill: { sizes: [2, 3], section: "skills" },
+    review: { sizes: [2], section: "skills" },
+    schedules: { sizes: [1], section: "schedules" },
+    connectors: { sizes: [1], section: "connectors" },
+  };
+
+  // page is the page a route (the hash's decoded segments) shows, and its
+  // section: {name, section}. Any route no page takes, "" included, shows
+  // the home page, which is Runs. Only PAGES' own names count, so a route
+  // like #/constructor is the home page too.
+  function page(route) {
+    const r = Array.isArray(route) ? route : [];
+    const p = str(r[0]) && Object.prototype.hasOwnProperty.call(PAGES, r[0]) ? PAGES[r[0]] : null;
+    return p && p.sizes.includes(r.length) ? { name: r[0], section: p.section } : { name: "home", section: "runs" };
+  }
+
+  // A count beside a section says how many things there need you. Each is
+  // read from a request()'s answer only if it's well formed: a failed or
+  // malformed answer gives null, and the bar shows no count.
+  const answered = (res) => res && typeof res === "object" && res.ok === true && res.data && typeof res.data === "object" && !Array.isArray(res.data);
+
+  // skillsWaiting counts the skills waiting for review, as the Skills page
+  // lists them.
+  function skillsWaiting(res) {
+    if (!answered(res) || !Array.isArray(res.data.skills) || !opt(res.data.pending, Array.isArray)) return null;
+    return (res.data.pending || []).filter((s) => asSkill(s) && s.pending === true).length;
+  }
+
+  // keysToSet counts the keys, Claude's included, that are set nowhere:
+  // the number the Connectors page says aren't set yet. A connector
+  // signed in to keeps its token as a key, so a sign-in to do again
+  // counts too.
+  function keysToSet(res) {
+    const v = answered(res) ? asConnectors(res.data) : null;
+    return v ? keysMissing(v) : null;
+  }
+
+  // Temporal's notes for a schedule it paused because a run failed or timed
+  // out (PauseOnFailure), from its workflow-backed scheduler and from the
+  // newer one. A pause from heedle or anywhere else isn't a failure.
+  const FAILURE_PAUSE = /^(paused due to workflow (failure|timeout): |paused, workflow (failed|timedout): )/;
+
+  // schedulesStopped counts the schedules paused by a run that failed.
+  function schedulesStopped(res) {
+    if (!answered(res) || !Array.isArray(res.data.schedules)) return null;
+    return asSchedules(res.data).filter((s) => s.paused && str(s.note) && FAILURE_PAUSE.test(s.note)).length;
+  }
+
+  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation };
 })();
 if (typeof module !== "undefined") module.exports = DD;

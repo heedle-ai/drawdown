@@ -58,6 +58,28 @@ All responses are JSON except the diffs, which are plain text.
 
 Requests are limited to 1 MB, and unknown JSON fields and trailing data are rejected. Every `ref` (query parameter or body field) is optional and defaults to the server's `-ref`; otherwise it must be a valid ref under `refs/loom/` (400 if not).
 
+## The top bar
+
+[[/images/top-bar.png|alt=drawdown's top bar: the brand and the history picker on the left; Runs (underlined in blue, the current section), Skills with a count of 1, Schedules with 2 and Connectors with 2 on the right; then Temporal with an arrow, set apart by a thin line]]
+
+The header holds the brand and the **history** picker (or, on an agent's page, its name) on the left, and on the right drawdown's four sections: **Runs** (the home page), **Skills**, **Schedules** and **Connectors**. Each is an ordinary link to its page (`#/`, `#/skills`, `#/schedules`, `#/connectors`). The section you're in is underlined with a thread in its own colour and marked `aria-current="page"`; a page inside a section counts as that section, so a skill's page (`#/skill/…`) and a review (`#/review/…`) are Skills, and a run, a step, a diff and an agent's page are Runs. Which page a route shows and which section it's in both come from `lib.js`'s `page`, so they can't disagree; anything no page takes shows the home page, which is Runs.
+
+A small count beside a section says how many things there need you:
+
+| Beside | Counts | Read from |
+|---|---|---|
+| Skills | skills waiting for review | `GET /api/skills` (`skillsWaiting`) |
+| Schedules | schedules paused because a run failed or timed out: Temporal's own notes for that pause, not one from heedle or anywhere else | `GET /api/schedules` (`schedulesStopped`) |
+| Connectors | keys set nowhere, Claude's included, as the Connectors page counts them; a sign-in's token is one of a connector's keys, so a sign-in to do again counts too | `GET /api/connectors` (`keysToSet`) |
+
+The bar asks once when the page loads and again whenever the route changes, never on a timer. A count is shown only from an answer that is well formed; a request that fails, or an answer that isn't understood, shows no count, and nothing in the bar says so: the section's own page says what's wrong.
+
+**Temporal** comes last, quieter and set apart: it opens Temporal's Web UI (`-temporal-ui`) in a new tab, since it's a developer's tool rather than a part of drawdown.
+
+There's no commands count any more. It looked like a button and did nothing, and a list of commands wouldn't add anything: `/api/info` has only their names, and **New run**'s **Insert a command** row already lists every one, with what it inserts.
+
+On a narrow screen the sections take a row of their own under the brand, and Temporal moves up beside the history picker, still last for the keyboard; at 375 px wide nothing scrolls sideways. CI checks the bar in Chromium (`ui/topbar.check.js`, the `topbar` step): every route marks exactly its section, the bar fits at 375 and 1280 px in light and dark mode, every link is reached by keyboard with a visible focus ring, and broken answers give no count.
+
 ## Histories
 
 The header's **history** selector switches between refs: the default one and every [branch](https://github.com/heedle-ai/loom/wiki/Branching-and-Merging) under `refs/loom/`. Runs submitted from the page are recorded on the selected history. Each history shows:
@@ -143,13 +165,13 @@ drawdown's own worker (`-worker`) takes the same `-connectors FILE` as `loom wor
 
 [[/images/schedules.png|alt=The Schedules page: one schedule, shipment-check, at cron 0 9 * * 1-5 in UTC, with its next run, its program, a recent run linked, and Run now, Pause and Delete]]
 
-**Schedule…** beside **Run** makes a schedule of the program in the editor: a name, and every hour, 6 hours, day or week, or cron times in a time zone (your browser's, to begin with). It's [loom's schedule](https://github.com/heedle-ai/loom/wiki/How-It-Works#schedules): Temporal runs the program as compiled now, each run recorded like any other, on the history you're looking at. The **schedules** link opens the Schedules page (`#/schedules`): each schedule with when it runs (an interval counts from when it was made), or that it's paused and why (a run that fails pauses it), its history, its next run, its program, and links to its recent runs, with **Run now** (if a run of it is still going, the new one starts when that ends), **Pause** or **Resume**, and **Delete** (its runs' records stay). Each scheduled run's **Compare** finds the previous run of its program, scheduled or not, by the record's `Loom-Program`.
+**Schedule…** beside **Run** makes a schedule of the program in the editor: a name, and every hour, 6 hours, day or week, or cron times in a time zone (your browser's, to begin with). It's [loom's schedule](https://github.com/heedle-ai/loom/wiki/How-It-Works#schedules): Temporal runs the program as compiled now, each run recorded like any other, on the history you're looking at. **Schedules** in the top bar opens the Schedules page (`#/schedules`): each schedule with when it runs (an interval counts from when it was made), or that it's paused and why (a run that fails pauses it), its history, its next run, its program, and links to its recent runs, with **Run now** (if a run of it is still going, the new one starts when that ends), **Pause** or **Resume**, and **Delete** (its runs' records stay). Each scheduled run's **Compare** finds the previous run of its program, scheduled or not, by the record's `Loom-Program`.
 
 ## Connectors
 
 [[/images/connectors.png|alt=The Connectors page: Claude's key, not set, with a field to paste it; a remote maps connector whose one write waits for approval, its key in the keychain, with Replace and Remove; a local search connector in a container, its key in the keychain]]
 
-The **connectors** link opens the Connectors page (`#/connectors`): the MCP servers agent steps can be granted ([pirn → Connectors](https://github.com/heedle-ai/pirn/wiki/How-It-Works#connectors)), as the worker's connectors file (`-connectors`) has them now, and Claude's own key. Each connector shows whether it's remote or a local container, its tools, and its writes, and whether they wait for approval. Each key it needs shows where it's found: in the environment where heedle runs (which comes first), in your keychain, or not set. Paste a key and **Save** (or **Replace**), or **Remove** it: it goes straight from this page to this machine's keychain (pirn's `Keychain`), never to Temporal, Git or a log, and the page never gets a value back. Only a name a connector uses, or `ANTHROPIC_API_KEY`, can be set, and only from the machine heedle runs on, at localhost: a request through a proxy (with forwarding headers), or to a server given `-hosts`, is refused, because a proxy on this machine makes every request look local; use `heedle secret set` there. A connectors file that fails its check lists no connector, says why, and names no key, and the worker uses none of it until it's fixed; one connector the page can't read is left out and counted, never hiding the others or Claude's key. The worker reads its connectors file and its keys again for every step, so a key saved here, or a connector added to the file, is used from the next step, with no restart.
+**Connectors** in the top bar opens the Connectors page (`#/connectors`): the MCP servers agent steps can be granted ([pirn → Connectors](https://github.com/heedle-ai/pirn/wiki/How-It-Works#connectors)), as the worker's connectors file (`-connectors`) has them now, and Claude's own key. Each connector shows whether it's remote or a local container, its tools, and its writes, and whether they wait for approval. Each key it needs shows where it's found: in the environment where heedle runs (which comes first), in your keychain, or not set. Paste a key and **Save** (or **Replace**), or **Remove** it: it goes straight from this page to this machine's keychain (pirn's `Keychain`), never to Temporal, Git or a log, and the page never gets a value back. Only a name a connector uses, or `ANTHROPIC_API_KEY`, can be set, and only from the machine heedle runs on, at localhost: a request through a proxy (with forwarding headers), or to a server given `-hosts`, is refused, because a proxy on this machine makes every request look local; use `heedle secret set` there. A connectors file that fails its check lists no connector, says why, and names no key, and the worker uses none of it until it's fixed; one connector the page can't read is left out and counted, never hiding the others or Claude's key. The worker reads its connectors file and its keys again for every step, so a key saved here, or a connector added to the file, is used from the next step, with no restart.
 
 [[/images/connectors-catalog.png|alt=Searching the MCP Registry for maps: two servers with Add buttons, one needing a token; one that needs an X-API-Key header and one that runs as a local package, each saying why it can't be added here]]
 
@@ -161,7 +183,7 @@ The **connectors** link opens the Connectors page (`#/connectors`): the MCP serv
 
 ## Skills
 
-The **skills** link opens the Skills page (`#/skills`): every skill the store keeps ([treadle](https://github.com/heedle-ai/treadle/wiki)), with its description, newest version, and whether it was imported. A skill's page (`#/skill/<name>`) shows its `SKILL.md` as text, its files with their sizes, and every version, newest first, with where each was imported from; for a GitHub source, a link to the exact folder at the exact commit, built only from checked parts so it can only point at github.com.
+**Skills** in the top bar opens the Skills page (`#/skills`): every skill the store keeps ([treadle](https://github.com/heedle-ai/treadle/wiki)), with its description, newest version, and whether it was imported. A skill's page (`#/skill/<name>`) shows its `SKILL.md` as text, its files with their sizes, and every version, newest first, with where each was imported from; for a GitHub source, a link to the exact folder at the exact commit, built only from checked parts so it can only point at github.com.
 
 Wherever a step follows a skill, it says so with a badge naming the skill and the version its plan pins, linking to that version: on the graph (an opened step names `weather @72ba7cf`, and its arguments), in hover cards, in the run's outputs and in the step inspector. A run that pinned an older version opens that version, marked *not the newest*.
 
@@ -195,7 +217,7 @@ These checks are tested in `TestGuard_RefusesCrossSiteAndRebinding`, `TestPage` 
 
 ## The page
 
-`static/index.html`, `static/lib.js` and `static/app.js`, embedded in the binary. `lib.js` holds the page's pure logic (reading outputs, durations, the timeline's span), which CI tests with Node (`node --test ui/lib.test.js`); every step output is read through its checked parse, so JSON that only looks like a page or an answer is shown as text. No build step: the libraries load from jsDelivr, each pinned to an exact version with a Subresource Integrity hash, so the browser refuses a file that doesn't match.
+`static/index.html`, `static/lib.js` and `static/app.js`, embedded in the binary. `lib.js` holds the page's pure logic (reading outputs, durations, the timeline's span), which CI tests with Node (`node --test ui/lib.test.js`), and CI opens the page in Chromium to check the top bar (`ui/topbar.check.js`); every step output is read through its checked parse, so JSON that only looks like a page or an answer is shown as text. No build step: the libraries load from jsDelivr, each pinned to an exact version with a Subresource Integrity hash, so the browser refuses a file that doesn't match.
 
 | Library | Version | Used for |
 |---|---|---|
