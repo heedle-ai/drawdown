@@ -1365,11 +1365,13 @@ function FrontDoor({ history }) {
   const ask = async (request) => {
     request = request.trim();
     if (!request || busy) return;
-    setBusy(true); setText("");
+    setBusy(true);
     const body = { request, earlier: DD.earlierTurns(conv), today: DD.localDay(new Date()), timeZone: localZone() };
     const r = await api("/api/ask", body);
     setBusy(false);
     const proposal = r.ok ? DD.asProposal(r.data) : null;
+    // What you typed stays until it's answered (review 33).
+    if (proposal) setText("");
     setConv((c) => [...c, proposal ? { request, proposal } : { request, error: (r.data && r.data.error) || "The answer wasn't understood." }]);
   };
   const last = conv.length - 1;
@@ -1403,20 +1405,35 @@ function ProposalCard({ p, history, latest }) {
   const [shape, setShape] = useState(null);
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState(null);
+  const [name, setName] = useState(p.name);
   const check = async () => {
     const r = await api("/api/ready", { program: p.program });
     const v = r.ok && DD.asReadiness(r.data);
-    if (v) setReady(v);
+    // A program that no longer compiles (a skill removed) can't run; the
+    // card never keeps an old "ready" (review 33).
+    setReady(v || { needs: [], error: (r.data && r.data.error) || "the check wasn't understood", ready: false });
   };
   useEffect(() => {
     if (!p.program) return;
     api("/api/compile", { program: p.program }).then((r) => { if (r.ok && r.data.plan) setShape(r.data); });
-    // Coming back from the connectors page: check again.
+    if (!latest) return;
+    // Coming back from the connectors page: check again, the latest card
+    // only (review 33).
     const again = () => { if (document.visibilityState === "visible") check(); };
     window.addEventListener("focus", again);
     document.addEventListener("visibilitychange", again);
     return () => { window.removeEventListener("focus", again); document.removeEventListener("visibilitychange", again); };
-  }, [p.program]);
+  }, [p.program, latest]);
+  useEffect(() => {
+    // A schedule of that name already: offer the next free one.
+    if (!latest || !p.schedule) return;
+    api("/api/schedules").then((r) => {
+      const taken = r.ok ? DD.asSchedules(r.data).map((x) => x.name) : [];
+      let n = p.name, i = 2;
+      while (taken.includes(n)) n = `${p.name.slice(0, 36)}-${i++}`;
+      setName(n);
+    });
+  }, [p.name, latest]);
   const run = async () => {
     setBusy("run"); setNote(null);
     const r = await api("/api/runs", { program: p.program, ref: history });
@@ -1427,10 +1444,10 @@ function ProposalCard({ p, history, latest }) {
   const schedule = async () => {
     setBusy("schedule"); setNote(null);
     const sp = p.schedule;
-    const body = { name: p.name, program: p.program, ref: history, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
+    const body = { name, program: p.program, ref: history, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
     const r = await api("/api/schedules", body);
     setBusy("");
-    setNote(r.ok ? { ok: html`Scheduled <a href="#/schedules" class="mono">${p.name}</a>, ${DD.when(sp)}. Each run is recorded like any other.` }
+    setNote(r.ok ? { ok: html`Scheduled <a href="#/schedules" class="mono">${name}</a>, ${DD.when(sp)}. Each run is recorded like any other.` }
       : { error: (r.data && r.data.error) || String(r.data) });
   };
   const teach = async () => {
@@ -1443,7 +1460,8 @@ function ProposalCard({ p, history, latest }) {
   };
   const edit = () => { window.dispatchEvent(new CustomEvent("dd-program", { detail: p.program })); };
   const lines = DD.readyLines(ready);
-  const canRun = !!p.program && (!ready || ready.ready);
+  // Run only what the worker said can run now (review 33).
+  const canRun = !!p.program && !!ready && ready.ready;
   // An earlier proposal is its summary, with the rest a click away.
   if (!latest) return html`
     <div class="panel proposal">
@@ -1465,15 +1483,18 @@ function ProposalCard({ p, history, latest }) {
             <span class="mark" aria-hidden="true">${l.ok ? "✓" : "!"}</span>
             <span class="mono">${l.what}</span>
             <span>${l.ok ? "ready" : l.fix}</span>
+            ${l.writes && html`<strong class=${l.asks ? "writes" : "writes unasked"}>${l.writes}</strong>`}
             ${!l.ok && l.href && html`<a class="btn" href=${l.href}>Connect</a>`}
           </li>`)}
         </ul>`}
-        ${ready && !ready.ready && html`<p><button class="link-btn" onClick=${check}>Check again</button></p>`}
+        ${!ready ? html`<p><button class="link-btn" onClick=${check}>Check whether it can run</button></p>`
+          : !ready.ready && html`<p><button class="link-btn" onClick=${check}>Check again</button></p>`}
         ${shape && html`<${CompositionGraph} plan=${shape.plan} shape=${shape.shape} />`}
-        <details class="program"><summary>The program</summary><${Program} text=${p.program} /></details>
+        <details class="program" open><summary>The program</summary><${Program} text=${p.program} /></details>
         ${latest && html`<div class="row">
           <button class="primary" disabled=${!canRun || !!busy} onClick=${run}>${busy === "run" ? "Starting…" : "Run it now"}</button>
-          ${p.schedule && html`<button disabled=${!canRun || !!busy} onClick=${schedule}>${busy === "schedule" ? "Scheduling…" : `Run it ${DD.when(p.schedule)}`}</button>`}
+          ${p.schedule && html`<button disabled=${!canRun || !!busy || !/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/.test(name)} onClick=${schedule}>${busy === "schedule" ? "Scheduling…" : `Run it ${DD.when(p.schedule)}`}</button>
+            <label class="sched-name">as <input type="text" value=${name} aria-label="schedule name" onInput=${(e) => setName(e.target.value)} /></label>`}
           <button onClick=${edit}>Edit the program</button>
           ${!canRun && html`<span class="muted">Connect what's missing first.</span>`}
         </div>`}`}
@@ -1531,10 +1552,16 @@ function NewRun({ info, history: ref }) {
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [scheduling, setScheduling] = useState(false);
+  const [putBack, setPutBack] = useState(null);
   const area = useRef(null);
   // Edit the program, from a proposal of the front door: into this editor.
   useEffect(() => {
-    const take = (e) => { if (typeof e.detail === "string") { setProgram(e.detail); setTimeout(() => area.current && area.current.scrollIntoView({ behavior: "smooth", block: "center" }), 50); } };
+    // What it replaces can be put back (review 33).
+    const take = (e) => {
+      if (typeof e.detail !== "string") return;
+      setProgram((old) => { setPutBack(DD.replaced(old, e.detail)); return e.detail; });
+      setTimeout(() => area.current && area.current.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+    };
     window.addEventListener("dd-program", take);
     return () => window.removeEventListener("dd-program", take);
   }, []);
@@ -1590,6 +1617,7 @@ function NewRun({ info, history: ref }) {
             onClick=${() => insert(TEMPLATES[c] || `(${c})`)}>${c}<//>`;
         })}
       </div>
+      ${putBack && html`<p class="muted">The program from Ask heedle replaced yours. <button class="link" onClick=${() => { setProgram(putBack); setPutBack(null); }}>Put back the program it replaced</button></p>`}
       ${err && html`<p class="error" role="alert">${err.line ? `line ${err.line}, column ${err.col}: ` : ""}${err.error}</p>`}
       ${submitError && html`<p class="error" role="alert">${submitError}</p>`}
       ${plan && html`

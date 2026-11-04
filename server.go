@@ -154,6 +154,11 @@ type Server struct {
 	ConnectorsFile string
 	// Secrets, if set, is the keychain the Connectors page keeps keys in.
 	Secrets Secrets
+	// StepKeys, if set, is the vault steps read keys through (Secrets
+	// if not), and Agents whether the worker has an agent image: the
+	// front door's ready check reads them as a run would.
+	StepKeys pirn.Vault
+	Agents   bool
 	// MCPRegistry is the MCP Registry the page adds connectors from
 	// (DefaultMCPRegistry if empty); RegistryClient, if set, reaches it.
 	MCPRegistry    string
