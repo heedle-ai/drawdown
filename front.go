@@ -70,7 +70,7 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	if skills == nil {
 		skills = noSkills{}
 	}
-	out, err := loom.CheckReady(r.Context(), p, skills, loom.Worker{Connectors: cs, Keys: v, Agents: s.Agents})
+	out, err := loom.CheckReady(r.Context(), p, skills, loom.Worker{Connectors: cs, Keys: v, Agents: s.Agents, Browsers: s.Browsers})
 	if err != nil {
 		out = loom.Readiness{Needs: []pirn.Need{}, Error: err.Error()}
 	}

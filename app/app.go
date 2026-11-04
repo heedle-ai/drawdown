@@ -173,7 +173,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 			if err != nil {
 				return loom.Readiness{}, err
 			}
-			return loom.CheckReady(ctx, p, lib, loom.Worker{Connectors: cs, Keys: agent.Vault, Agents: agent.Image != ""})
+			return loom.CheckReady(ctx, p, lib, loom.Worker{Connectors: cs, Keys: agent.Vault, Agents: agent.Image != "", Browsers: *browserImage != ""})
 		}}
 		loom.RegisterWriter(w, writer)
 		loom.RegisterAsk(w, writer)
@@ -203,6 +203,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		Secrets:        vault,
 		StepKeys:       stepKeys,
 		Agents:         *agentImage != "",
+		Browsers:       *browserImage != "",
 		Skills:         &treadle.Library{Store: s},
 		Commands:       commands,
 		Store:          s,

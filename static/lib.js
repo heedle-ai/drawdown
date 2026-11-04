@@ -641,7 +641,7 @@ const DD = (() => {
   const isNeed = (n) => n && typeof n === "object" && str(n.connector) && /^[a-z0-9-]{1,24}$/.test(n.connector) && opt(n.tools, strs) &&
     (n.problem === undefined || NEED.test(n.problem)) && opt(n.key, str) && opt(n.detail, str) && opt(n.writes, strs) && opt(n.approve, bool);
   const isReady = (r) => r && typeof r === "object" && objs(r.needs || [], isNeed) && (r.claude === undefined || /^(|key|unreadable)$/.test(r.claude)) &&
-    opt(r.claudeDetail, str) && opt(r.agent, str) && opt(r.error, str) && bool(r.ready);
+    opt(r.claudeDetail, str) && opt(r.agent, str) && opt(r.browser, str) && opt(r.error, str) && bool(r.ready);
 
   // asProposal is a proposal as the API sends it, if well formed: a
   // summary, and a program with its plan (perhaps a schedule with a name,
@@ -669,6 +669,7 @@ const DD = (() => {
     if (r.error) return [{ what: "This plan", ok: false, fix: `Can't run as it is: ${r.error}`, href: "" }];
     const out = [];
     if (r.agent) out.push({ what: "Agent steps", ok: false, fix: r.agent, href: "" });
+    if (r.browser) out.push({ what: "Browse steps", ok: false, fix: r.browser, href: "" });
     if (r.claude === "key") out.push({ what: "Claude", ok: false, fix: "No Anthropic API key yet. Paste one on the connectors page.", href: "#/connectors" });
     else if (r.claude === "unreadable") out.push({ what: "Claude", ok: false, fix: `Can't read the Anthropic API key now: ${r.claudeDetail || "the keychain didn't answer"}.`, href: "#/connectors" });
     for (const n of r.needs) {
