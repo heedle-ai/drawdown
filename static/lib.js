@@ -506,13 +506,14 @@ const DD = (() => {
 
   // links splits a string's text into pieces, each { text } or, for an
   // http or https URL, { text, url }. No other scheme is ever a link. A
-  // URL starts a word (the text's start, or after whitespace or an opening
-  // bracket), so "blob:https://…" is no link; it ends at whitespace, a
+  // URL starts a word (the text's start, or after whitespace, an opening
+  // bracket or a quote, such as the one a program's string opens with:
+  // (browse "https://…")), so "blob:https://…" is no link; it ends at whitespace, a
   // quote, a backslash or an angle bracket, and leaves off closing
   // punctuation (a bracket only if it closes nothing).
   function links(text) {
     const out = [];
-    const re = /(?<=^|[\s(\[{<'‘“])https?:\/\/[^\s"\\<>]+/giu;
+    const re = /(?<=^|[\s(\[{<'‘“"])https?:\/\/[^\s"\\<>]+/giu;
     let last = 0, m;
     while ((m = re.exec(text))) {
       let u = m[0];
