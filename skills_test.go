@@ -309,3 +309,31 @@ func TestInv_CompilesReadSkillsOnlyWhenTheyChange(t *testing.T) {
 		t.Errorf("a new skill: reads %d", c.reads)
 	}
 }
+
+// TestInv_InfoNamesSkillsAndDescribesCommands: /api/info says which
+// commands are skills (the program viewer links them to their pages and
+// dyes them as skills) and what each built-in command does, in loom's
+// words to Claude, for the viewer's hover (roadmap 9.4).
+func TestInv_InfoNamesSkillsAndDescribesCommands(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	lib := &treadle.Library{Store: w.store}
+	if _, err := lib.Add(ctx, skillFolder("weather", "v1"), time.Unix(1700000000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	_, info, raw := w.call("GET", "/api/info", nil)
+	skills, _ := info["skills"].([]any)
+	about, _ := info["about"].(map[string]any)
+	if len(skills) != 1 || skills[0] != "weather" {
+		t.Fatalf("skills = %v (%s)", skills, raw)
+	}
+	commands, _ := info["commands"].([]any)
+	if len(commands) != 4 || len(about) != 3 || about["weather"] != nil {
+		t.Fatalf("commands %v, about %v", commands, about)
+	}
+	for _, c := range []string{"echo", "source", "assess"} {
+		if about[c] != loom.BuiltinCommands[c].About || about[c] == "" {
+			t.Errorf("about %s = %v", c, about[c])
+		}
+	}
+}

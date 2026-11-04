@@ -6,6 +6,8 @@
 <title>drawdown</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/css/diff2html.min.css"
       integrity="sha384-iBvSlI3tNrrSIy7s6mvLg+5B2Z/QXbR4L0Pzg1nRf8zkXrz5JF316MLm2igMIpi2" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.21/lib/codemirror.css"
+      integrity="sha384-bsaAhvdduZPAwUb7RRLRvDgtEtOsggrgjkr/EjPO1i/vdoi+DmdLaG79UOt6M5hD" crossorigin="anonymous">
 <style>
   /* Fonts are served by drawdown itself (static/fonts, SIL Open Font License). */
   @font-face { font-family:"Bricolage Grotesque"; font-style:normal; font-weight:200 800; font-display:swap;
@@ -143,9 +145,49 @@
   button.link { border:none; background:none; padding:0; color:var(--source); text-decoration:underline; text-underline-offset:3px; cursor:pointer; font:inherit; }
   select { font:12.5px var(--mono); padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); }
 
-  /* Programs, highlighted */
-  .prog .p { color:var(--muted); } .prog .str { color:var(--ink); } .prog .comb { font-weight:600; color:var(--muted); }
-  .prog .cmd { font-weight:600; color:color-mix(in srgb, var(--c) 85%, var(--ink)); }
+  /* Programs, highlighted (roadmap 9.4). One tokenizer (DD.tokens, draft's
+     lexer) colours the viewer (.prog) and the editor (.ed) alike. Brackets
+     take their depth's thread colour, four in turn, each at least 4.5:1 on
+     --surface and --sunk in both modes; the form under a bracket being
+     pointed at, focused or next to the cursor takes a tint of it. */
+  .prog, .ed { --d0:#4a5f9e; --d1:#2b7368; --d2:#8c4a7f; --d3:#7a6514; --hc:transparent; }
+  @media (prefers-color-scheme: dark) { .prog, .ed { --d0:#9db0ee; --d1:#6fc8ba; --d2:#dc9ad0; --d3:#d1bb62; } }
+  .d0 { --dc:var(--d0); } .d1 { --dc:var(--d1); } .d2 { --dc:var(--d2); } .d3 { --dc:var(--d3); }
+  .prog .p, .ed .p { color:var(--dc); font-weight:600; }
+  .prog .comb, .ed .comb { font-weight:600; color:var(--ink); }
+  .prog .cmd, .ed .cmd { font-weight:600; color:color-mix(in srgb, var(--c) 85%, var(--ink)); }
+  .prog .sk, .ed .sk { font-weight:600; color:color-mix(in srgb, var(--skill) 85%, var(--ink));
+                       text-decoration:underline dotted color-mix(in srgb, var(--skill) 60%, transparent); text-underline-offset:3px; }
+  .prog .str, .ed .str { color:var(--ink); }
+  .prog .cm, .ed .cm { color:var(--muted); font-style:italic; }
+  .prog .in, .ed .CodeMirror-focused .in { background:color-mix(in srgb, var(--hc) 11%, transparent); }
+  .prog .hot, .ed .CodeMirror-focused .hot { background:color-mix(in srgb, var(--dc) 26%, transparent); border-radius:3px;
+                         box-shadow:0 0 0 1px color-mix(in srgb, var(--dc) 60%, transparent); }
+  .prog .unmatched, .ed .unmatched, .prog .bad, .ed .bad { color:var(--bad); background:color-mix(in srgb, var(--bad) 12%, transparent);
+                         text-decoration:underline wavy var(--bad); text-underline-offset:3px; text-decoration-skip-ink:none; }
+  .prog a.url, .prog a.grant { color:inherit; text-decoration:underline; text-decoration-color:color-mix(in srgb, var(--source) 70%, transparent); text-underline-offset:3px; }
+  .prog a.grant { text-decoration-style:dotted; }
+  .prog .why { cursor:help; text-decoration:underline dotted color-mix(in srgb, var(--muted) 70%, transparent); text-underline-offset:3px; }
+  .prog-box { display:flow-root; }
+  pre.prog { font:12.5px/1.65 var(--mono); }
+  pre.prog:focus-visible { outline-offset:4px; }
+  .prog .ln { display:block; min-height:1.65em; padding-left:var(--hang); text-indent:calc(-1 * var(--hang)); }
+  .prog .more { font:600 11px/1.5 var(--sans); padding:0 8px; margin-left:6px; border-radius:999px; text-indent:0; vertical-align:1px;
+                color:var(--muted); user-select:none; }
+  .prog-copy { float:right; margin:0 0 4px 10px; font:600 11.5px/1.5 var(--sans); padding:2px 10px; border-radius:999px; color:var(--muted); }
+  .ed { position:relative; }
+  .ed .CodeMirror { height:auto; min-height:150px; font:13.5px/1.6 var(--mono); padding:8px 4px; border:1px solid var(--line);
+                    border-radius:10px; background:var(--sunk); color:var(--ink); }
+  .ed .CodeMirror-focused { outline:2px solid var(--focus); outline-offset:2px; }
+  .ed .CodeMirror-code:focus-visible { outline:none; } /* the editor's own ring, above, shows focus */
+  .ed .CodeMirror-lines { min-height:132px; }
+  .ed .CodeMirror-cursor { border-left:1.5px solid var(--ink); }
+  .ed .CodeMirror-selected, .ed .CodeMirror-focused .CodeMirror-selected, .ed .CodeMirror-line::selection, .ed .CodeMirror-line > span::selection,
+  .ed .CodeMirror-line > span > span::selection { background:color-mix(in srgb, var(--focus) 24%, transparent); }
+  .ed .CodeMirror-line { padding:0 10px; }
+  .ed .CodeMirror pre.CodeMirror-line, .ed .CodeMirror pre.CodeMirror-line-like { font:inherit; }
+  .ed-empty { position:absolute; left:15px; top:9px; color:var(--muted); font:13.5px/1.6 var(--mono); pointer-events:none; }
+  .ed-keys { font-size:12.5px; margin-top:6px; }
 
   /* The drawdown: recent runs, woven */
   .weave-wrap { overflow-x:auto; padding:4px 2px 2px; }
@@ -393,6 +435,8 @@
         integrity="sha384-toVdrLSMaw7Y55MowcKqkmFL/Ek6Sky62NOk0b5sDDZBu2wcoPyyQUt9unDVjXhL" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/js/diff2html.min.js"
         integrity="sha384-1tVmtFdzvhqVP3vQWJmKYvD0uTtR0r+FhlLWw+vG6F/vNDS7yegNMNNHRS12fSyR" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.21/lib/codemirror.js"
+        integrity="sha384-YbR2n4zUtdAz2YuqQsJFpjrgTl5SPEm0NG+y8/y3R63tAWTA3O7TOyIWyYYcqUqU" crossorigin="anonymous"></script>
 <script src="lib.js"></script>
 <script src="app.js"></script>
 </body>

@@ -5,8 +5,8 @@
 | Page | What it shows |
 |---|---|
 | **Drawdown** | Recent runs, woven: one column per run, one square per step, coloured by the kind of step, with the run's status along the top. Hover for details; click a column to open the run, a square to open the step |
-| **New run** | An editor that compiles as you type: errors with line and column, or the program's composition as a graph. Example programs, and a button per command that inserts it |
-| **Runs** | Every run, newest first: status, the program with its commands coloured, when it started, how long it took relative to the others, and its warp commit |
+| **New run** | An editor that colours and compiles as you type: brackets by depth, errors with line and column, or the program's composition as a graph. Example programs, and a button per command that inserts it |
+| **Runs** | Every run, newest first: status, the program as draft reads it (see [Reading and editing programs](How-It-Works#reading-and-editing-programs)), when it started, how long it took relative to the others, and its warp commit |
 | **Run** | Status and IDs, the timeline of every step as Temporal ran it, the composition graph (groups fold, every step opens in place, with links to its inspector, skill, diff, record and Temporal history) and each step's output |
 | **Schedules** | Programs Temporal runs on a timer, each run recorded like any other; run one now, pause, resume or delete it |
 | **Connectors** | The MCP servers agent steps can use, and where each key is found; paste a key once and it goes to your keychain |
