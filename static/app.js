@@ -1,6 +1,6 @@
 // drawdown: React (UMD) with htm for JSX-style markup, diff2html for
 // diffs. No build step.
-const { useState, useEffect, useRef, useLayoutEffect, useContext, createContext } = React;
+const { useState, useEffect, useRef, useLayoutEffect, useContext, createContext, useMemo } = React;
 const html = htm.bind(React.createElement);
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -86,21 +86,270 @@ function Card({ title, children }) {
 }
 const Field = ({ k, children }) => children === "" || children == null || children === false ? null : html`<dt>${k}</dt><dd>${children}</dd>`;
 
-// === Programs, highlighted =================================================
+// === Programs, highlighted (roadmap 9.4) ===================================
+// A program reads as draft reads it (DD.program): each bracket in its
+// depth's colour, pipe and par as structure, commands in their step's dye,
+// skills in the skill dye and linked to their pages, comments muted. The
+// viewer and the editor colour from the same tokens.
+
+// CommandsContext is what the page knows of the worker's commands: which
+// are skills (with their descriptions) and what each built-in does.
+const CommandsContext = createContext({ skills: new Map(), about: {} });
+
+// BROWSE_GRANT explains an agent step granted "browse": a connector of that
+// name, not the browse command.
+const BROWSE_GRANT = "Grants the connector named browse: the agent works a browser through that connector's tools. It is not the browse command, which opens pages itself; without a connector of that name, the step can't run.";
+
+// tokenClass is the classes a token is coloured by, and the dye (--c) a
+// command takes.
+function tokenClass(t, cmds) {
+  if (t.kind === "paren") return "p d" + (t.depth % 4) + (t.partner < 0 ? " unmatched" : "");
+  if (t.kind === "comment") return "cm";
+  if (t.kind === "str") return "str";
+  if (t.kind === "bad") return "bad";
+  if (t.kind !== "word") return "";
+  if (t.text === "pipe" || t.text === "par") return "comb";
+  if (cmds.skills.has(t.text)) return "sk";
+  if (KIND_OF_COMMAND[t.text]) return "cmd k-" + KIND_OF_COMMAND[t.text];
+  if (cmds.about[t.text] !== undefined) return "cmd k-other";
+  return "";
+}
+
+// hotRange is the brackets a hot bracket pairs (lo, hi) and the depth
+// colour to tint the form between them with.
+function hotRange(toks, hot) {
+  if (hot < 0 || !toks[hot] || toks[hot].kind !== "paren") return null;
+  const t = toks[hot], o = t.partner < 0 ? hot : t.partner;
+  const lo = Math.min(hot, o), hi = Math.max(hot, o);
+  return { lo, hi, color: `var(--d${toks[lo].depth % 4})` };
+}
 
 function Program({ text, max }) {
-  const src = max && text.length > max ? text.slice(0, max) + " …" : text;
-  const out = DD.tokens(src).map(([kind, v], k) => {
-    if (kind === "str") return html`<span key=${k} class="str">${v}</span>`;
-    if (kind === "paren") return html`<span key=${k} class="p">${v}</span>`;
-    if (kind === "word") {
-      const c = KIND_OF_COMMAND[v];
-      if (c) return html`<span key=${k} class=${"cmd k-" + c}>${v}</span>`;
-      if (v === "pipe" || v === "par") return html`<span key=${k} class="comb">${v}</span>`;
+  const cmds = useContext(CommandsContext);
+  const toks = useMemo(() => DD.program(text), [text]);
+  const [hot, setHot] = useState(-1);
+  const [open, setOpen] = useState(() => new Set());
+  const [copied, setCopied] = useState("");
+  const parens = useMemo(() => toks.map((t, i) => (t.kind === "paren" ? i : -1)).filter((i) => i >= 0), [toks]);
+  const range = hotRange(toks, hot);
+
+  // What shows: each token, a long string folded to its start unless
+  // opened, all of it cut at max characters for a list's preview.
+  const pieces = [];
+  let budget = max || Infinity;
+  for (let i = 0; i < toks.length && budget > 0; i++) {
+    const t = toks[i];
+    const long = (t.kind === "str" || t.kind === "bad") && t.text.length > DD.FOLD_AT && !max;
+    let shown = long && !open.has(i) ? t.text.slice(0, DD.FOLD_SHOW) + "…" : t.text;
+    if (shown.length > budget) shown = shown.slice(0, budget);
+    budget -= shown.length;
+    pieces.push({ text: shown, i, off: 0 });
+    if (long) pieces.push({ text: "⁠", i, toggle: true });
+  }
+  if (budget <= 0 && pieces.reduce((n, p) => n + (p.toggle ? 0 : p.text.length), 0) < text.length) pieces.push({ text: " …", i: -1 });
+  const lns = DD.lines(pieces);
+
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopied("Copied"); }
+    catch { setCopied("Couldn't copy"); }
+    setTimeout(() => setCopied(""), 1600);
+  };
+  const keys = (e) => {
+    if (!parens.length) return;
+    const at = parens.indexOf(hot);
+    const to = { ArrowRight: at + 1, ArrowDown: at + 1, ArrowLeft: at - 1, ArrowUp: at - 1, Home: 0, End: parens.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    setHot(parens[Math.max(0, Math.min(parens.length - 1, to))]);
+  };
+
+  const word = (t, txt, k, cls) => {
+    if (cls === "sk") {
+      const about = cmds.skills.get(t.text);
+      return html`<${Tip} tag="a" key=${k} class="sk" href=${"#/skill/" + encodeURIComponent(t.text)}
+        content=${html`<${Card} title=${html`<${KindPill} kind="skill">${t.text}<//>`}><${Field} k="Skill">${about || "A skill you added."}<//><//>`}>${txt}<//>`;
     }
-    return v;
-  });
-  return html`<pre class="prog">${out}</pre>`;
+    if (cls.startsWith("cmd") && cmds.about[t.text]) {
+      const kind = KIND_OF_COMMAND[t.text] || "other";
+      return html`<${Tip} key=${k} class=${cls} focusable=${false} color=${kindColor(kind)}
+        content=${html`<${Card} title=${html`<${KindPill} kind=${kind}>${t.text}<//>`}><${Field} k="Does">${cmds.about[t.text]}<//><//>`}>${txt}<//>`;
+    }
+    return html`<span key=${k} class=${cls}>${txt}</span>`;
+  };
+  const str = (t, p, k, cls) => {
+    const g = DD.grantOf(t);
+    if (g && g.connector === "browse" && !g.tool) {
+      return html`<${Tip} key=${k} class=${cls + " why"} content=${html`<${Card} title="A grant"><${Field} k="browse">${BROWSE_GRANT}<//><//>`}>${p.text}<//>`;
+    }
+    if (g) {
+      const what = g.tool ? `Grants the tool ${g.tool} of the connector ${g.connector}.` : `Grants the connector ${g.connector}, all its tools.`;
+      return html`<${Tip} tag="a" key=${k} class=${cls + " grant"} href="#/connectors"
+        content=${html`<${Card} title="A grant"><${Field} k=${g.connector}>${what} See your connectors.<//><//>`}>${p.text}<//>`;
+    }
+    // Links: only a URL wholly in what shows (DD.links, on the whole string).
+    let at = 0;
+    const full = DD.links(t.text).map((x) => { const y = { ...x, start: at }; at += x.text.length; return y; });
+    const from = p.off, to = p.off + p.text.length;
+    const out = [];
+    let pos = from;
+    for (const x of full) {
+      if (!x.url || x.start < from || x.start + x.text.length > to) continue;
+      if (x.start > pos) out.push(p.text.slice(pos - from, x.start - from));
+      out.push(html`<a key=${x.start} class="url" href=${x.url} target="_blank" rel="noopener noreferrer">${x.text}</a>`);
+      pos = x.start + x.text.length;
+    }
+    out.push(p.text.slice(pos - from));
+    return html`<span key=${k} class=${cls}>${out}</span>`;
+  };
+  const piece = (p, k) => {
+    if (p.i < 0) return html`<span key=${k} class="muted">${p.text}</span>`;
+    const t = toks[p.i];
+    if (p.toggle) {
+      const on = open.has(p.i);
+      return html`<span key=${k}>${p.text}<button class="more" aria-expanded=${on}
+        onClick=${() => setOpen((o) => { const n = new Set(o); on ? n.delete(p.i) : n.add(p.i); return n; })}>${on ? "less" : "more"}</button></span>`;
+    }
+    let cls = tokenClass(t, cmds);
+    if (range && (p.i === range.lo || p.i === range.hi)) cls += " hot";
+    else if (range && p.i > range.lo && p.i < range.hi) cls += " in";
+    if (t.kind === "paren") return html`<span key=${k} class=${cls} data-i=${p.i} title=${t.partner < 0 ? "This bracket has no partner" : undefined}>${p.text}</span>`;
+    if (t.kind === "word") return word(t, p.text, k, cls);
+    if (t.kind === "str") return str(t, p, k, cls);
+    if (t.kind === "bad") return html`<span key=${k} class=${cls} title="draft can't read this string: it isn't closed, or has an escape other than \\n \\t \\r \\&quot; \\\\">${p.text}</span>`;
+    return cls ? html`<span key=${k} class=${cls}>${p.text}</span>` : html`<span key=${k} class=${range && p.i > range.lo && p.i < range.hi ? "in" : undefined}>${p.text}</span>`;
+  };
+  const over = (e) => {
+    const el = e.target.closest && e.target.closest("[data-i]");
+    if (el) setHot(+el.dataset.i);
+  };
+  return html`<div class="prog-box">${!max && html`<button class="prog-copy" onClick=${copy}>${copied || "Copy"}</button>`}<pre class="prog"
+    style=${range ? { "--hc": range.color } : undefined}
+    tabIndex=${parens.length && !max ? 0 : undefined} aria-label=${parens.length && !max ? "Program: the arrow keys move from bracket to bracket" : undefined}
+    onKeyDown=${keys} onFocus=${(e) => { if (e.target === e.currentTarget && hot < 0 && parens.length) setHot(parens[0]); }}
+    onBlur=${(e) => { if (e.target === e.currentTarget) setHot(-1); }}
+    onMouseOver=${over} onMouseLeave=${() => setHot(-1)}>${lns.map((l, n) => html`<span key=${n} class="ln" style=${{ "--hang": l.indent + 2 + "ch" }}>${l.pieces.map(piece)}</span>`)}</pre></div>`;
+}
+
+// ProgramEditor is the program's editor: CodeMirror 5, coloured from
+// DD.program as the viewer is, with the bracket at the cursor and its
+// partner lit. It keeps the text exactly as typed (its line separator is
+// "\n" alone, so a "\r" stays). Tab indents; Esc, then Tab, leaves it.
+// handle gets insert(text) and the editor's element. Without CodeMirror
+// (it didn't load), it is a plain text field.
+function ProgramEditor({ value, onChange, handle, placeholder }) {
+  const cmds = useContext(CommandsContext);
+  const box = useRef(null);
+  const area = useRef(null);
+  const ed = useRef(null);
+  const repaint = useRef(null);
+  const latest = useRef({ onChange, cmds });
+  latest.current = { onChange, cmds };
+  const [plain] = useState(() => typeof window.CodeMirror !== "function");
+
+  useEffect(() => {
+    if (plain || !box.current) return;
+    const marks = [], lit = [];
+    let escaped = false, frame = 0;
+    const cm = window.CodeMirror(box.current, {
+      value, lineSeparator: "\n", lineWrapping: true, inputStyle: "contenteditable", screenReaderLabel: "program",
+      indentUnit: 2, tabSize: 2, smartIndent: false, electricChars: false, spellcheck: false, autocorrect: false, autocapitalize: false,
+      viewportMargin: Infinity,
+      extraKeys: {
+        Tab: (c) => (c.somethingSelected() ? c.indentSelection("add") : c.replaceSelection("  ", "end")),
+        "Shift-Tab": (c) => c.indentSelection("subtract"),
+        Esc: () => { escaped = true; },
+        // A line break, nothing more: the text stays exactly as typed.
+        Enter: (c) => c.replaceSelection("\n", "end"),
+      },
+    });
+    // A paste goes in as it is. CodeMirror's own paste splits lines at
+    // "\r\n" and "\r" whatever the line separator, so a "\r" would be
+    // lost; replaceSelection splits at the separator alone.
+    cm.on("paste", (c, e) => {
+      const text = e.clipboardData && e.clipboardData.getData("text/plain");
+      if (!text) return;
+      e.preventDefault();
+      c.replaceSelection(text, "end", "paste");
+    });
+    // A wrapped line hangs under its own indent, 2ch in, as in the viewer.
+    cm.on("renderLine", (c, line, elt) => {
+      const cols = window.CodeMirror.countColumn(line.text, null, c.getOption("tabSize"));
+      const lead = (line.text.match(/^[ \t]*/) || [""])[0].length;
+      const hang = `calc(${Math.min(cols, 40)}ch + 2ch)`;
+      if (lead < line.text.length) { elt.style.textIndent = `calc(-1 * ${hang})`; elt.style.paddingLeft = `calc(10px + ${hang})`; }
+    });
+    const input = cm.getInputField();
+    input.setAttribute("role", "textbox");
+    input.setAttribute("aria-multiline", "true");
+    const at = (i) => cm.posFromIndex(i);
+    let toks = [];
+    const light = () => {
+      lit.splice(0).forEach((m) => m.clear());
+      const i = cm.indexFromPos(cm.getCursor());
+      let hot = toks.findIndex((t) => t.kind === "paren" && t.start === i - 1);
+      if (hot < 0) hot = toks.findIndex((t) => t.kind === "paren" && t.start === i);
+      const r = hotRange(toks, hot);
+      cm.getWrapperElement().style.setProperty("--hc", r ? r.color : "transparent");
+      if (!r) return;
+      for (const k of new Set([r.lo, r.hi])) lit.push(cm.markText(at(toks[k].start), at(toks[k].start + 1), { className: "hot" }));
+      if (r.hi - r.lo > 1) lit.push(cm.markText(at(toks[r.lo].start + 1), at(toks[r.hi].start), { className: "in" }));
+    };
+    const paint = () => {
+      frame = 0;
+      cm.operation(() => {
+        marks.splice(0).forEach((m) => m.clear());
+        toks = DD.program(cm.getValue());
+        for (const t of toks) {
+          const cls = tokenClass(t, latest.current.cmds);
+          if (cls) marks.push(cm.markText(at(t.start), at(t.start + t.text.length), { className: cls }));
+        }
+        light();
+      });
+    };
+    cm.on("change", () => {
+      latest.current.onChange(cm.getValue());
+      if (!frame) frame = requestAnimationFrame(paint);
+    });
+    cm.on("cursorActivity", () => { if (!frame) cm.operation(light); });
+    // After Esc, Tab is the browser's: it moves focus on. (CodeMirror.Pass
+    // would hand it to CodeMirror's default keymap, which indents.)
+    cm.on("keydown", (_, e) => {
+      if (e.key === "Tab" && escaped) e.codemirrorIgnore = true;
+      else if (e.key !== "Escape" && e.key !== "Shift") escaped = false;
+    });
+    cm.on("focus", () => { escaped = false; });
+    ed.current = cm;
+    repaint.current = () => { if (!frame) frame = requestAnimationFrame(paint); };
+    paint();
+    return () => { cancelAnimationFrame(frame); ed.current = null; repaint.current = null; const w = cm.getWrapperElement(); w.parentNode && w.parentNode.removeChild(w); };
+  }, []);
+
+  // A program put in from outside (an example, Ask heedle's, one put back).
+  useEffect(() => {
+    const cm = ed.current;
+    if (cm && cm.getValue() !== value) cm.setValue(value);
+  }, [value]);
+  // Recolour once the worker's skills are known.
+  useEffect(() => { if (repaint.current) repaint.current(); }, [cmds]);
+
+  if (handle) handle.current = {
+    el: () => box.current || area.current,
+    insert: (text) => {
+      const cm = ed.current;
+      if (cm) { cm.replaceSelection(text); cm.focus(); return; }
+      const el = area.current, i = el ? el.selectionStart : value.length;
+      onChange(value.slice(0, i) + text + value.slice(i));
+    },
+  };
+  if (plain) {
+    return html`<textarea ref=${area} aria-label="program" spellcheck="false" value=${value} placeholder=${placeholder}
+      onInput=${(e) => onChange(e.target.value)}></textarea>`;
+  }
+  return html`<div class="ed">
+    <div ref=${box}></div>
+    ${value === "" && html`<div class="ed-empty" aria-hidden="true">${placeholder}</div>`}
+    <p class="muted ed-keys">Tab indents. To leave the editor by keyboard, press Esc, then Tab.</p>
+  </div>`;
 }
 
 // === Agents: one tab each ==================================================
@@ -669,8 +918,8 @@ function Viewer({ title, info, onClose, children }) {
         if (!dialog.current.contains(document.activeElement)) { e.preventDefault(); first && first.focus(); }
         else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-      } else if ((e.key === "+" || e.key === "=") && !e.target.closest("input, textarea")) zoomRef.current(1.2);
-      else if (e.key === "-" && !e.target.closest("input, textarea")) zoomRef.current(1 / 1.2);
+      } else if ((e.key === "+" || e.key === "=") && !e.target.closest("input, textarea, [contenteditable]")) zoomRef.current(1.2);
+      else if (e.key === "-" && !e.target.closest("input, textarea, [contenteditable]")) zoomRef.current(1 / 1.2);
     };
     addEventListener("keydown", key);
     // React's wheel listener is passive, so preventDefault there is ignored
@@ -1559,14 +1808,14 @@ function NewRun({ info, history: ref }) {
   const [submitError, setSubmitError] = useState("");
   const [scheduling, setScheduling] = useState(false);
   const [putBack, setPutBack] = useState(null);
-  const area = useRef(null);
+  const editor = useRef(null);
   // Edit the program, from a proposal of the front door: into this editor.
   useEffect(() => {
     // What it replaces can be put back (review 33).
     const take = (e) => {
       if (typeof e.detail !== "string") return;
       setProgram((old) => { setPutBack(DD.replaced(old, e.detail)); return e.detail; });
-      setTimeout(() => area.current && area.current.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+      setTimeout(() => { const el = editor.current && editor.current.el(); el && el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 50);
     };
     window.addEventListener("dd-program", take);
     return () => window.removeEventListener("dd-program", take);
@@ -1586,11 +1835,7 @@ function NewRun({ info, history: ref }) {
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setSubmitError(r.data.error || String(r.data));
   };
-  const insert = (text) => {
-    const el = area.current;
-    const at = el ? el.selectionStart : program.length;
-    setProgram(program.slice(0, at) + text + program.slice(at));
-  };
+  const insert = (text) => editor.current && editor.current.insert(text);
 
   const err = result && result.data && result.data.error ? result.data : null;
   const plan = result && result.ok && result.data.plan ? result.data.plan : null;
@@ -1604,9 +1849,7 @@ function NewRun({ info, history: ref }) {
   return html`
     <${Describe} program=${program} onProgram=${setProgram} />
     <div class="panel">
-      <textarea ref=${area} aria-label="program" spellcheck="false" value=${program}
-        placeholder='(pipe (par (echo "a") (echo "b")) echo)'
-        onInput=${(e) => setProgram(e.target.value)}></textarea>
+      <${ProgramEditor} value=${program} onChange=${setProgram} handle=${editor} placeholder='(pipe (par (echo "a") (echo "b")) echo)' />
       <div class="row">
         <button class="primary" disabled=${!plan || busy} onClick=${run}>${busy ? "Starting…" : "Run"}</button>
         <button disabled=${!plan || busy} onClick=${() => setScheduling((x) => !x)} aria-expanded=${scheduling}>Schedule…</button>
@@ -2190,6 +2433,7 @@ function App() {
   const [refs, setRefs] = useState([]);
   const [heads, setHeads] = useState({});
   const [tip, setTip] = useState(null);
+  const [skillList, setSkillList] = useState([]);
   const tipApi = useRef({
     show: (el, content, color) => setTip({ rect: el.getBoundingClientRect(), content, color }),
     hide: () => setTip(null),
@@ -2199,6 +2443,17 @@ function App() {
   });
   const setRef = (r) => { setRefState(r); try { localStorage.setItem("drawdown.ref", r); } catch {} };
   useEffect(() => { api("/api/info").then((r) => setInfo(r.data)); }, []);
+  // Skills' descriptions, for a program's skill names: again on each page,
+  // so a skill just added reads as one.
+  useEffect(() => {
+    api("/api/skills").then((r) => { if (r.ok) setSkillList(((r.data && r.data.skills) || []).map(DD.asSkill).filter(Boolean)); });
+  }, [route.join("/")]);
+  const commands = useMemo(() => {
+    const desc = new Map(skillList.map((k) => [k.name, k.description]));
+    const names = (info && Array.isArray(info.skills) ? info.skills : []).filter((n) => typeof n === "string");
+    const about = info && info.about && typeof info.about === "object" ? info.about : {};
+    return { skills: new Map(names.map((n) => [n, desc.get(n) || ""])), about };
+  }, [info, skillList]);
   useEffect(() => {
     let live = true, timer;
     const load = async () => {
@@ -2228,7 +2483,7 @@ function App() {
 
   const dyes = ["source", "assess", "browse", "ask", "record", "container", "echo", "source"];
   return html`
-    <${TipContext.Provider} value=${tipApi}>
+    <${TipContext.Provider} value=${tipApi}><${CommandsContext.Provider} value=${commands}>
     <header>
       <a class="brand" href="#/" aria-label="drawdown, home">
         <span class="swatch" aria-hidden="true">${dyes.map((k, i) => html`<i key=${i} style=${{ background: `var(--${k})` }}></i>`)}</span>
@@ -2249,7 +2504,7 @@ function App() {
     </header>
     <main><${ErrorBoundary} route=${route.join("/")}>${body}<//></main>
     <${TipLayer} tip=${tip} />
-    <//>`;
+    <//><//>`;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);

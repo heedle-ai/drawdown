@@ -21,7 +21,7 @@ All responses are JSON except the diffs, which are plain text.
 
 | Method and path | Request | Response |
 |---|---|---|
-| `GET /api/info` | | `ref` (the default history), `temporalUI`, `namespace`, `commands`, `examples` |
+| `GET /api/info` | | `ref` (the default history), `temporalUI`, `namespace`, `commands`, `skills` (the commands that are skills), `about` (what each built-in command does, in a line: loom's `BuiltinCommands`, as its program writer tells Claude), `examples` |
 | `GET /api/refs` | | `{"refs": [...], "default", "heads"}`: every history under `refs/loom/`, the default one even before its first run, and each one's head commit |
 | `GET /api/beliefs?ref=` | | `{"ref", "beliefs": [...]}`: the latest run of every question asked on that history (`loom.Beliefs`), each with `program`, `outputs` and `leaves` |
 | `POST /api/compile` | `{"program": "…"}` | `{"plan": …, "shape": …}` (`shape` is the program's composition, or null; see [the graph](#runs-steps-and-the-graph)), or `{"error", "line", "col"}` (200 either way; `line` and `col` only for syntax errors) |
@@ -133,6 +133,21 @@ What you typed stays in the box until it's answered. The box then asks **Change 
 
 **New run** starts with **Describe a task**: Claude, on a worker, writes the program from the commands and skills the worker has (loom's [program writer](https://github.com/heedle-ai/loom/wiki/How-It-Works#writing-programs)). The program goes into the editor, which compiles it and draws its plan, so you see every step before anything runs; Run submits it like any program.
 
+## Reading and editing programs
+
+Every program the page shows, on a proposal card, a run's page or in the editor, reads as draft reads it. One tokenizer (`lib.js`'s `tokens`) is draft's lexer rule for rule and in its order: comments (`;` anywhere, `//` where a token starts), whitespace, strings with draft's five escapes (`\n \t \r \" \\`), brackets and atoms. A string draft can't read is marked as an error. `testdata/tokens.json` holds programs that `TestInv_TokensAgreeWithDraft` reads with draft and `ui/lib.test.js` splits with the page, so the two can't drift.
+
+[[/images/program-viewer.png|alt=The program on a proposal card: brackets in four colours by depth, the pointed-at par form tinted teal with both its brackets outlined, agent and ask in their dyes, a long instruction folded with a more button, the grants maps and maps/directions underlined, and a muted italic comment]]
+
+- **Brackets** take their depth's colour, four in turn (each at least 4.5:1 on the page in both modes). Pointing at a bracket, or moving between brackets with the arrow keys once the program has focus, outlines it and its partner and tints the form between them. A bracket with no partner is marked as an error. Brackets inside strings and comments are text.
+- **Words** read by kind: `pipe` and `par` as structure, each command in its step's dye, skills in the skill dye. Hovering a command says what it does (`/api/info`'s `about`); a skill links to its page and says its description.
+- **Links.** In an agent step, each grant after the instruction (`"maps"`, `"maps/directions"`) links to **Connectors**, and says what it grants. `"browse"` says instead that it is a connector of that name, not the `browse` command. In a string, an `http` or `https` URL that starts a word opens in a new tab with `rel="noopener noreferrer"`; no other scheme is ever a link (`javascript:`, `data:`, and `blob:https://…` all stay text). Links are React elements, never HTML.
+- **Long strings** wrap with a hanging indent under their line, keeping the program's own line breaks and indents. A string over 240 characters folds to its start, with **more**. **Copy** puts the exact program on the clipboard, never the folded view.
+
+[[/images/program-editor.png|alt=The editor in dark mode: a program whose pipe bracket is never closed, marked with a red wavy underline, the assess form at the cursor lit, and draft's error below: unclosed ( at end of input]]
+
+The **editor** under New run is [CodeMirror 5](https://codemirror.net/5/), its core only, coloured by the same tokenizer as you type, with the bracket at the cursor and its partner lit. It compiles as you type, as the plain field did. It keeps the program exactly as typed, pasted or composed with an input method: Enter adds a line break and nothing else, and a paste goes in as it is (CodeMirror's own paste would turn `\r\n` into `\n`). **Tab** indents; to leave the editor by keyboard, press **Esc**, then **Tab**. If CodeMirror doesn't load, the editor is a plain text field.
+
 ## Writes
 
 A run whose agent steps queued writes ([loom → Writes](https://github.com/heedle-ai/loom/wiki/How-It-Works#writes)) shows them under **Writes** on its page: each connector and tool, its input, its status, and what came of it. While the run waits for approval, a write that needs it has **Approve** and **Decline** buttons; deciding signals the run, which runs the write once if approved. An agent step's own page lists every connector call it made (run by Anthropic's MCP connector or on the worker) and every write it queued, with what the step was granted. Inputs, outputs and errors are shown as text, with control and invisible format characters as `⟨U+XXXX⟩`.
@@ -185,7 +200,7 @@ drawdown has no login. It's meant for your own machine, so it listens on `127.0.
 | An `Origin` header must match the host the UI was opened on (403 otherwise) | Scripts on another site calling the API |
 | The `Host` header must be localhost, a loopback address, or listed with `-hosts` (403 otherwise) | DNS rebinding: another site pointing its own name at your machine |
 
-All page content is rendered as text by React (the composition graph included), and diff2html escapes diff content.
+All page content is rendered as text by React (the composition graph included), and diff2html escapes diff content. A program's links are React elements to `http` and `https` URLs only (see [Reading and editing programs](#reading-and-editing-programs)).
 
 Every response also carries a **Content-Security-Policy**: scripts only from drawdown itself and `cdn.jsdelivr.net`, network requests only to drawdown, no plugins, no framing. If a library were ever compromised past its integrity hash, it still couldn't send your data anywhere else. Inline styles are allowed for the page's own style sheet.
 
@@ -202,12 +217,14 @@ These checks are tested in `TestGuard_RefusesCrossSiteAndRebinding`, `TestPage` 
 | React, ReactDOM | 18.3.1 (UMD) | Components |
 | htm | 3.1.1 | JSX-style markup without a compiler |
 | diff2html | 3.4.48 | Diff view |
+| CodeMirror | 5.65.21 (`lib/codemirror.js` and `.css`, no add-ons) | The program editor |
 
 Its two fonts, Bricolage Grotesque and JetBrains Mono, are served by drawdown itself from `static/fonts`, with their SIL Open Font License files, so the Content-Security-Policy keeps fonts to this server (`TestInv_FontsAreServedHere`).
 
 ## Tested
 
 - [Invariants](Invariants) lists every guarantee and its guard; CI checks it against the code.
+- `ui/browser.test.js` drives the program viewer and editor in headless Chromium (Playwright) on the real server with the fake Temporal (`TestServeForBrowser`), with the libraries served from their npm packages: typing, pasting and input-method text kept exactly, Tab and Esc, colours and compiling as you type, Copy, and links. CI runs it as the `browser` step.
 - `server_test.go` covers every endpoint, the security checks, the 200-record bound, and Temporal being down, against a fake Temporal that really runs plans in Temporal's test suite and records them with loom's `Recorder`, so compiles, runs, records and diffs are real.
 - The agent tabs were driven in headless Chromium against real records: reed visited a test site from a real browser in Podman, and its pages and a live frame were served through the fake Temporal. Checked: the tree, the named tab target, that opening an agent twice reuses its tab, each tab's title and icon, the live view, and recorded pages with their blocked requests. `TestInv_AgentTabs` checks the tab code in CI.
 - The redesigned pages (drawdown, timeline, graph, step inspector) were driven in headless Chromium in light and dark mode against demo records and a stand-in Temporal, with no console errors; the screenshots on these pages come from that run. The API they use is tested in CI (`TestInv_StepsComeFromTemporalHistory`, `TestSteps_ReportsTemporalErrorsWithoutFailing`).
