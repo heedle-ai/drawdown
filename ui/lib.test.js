@@ -526,7 +526,9 @@ test("every route the app shows is one page in one section (DRAW-68)", () => {
   const cases = [...sw[1].matchAll(/case "([a-z]+)":/g)].map((m) => m[1]).sort();
   assert.deepEqual(cases, Object.keys(DD.PAGES).sort());
   assert.match(sw[1], /default: body = html`<\$\{Home\} /);
-  assert.ok(!/route\[0\] === "(run|step|diff|skills?|review|schedules|connectors)"/.test(app), "no page is chosen outside DD.page");
+  // Review 37: the header still chose the agent pill from route[0], so
+  // #/agent blanked the page and #/agent/x/extra mixed two pages.
+  assert.ok(!/route\[0\]/.test(app), "nothing chooses by route[0] outside DD.page");
   for (const [name, p] of Object.entries(DD.PAGES)) assert.ok(DD.SECTIONS.includes(p.section), name);
   const cases2 = {
     "": "runs", "agent/refs/loom/main": "runs", "run/w/r": "runs", "step/w/r/n0": "runs", "diff/a/b": "runs",
@@ -559,6 +561,12 @@ test("the top bar counts only from answers it understands (DRAW-69)", () => {
   const frame = (anthropic, connectors) => ok({ file: "/c.json", keychain: true, anthropic, connectors });
   assert.equal(DD.keysToSet(frame(key("ANTHROPIC_API_KEY", "missing"), [conn([key("MAPS_KEY", "missing"), key("HEEDLE_CONNECTOR_MAPS_TOKEN", "missing")])])), 3);
   assert.equal(DD.keysToSet(frame(key("ANTHROPIC_API_KEY", "keychain"), [conn([key("MAPS_KEY", "environment")])])), 0);
+  // A signed-in connector keeps its token as a key: counted once the
+  // token is gone, not while it's there, even if the sign-in has expired
+  // (review 37: the wiki said any sign-in to do again counted).
+  const signed = (from) => ({ ...conn([key("HEEDLE_CONNECTOR_MAPS_TOKEN", from)]), signedIn: from !== "missing" });
+  assert.equal(DD.keysToSet(frame(key("ANTHROPIC_API_KEY", "keychain"), [signed("keychain")])), 0);
+  assert.equal(DD.keysToSet(frame(key("ANTHROPIC_API_KEY", "keychain"), [signed("missing")])), 1);
   // One unreadable connector is left out, as on the Connectors page.
   assert.equal(DD.keysToSet(frame(key("ANTHROPIC_API_KEY", "keychain"), [conn([key("MAPS_KEY", "missing")]), { name: "bad", secrets: "x" }])), 1);
 

@@ -69,16 +69,16 @@ A small count beside a section says how many things there need you:
 | Beside | Counts | Read from |
 |---|---|---|
 | Skills | skills waiting for review | `GET /api/skills` (`skillsWaiting`) |
-| Schedules | schedules paused because a run failed or timed out: Temporal's own notes for that pause, not one from heedle or anywhere else | `GET /api/schedules` (`schedulesStopped`) |
-| Connectors | keys set nowhere, Claude's included, as the Connectors page counts them; a sign-in's token is one of a connector's keys, so a sign-in to do again counts too | `GET /api/connectors` (`keysToSet`) |
+| Schedules | schedules paused after a run failed or timed out: Temporal's own notes for that pause, not one from heedle or anywhere else | `GET /api/schedules` (`schedulesStopped`) |
+| Connectors | keys set nowhere, Claude's included, as the Connectors page counts them. A sign-in keeps its token as one of the connector's keys, so a connector signed in to counts once its token is gone; one whose sign-in has expired still has its token, so it isn't counted until a step finds the token can't be refreshed and says to sign in again | `GET /api/connectors` (`keysToSet`) |
 
-The bar asks once when the page loads and again whenever the route changes, never on a timer. A count is shown only from an answer that is well formed; a request that fails, or an answer that isn't understood, shows no count, and nothing in the bar says so: the section's own page says what's wrong.
+The bar asks once when the page loads and again whenever the route changes, never on a timer. When the Skills, Schedules or Connectors page loads its own answer, after an approval, a resumed schedule or a saved key too, it hands the bar that same answer, so the count beside it always agrees with the page. A screen reader reads each section with its count once, such as "Skills (1 waiting for review)". A count is shown only from an answer that is well formed; a request that fails, or an answer that isn't understood, shows no count, and nothing in the bar says so: the section's own page says what's wrong.
 
 **Temporal** comes last, quieter and set apart: it opens Temporal's Web UI (`-temporal-ui`) in a new tab, since it's a developer's tool rather than a part of drawdown.
 
 There's no commands count any more. It looked like a button and did nothing, and a list of commands wouldn't add anything: `/api/info` has only their names, and **New run**'s **Insert a command** row already lists every one, with what it inserts.
 
-On a narrow screen the sections take a row of their own under the brand, and Temporal moves up beside the history picker, still last for the keyboard; at 375 px wide nothing scrolls sideways. CI checks the bar in Chromium (`ui/topbar.check.js`, the `topbar` step): every route marks exactly its section, the bar fits at 375 and 1280 px in light and dark mode, every link is reached by keyboard with a visible focus ring, and broken answers give no count.
+On a narrow screen the sections take a row of their own under the brand, and Temporal moves up beside the history picker, still last for the keyboard; at 375 px wide nothing scrolls sideways, and a long agent name wraps. CI checks the bar in Chromium (`ui/topbar.check.js`, the `topbar` step): every route marks exactly its section, the bar fits at 375 and 1280 px in light and dark mode (and an agent's page at 320 px), every link is reached by keyboard with a visible focus ring, and broken answers give no count.
 
 ## Histories
 

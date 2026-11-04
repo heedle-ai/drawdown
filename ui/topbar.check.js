@@ -123,9 +123,16 @@ const bar = (page) => page.evaluate(() => {
 
 const SECTION_OF = { "": "Runs", "#/": "Runs", "#/run/wf/run1": "Runs", "#/step/wf/run1/n0": "Runs", "#/diff/a/b": "Runs", "#/agent/refs%2Floom%2Fmain": "Runs",
   "#/skills": "Skills", "#/skill/summarise": "Skills", [`#/skill/summarise/${HEX("a")}`]: "Skills", [`#/review/${waiting.name}`]: "Skills",
-  "#/schedules": "Schedules", "#/connectors": "Connectors", "#/nowhere": "Runs", "#/constructor": "Runs", "#/skills/extra": "Runs" };
+  "#/schedules": "Schedules", "#/connectors": "Connectors", "#/nowhere": "Runs", "#/constructor": "Runs", "#/skills/extra": "Runs",
+  // Review 37: these blanked the page, or put an agent's header over the
+  // home page.
+  "#/agent": "Runs", "#/agent/refs%2Floom%2Fmain/extra": "Runs" };
+const HOME_ROUTES = ["", "#/", "#/nowhere", "#/constructor", "#/skills/extra", "#/agent", "#/agent/refs%2Floom%2Fmain/extra"];
+const LONG_AGENT = "#/agent/refs%2Floom%2Fa-very-long-agent-branch-name-for-the-quarterly-report";
 
 async function main() {
+  // The version Contributing names, and CI's setup-node gives (review 37).
+  assert.ok(+process.versions.node.split(".")[0] >= 22, `topbar: needs Node 22 or later, not ${process.versions.node}`);
   const shots = process.argv[2];
   if (shots) fs.mkdirSync(shots, { recursive: true });
   const cdn = cdnFiles();
@@ -134,25 +141,35 @@ async function main() {
   try {
     // Each route marks exactly its own section.
     {
-      const { ctx, page } = await open(browser, cdn, { width: 1280, scheme: "light", answers: GOOD, hash: "" });
+      const { ctx, page, errors } = await open(browser, cdn, { width: 1280, scheme: "light", answers: GOOD, hash: "" });
       for (const [hash, want] of Object.entries(SECTION_OF)) {
         await page.evaluate((h) => { location.hash = h; }, hash || "#/");
         await page.waitForFunction((w) => [...document.querySelectorAll("header [aria-current]")].some((a) => a.textContent.startsWith(w)), want);
         const b = await bar(page);
         assert.deepEqual(b.current, [[want, "page"]], `${hash}: marks ${JSON.stringify(b.current)}`);
+        if (HOME_ROUTES.includes(hash)) {
+          await page.waitForSelector("main h2");
+          const home = await page.evaluate(() => ({ picker: !!document.querySelector("header select"), title: [...document.querySelectorAll("main h2")].some((h) => h.textContent === "Drawdown") }));
+          assert.deepEqual(home, { picker: true, title: true }, `${hash}: the home page, with the history picker`);
+        }
+        assert.deepEqual(errors, [], `${hash}: page errors`);
         checks++;
       }
       await ctx.close();
     }
-    for (const width of [1280, 375]) for (const scheme of ["light", "dark"]) for (const hash of ["#/", `#/review/${waiting.name}`]) {
+    for (const width of [1280, 375]) for (const scheme of ["light", "dark"]) for (const hash of ["#/", `#/review/${waiting.name}`, LONG_AGENT]) {
       const where = `${width}px ${scheme} ${hash}`;
       const { ctx, page, errors } = await open(browser, cdn, { width, scheme, answers: GOOD, hash });
       await page.waitForFunction(() => document.querySelectorAll("header .need").length === 3, null, { timeout: 15000 });
-      if (hash !== "#/") await page.waitForSelector("main .step-hero");
+      if (hash.startsWith("#/review/")) await page.waitForSelector("main .step-hero");
       const b = await bar(page);
       assert.deepEqual(b.items.map((i) => i.text), ["Runs", "Skills", "Schedules", "Connectors", "Temporal"], where);
       assert.deepEqual(b.items.slice(0, 4).map((i) => i.href), ["#/", "#/skills", "#/schedules", "#/connectors"], where);
       for (const i of b.items.slice(0, 4)) assert.equal(i.need || "", COUNTS[i.text] || "", `${where}: ${i.text}'s count`);
+      // Each count is read once, with what it counts (review 37: twice).
+      for (const name of ["Runs", "Skills (1 waiting for review)", "Schedules (2 paused after a failed or timed-out run)", "Connectors (2 keys to set)"]) {
+        assert.equal(await page.getByRole("link", { name, exact: true }).count(), 1, `${where}: no link named "${name}"`);
+      }
       const t = b.items[4];
       assert.ok(b.last && t.href === GOOD["/api/info"].temporalUI && t.target === "_blank" && /noopener/.test(t.rel), `${where}: Temporal is last, in a new tab`);
       assert.ok(!/\d+ commands/.test(b.headerText), `${where}: the commands pill is gone`);
@@ -177,9 +194,35 @@ async function main() {
       assert.deepEqual(errors, [], `${where}: page errors`);
       if (shots) {
         await page.evaluate(() => document.activeElement && document.activeElement.blur());
-        const name = `${hash === "#/" ? "home" : "review"}-${width}-${scheme}.png`;
+        const name = `${hash === "#/" ? "home" : hash === LONG_AGENT ? "agent" : "review"}-${width}-${scheme}.png`;
         await page.screenshot({ path: path.join(shots, name), clip: { x: 0, y: 0, width, height: width < 500 ? 640 : 420 } });
       }
+      checks++;
+      await ctx.close();
+    }
+    // A long agent name wraps at 320 px too (review 37: it scrolled).
+    for (const scheme of ["light", "dark"]) {
+      const { ctx, page } = await open(browser, cdn, { width: 320, scheme, answers: GOOD, hash: LONG_AGENT });
+      await page.waitForFunction(() => document.querySelectorAll("header .need").length === 3);
+      const b = await bar(page);
+      assert.equal(b.overflow, 0, `320px ${scheme}: the agent page scrolls sideways by ${b.overflow}px`);
+      assert.deepEqual(b.outside, [], `320px ${scheme}: header parts outside the viewport`);
+      checks++;
+      await ctx.close();
+    }
+    // A count follows its page: resuming a schedule there takes it off
+    // the bar without leaving the page (review 37: it stayed until you
+    // navigated).
+    {
+      const answers = { ...GOOD, "/api/schedules/morning-brief/resume": {} };
+      const { ctx, page, errors, asked } = await open(browser, cdn, { width: 1280, scheme: "light", answers, hash: "#/schedules" });
+      await page.waitForFunction(() => document.querySelector('header a[href="#/schedules"] .need')?.textContent.startsWith("2"));
+      answers["/api/schedules"] = { schedules: GOOD["/api/schedules"].schedules.map((s) => s.name === "morning-brief" ? { ...s, paused: false, note: "resumed from heedle" } : s) };
+      const before = asked.length;
+      await page.locator(".panel.connector", { hasText: "morning-brief" }).getByRole("button", { name: "Resume" }).click();
+      await page.waitForFunction(() => document.querySelector('header a[href="#/schedules"] .need')?.textContent.startsWith("1"), null, { timeout: 5000 });
+      assert.deepEqual(errors, []);
+      assert.ok(asked.length > before, "resuming asked the API");
       checks++;
       await ctx.close();
     }

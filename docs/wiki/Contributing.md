@@ -27,7 +27,7 @@ bash .github/sri.sh
 node --test ui/lib.test.js
 ```
 
-The top bar's check (CI's `topbar` step) opens the page in Chromium, so it needs Node 22 and Playwright 1.63 with its Chromium. It serves the page's files itself, takes the CDN files from their npm packages and answers the API from its own fixtures, so it needs no server:
+The top bar's check (CI's `topbar` step) opens the page in Chromium, so it needs Node 22 or later (CI uses 22) and Playwright 1.63 with its Chromium. It serves the page's files itself, takes the CDN files from their npm packages and answers the API from its own fixtures, so it needs no server:
 
 ```bash
 npm install --no-save --no-audit --no-fund --prefix ~/.cache/drawdown-playwright playwright@1.63.0

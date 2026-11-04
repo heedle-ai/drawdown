@@ -780,7 +780,7 @@ function SchedulesPage() {
   const [err, setErr] = useState("");
   const [sure, setSure] = useState("");
   const [note, setNote] = useState("");
-  useEffect(() => { api("/api/schedules").then(setData); }, [tick]);
+  useEffect(() => { api("/api/schedules").then((r) => { setData(r); tellBar("schedules", r); }); }, [tick]);
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
   const ss = DD.asSchedules(data.data);
@@ -1004,7 +1004,7 @@ function ConnectPrompt({ failure }) {
 function ConnectorsPage() {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
-  useEffect(() => { api("/api/connectors").then(setData); }, [tick]);
+  useEffect(() => { api("/api/connectors").then((r) => { setData(r); tellBar("connectors", r); }); }, [tick]);
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
   const v = DD.asConnectors(data.data);
@@ -1193,7 +1193,7 @@ function BrowseRepo({ onDone, library }) {
 function SkillsPage() {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
-  useEffect(() => { api("/api/skills").then(setData); }, [tick]);
+  useEffect(() => { api("/api/skills").then((r) => { setData(r); tellBar("skills", r); }); }, [tick]);
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
   const skills = (data.data.skills || []).map(DD.asSkill).filter(Boolean);
@@ -2191,14 +2191,21 @@ function Home({ info, refs, heads, current }) {
 const SECTION_LINKS = [
   { section: "runs", href: "#/", label: "Runs", dye: "source" },
   { section: "skills", href: "#/skills", label: "Skills", dye: "skill", need: (n) => `${n} waiting for review` },
-  { section: "schedules", href: "#/schedules", label: "Schedules", dye: "record", need: (n) => `${n} paused by a failed run` },
+  { section: "schedules", href: "#/schedules", label: "Schedules", dye: "record", need: (n) => `${n} paused after a failed or timed-out run` },
   { section: "connectors", href: "#/connectors", label: "Connectors", dye: "agent", need: (n) => `${n} key${n === 1 ? "" : "s"} to set` },
 ];
 
+const COUNT = { skills: DD.skillsWaiting, schedules: DD.schedulesStopped, connectors: DD.keysToSet };
+
+// tellBar hands the top bar an answer a section's page just loaded, so its
+// count agrees with the page beside it, after an approval, a saved key or
+// a resumed schedule too, with no request of its own (review 37).
+const tellBar = (section, res) => dispatchEvent(new CustomEvent("drawdown:needs", { detail: { section, res } }));
+
 // useNeeds fetches what needs you once on load and again each time the
-// route changes, never on a timer. An answer that fails or isn't
-// understood is no count, never an error; a late answer to an earlier
-// fetch is dropped.
+// route changes, never on a timer, and takes each answer a section's page
+// loads. An answer that fails or isn't understood is no count, never an
+// error; a late answer to an earlier fetch is dropped.
 function useNeeds(at) {
   const [needs, setNeeds] = useState({});
   const seq = useRef(0);
@@ -2206,9 +2213,17 @@ function useNeeds(at) {
     const mine = ++seq.current;
     Promise.all([api("/api/skills"), api("/api/schedules"), api("/api/connectors")]).then(([sk, sc, co]) => {
       if (mine !== seq.current) return;
-      setNeeds({ skills: DD.skillsWaiting(sk), schedules: DD.schedulesStopped(sc), connectors: DD.keysToSet(co) });
+      setNeeds({ skills: COUNT.skills(sk), schedules: COUNT.schedules(sc), connectors: COUNT.connectors(co) });
     });
   }, [at]);
+  useEffect(() => {
+    const on = (e) => {
+      const { section, res } = e.detail || {};
+      if (Object.prototype.hasOwnProperty.call(COUNT, section)) setNeeds((n) => ({ ...n, [section]: COUNT[section](res) }));
+    };
+    addEventListener("drawdown:needs", on);
+    return () => removeEventListener("drawdown:needs", on);
+  }, []);
   return needs;
 }
 
@@ -2223,7 +2238,7 @@ function TopBar({ section, at, temporalUI }) {
         const here = s.section === section;
         return html`<li key=${s.section}>
           <a href=${s.href} class=${here ? "here" : ""} style=${{ "--c": `var(--${s.dye})` }} aria-current=${here ? "page" : undefined}>
-            ${s.label}${n > 0 && html`<span class="need" title=${s.need(n)}>${n}<span class="sr"> ${s.need(n)}</span></span>`}
+            ${s.label}${n > 0 && html`<span class="need" title=${s.need(n)}><span aria-hidden="true">${n}</span><span class="sr">(${s.need(n)})</span></span>`}
           </a></li>`;
       })}
     </ul>
@@ -2233,6 +2248,10 @@ function TopBar({ section, at, temporalUI }) {
 
 function App() {
   const route = useRoute();
+  // What to show, which section of the top bar it's in, and whether the
+  // header is an agent's, all come from DD.page, so they can't disagree
+  // (DRAW-68; review 37: #/agent alone blanked the page).
+  const pg = DD.page(route);
   const [info, setInfo] = useState(null);
   const [refs, setRefs] = useState([]);
   const [heads, setHeads] = useState({});
@@ -2255,15 +2274,12 @@ function App() {
     load();
     return () => { live = false; clearTimeout(timer); };
   }, []);
-  useEffect(() => { if (route[0] !== "agent") setTab("drawdown · agents", "#3b5bdb"); }, [route[0]]);
+  useEffect(() => { if (pg.name !== "agent") setTab("drawdown · agents", "#3b5bdb"); }, [pg.name]);
   useEffect(() => { setTip(null); }, [route.join("/")]);
   if (!info) return html`<main><p class="muted">Loading…</p></main>`;
   // A remembered ref that no longer exists falls back to the default.
   const current = refs.includes(ref) ? ref : info.ref;
 
-  // What to show, and which section of the top bar it's in, both come
-  // from DD.page, so they can't disagree (DRAW-68).
-  const pg = DD.page(route);
   let body;
   switch (pg.name) {
     case "agent": body = html`<${AgentPage} agent=${route[1]} refs=${refs} heads=${heads} info=${info} />`; break;
@@ -2286,7 +2302,7 @@ function App() {
         <span class="swatch" aria-hidden="true">${dyes.map((k, i) => html`<i key=${i} style=${{ background: `var(--${k})` }}></i>`)}</span>
         <b>drawdown</b>
       </a>
-      ${route[0] === "agent"
+      ${pg.name === "agent"
         ? html`<${Pill} cls="k-other" plain>agent <span class="mono">${agentName(route[1])}</span><//> <a href="#/">all agents</a>`
         : html`<label class="pills"><span class="muted">history</span>
             <select aria-label="history" value=${current} onChange=${(e) => setRef(e.target.value)}>
