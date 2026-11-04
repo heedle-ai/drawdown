@@ -100,20 +100,8 @@ const CommandsContext = createContext({ skills: new Map(), about: {} });
 // name, not the browse command.
 const BROWSE_GRANT = "Grants the connector named browse: the agent works a browser through that connector's tools. It is not the browse command, which opens pages itself; without a connector of that name, the step can't run.";
 
-// tokenClass is the classes a token is coloured by, and the dye (--c) a
-// command takes.
-function tokenClass(t, cmds) {
-  if (t.kind === "paren") return "p d" + (t.depth % 4) + (t.partner < 0 ? " unmatched" : "");
-  if (t.kind === "comment") return "cm";
-  if (t.kind === "str") return "str";
-  if (t.kind === "bad") return "bad";
-  if (t.kind !== "word") return "";
-  if (t.text === "pipe" || t.text === "par") return "comb";
-  if (cmds.skills.has(t.text)) return "sk";
-  if (KIND_OF_COMMAND[t.text]) return "cmd k-" + KIND_OF_COMMAND[t.text];
-  if (cmds.about[t.text] !== undefined) return "cmd k-other";
-  return "";
-}
+// tokenClass is the classes a token is coloured by (DD.tokenClass).
+const tokenClass = (t, cmds) => DD.tokenClass(t, KIND_OF_COMMAND, cmds.skills, cmds.about);
 
 // hotRange is the brackets a hot bracket pairs (lo, hi) and the depth
 // colour to tint the form between them with.
@@ -124,57 +112,28 @@ function hotRange(toks, hot) {
   return { lo, hi, color: `var(--d${toks[lo].depth % 4})` };
 }
 
-function Program({ text, max }) {
-  const cmds = useContext(CommandsContext);
-  const toks = useMemo(() => DD.program(text), [text]);
-  const [hot, setHot] = useState(-1);
-  const [open, setOpen] = useState(() => new Set());
-  const [copied, setCopied] = useState("");
-  const parens = useMemo(() => toks.map((t, i) => (t.kind === "paren" ? i : -1)).filter((i) => i >= 0), [toks]);
-  const range = hotRange(toks, hot);
+// ownAbout is what a built-in command does, if the worker said (never an
+// Object member such as toString: review 38).
+const ownAbout = (cmds, name) => (Object.prototype.hasOwnProperty.call(cmds.about, name) ? cmds.about[name] : "");
 
-  // What shows: each token, a long string folded to its start unless
-  // opened, all of it cut at max characters for a list's preview.
-  const pieces = [];
-  let budget = max || Infinity;
-  for (let i = 0; i < toks.length && budget > 0; i++) {
-    const t = toks[i];
-    const long = (t.kind === "str" || t.kind === "bad") && t.text.length > DD.FOLD_AT && !max;
-    let shown = long && !open.has(i) ? t.text.slice(0, DD.FOLD_SHOW) + "…" : t.text;
-    if (shown.length > budget) shown = shown.slice(0, budget);
-    budget -= shown.length;
-    pieces.push({ text: shown, i, off: 0 });
-    if (long) pieces.push({ text: "⁠", i, toggle: true });
-  }
-  if (budget <= 0 && pieces.reduce((n, p) => n + (p.toggle ? 0 : p.text.length), 0) < text.length) pieces.push({ text: " …", i: -1 });
-  const lns = DD.lines(pieces);
-
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(text); setCopied("Copied"); }
-    catch { setCopied("Couldn't copy"); }
-    setTimeout(() => setCopied(""), 1600);
-  };
-  const keys = (e) => {
-    if (!parens.length) return;
-    const at = parens.indexOf(hot);
-    const to = { ArrowRight: at + 1, ArrowDown: at + 1, ArrowLeft: at - 1, ArrowUp: at - 1, Home: 0, End: parens.length - 1 }[e.key];
-    if (to === undefined) return;
-    e.preventDefault();
-    setHot(parens[Math.max(0, Math.min(parens.length - 1, to))]);
-  };
-
-  const word = (t, txt, k, cls) => {
+// ProgramLine is one line of a shown program. It re-renders only when
+// what it shows changes: its pieces, the folds, or the hot form's ends as
+// far as they touch it (lo and hi are -1 for a line the form misses), so
+// pointing at a bracket redraws only the lines of its form (review 38).
+const ProgramLine = React.memo(function ProgramLine({ line, toks, cmds, open, toggle, lo, hi }) {
+  const word = (t, p, k, cls) => {
     if (cls === "sk") {
       const about = cmds.skills.get(t.text);
       return html`<${Tip} tag="a" key=${k} class="sk" href=${"#/skill/" + encodeURIComponent(t.text)}
-        content=${html`<${Card} title=${html`<${KindPill} kind="skill">${t.text}<//>`}><${Field} k="Skill">${about || "A skill you added."}<//><//>`}>${txt}<//>`;
+        content=${html`<${Card} title=${html`<${KindPill} kind="skill">${t.text}<//>`}><${Field} k="Skill">${about || "A skill you added."}<//><//>`}>${p.text}<//>`;
     }
-    if (cls.startsWith("cmd") && cmds.about[t.text]) {
-      const kind = KIND_OF_COMMAND[t.text] || "other";
+    const about = cls.startsWith("cmd") ? ownAbout(cmds, t.text) : "";
+    if (about) {
+      const kind = cls.slice("cmd k-".length);
       return html`<${Tip} key=${k} class=${cls} focusable=${false} color=${kindColor(kind)}
-        content=${html`<${Card} title=${html`<${KindPill} kind=${kind}>${t.text}<//>`}><${Field} k="Does">${cmds.about[t.text]}<//><//>`}>${txt}<//>`;
+        content=${html`<${Card} title=${html`<${KindPill} kind=${kind}>${t.text}<//>`}><${Field} k="Does">${about}<//><//>`}>${p.text}<//>`;
     }
-    return html`<span key=${k} class=${cls}>${txt}</span>`;
+    return html`<span key=${k} class=${cls}>${p.text}</span>`;
   };
   const str = (t, p, k, cls) => {
     const g = DD.grantOf(t);
@@ -186,7 +145,8 @@ function Program({ text, max }) {
       return html`<${Tip} tag="a" key=${k} class=${cls + " grant"} href="#/connectors"
         content=${html`<${Card} title="A grant"><${Field} k=${g.connector}>${what} See your connectors.<//><//>`}>${p.text}<//>`;
     }
-    // Links: only a URL wholly in what shows (DD.links, on the whole string).
+    // Links: only a URL wholly in this piece, placed by where the piece
+    // starts in its string (p.off, from DD.lines).
     let at = 0;
     const full = DD.links(t.text).map((x) => { const y = { ...x, start: at }; at += x.text.length; return y; });
     const from = p.off, to = p.off + p.text.length;
@@ -206,28 +166,84 @@ function Program({ text, max }) {
     const t = toks[p.i];
     if (p.toggle) {
       const on = open.has(p.i);
-      return html`<span key=${k}>${p.text}<button class="more" aria-expanded=${on}
-        onClick=${() => setOpen((o) => { const n = new Set(o); on ? n.delete(p.i) : n.add(p.i); return n; })}>${on ? "less" : "more"}</button></span>`;
+      return html`<span key=${k}>${p.text}<button class="more" aria-expanded=${on} onClick=${() => toggle(p.i)}>${on ? "less" : "more"}</button></span>`;
     }
     let cls = tokenClass(t, cmds);
-    if (range && (p.i === range.lo || p.i === range.hi)) cls += " hot";
-    else if (range && p.i > range.lo && p.i < range.hi) cls += " in";
+    if (p.i === lo || p.i === hi) cls += " hot";
+    else if (lo >= 0 && p.i > lo && p.i < hi) cls += " in";
+    cls = cls.trim();
     if (t.kind === "paren") return html`<span key=${k} class=${cls} data-i=${p.i} title=${t.partner < 0 ? "This bracket has no partner" : undefined}>${p.text}</span>`;
-    if (t.kind === "word") return word(t, p.text, k, cls);
+    if (t.kind === "word") return word(t, p, k, cls);
     if (t.kind === "str") return str(t, p, k, cls);
-    if (t.kind === "bad") return html`<span key=${k} class=${cls} title="draft can't read this string: it isn't closed, or has an escape other than \\n \\t \\r \\&quot; \\\\">${p.text}</span>`;
-    return cls ? html`<span key=${k} class=${cls}>${p.text}</span>` : html`<span key=${k} class=${range && p.i > range.lo && p.i < range.hi ? "in" : undefined}>${p.text}</span>`;
+    if (t.kind === "bad") return html`<span key=${k} class=${cls} title=${BAD_STRING}>${p.text}</span>`;
+    return html`<span key=${k} class=${cls || undefined}>${p.text}</span>`;
+  };
+  return html`<span class="ln" style=${{ "--hang": line.indent + 2 + "ch" }}>${line.pieces.map(piece)}</span>`;
+});
+
+// BAD_STRING says why a string is marked: draft can't read it.
+const BAD_STRING = 'draft can\'t read this string: it isn\'t closed, or has an escape other than \\n \\t \\r \\" \\\\';
+
+function Program({ text, max }) {
+  const cmds = useContext(CommandsContext);
+  const toks = useMemo(() => DD.program(text), [text]);
+  const [hot, setHot] = useState(-1);
+  const [open, setOpen] = useState(() => new Set());
+  const [copied, setCopied] = useState("");
+  const parens = useMemo(() => toks.map((t, i) => (t.kind === "paren" ? i : -1)).filter((i) => i >= 0), [toks]);
+  const toggle = useRef((i) => setOpen((o) => { const n = new Set(o); n.has(i) ? n.delete(i) : n.add(i); return n; })).current;
+  const range = hotRange(toks, hot);
+
+  // What shows: each token, a long string folded to its start unless
+  // opened, all of it cut at max characters for a list's preview; then
+  // its lines, each with the first and last token it shows.
+  const lns = useMemo(() => {
+    const pieces = [];
+    let budget = max || Infinity;
+    for (let i = 0; i < toks.length && budget > 0; i++) {
+      const t = toks[i];
+      const long = (t.kind === "str" || t.kind === "bad") && t.text.length > DD.FOLD_AT && !max;
+      let shown = long && !open.has(i) ? t.text.slice(0, DD.FOLD_SHOW) + "…" : t.text;
+      if (shown.length > budget) shown = shown.slice(0, budget);
+      budget -= shown.length;
+      pieces.push({ text: shown, i, off: 0 });
+      if (long) pieces.push({ text: "⁠", i, toggle: true });
+    }
+    if (budget <= 0 && pieces.reduce((n, p) => n + (p.toggle ? 0 : p.text.length), 0) < text.length) pieces.push({ text: " …", i: -1 });
+    return DD.lines(pieces).map((l) => {
+      const is = l.pieces.map((p) => p.i).filter((i) => i >= 0);
+      return { ...l, first: is.length ? Math.min(...is) : -1, last: is.length ? Math.max(...is) : -1 };
+    });
+  }, [toks, open, max, text]);
+
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopied("Copied"); }
+    catch { setCopied("Couldn't copy"); }
+    setTimeout(() => setCopied(""), 1600);
+  };
+  const keys = (e) => {
+    if (!parens.length) return;
+    const at = parens.indexOf(hot);
+    const to = { ArrowRight: at + 1, ArrowDown: at + 1, ArrowLeft: at - 1, ArrowUp: at - 1, Home: 0, End: parens.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    setHot(parens[Math.max(0, Math.min(parens.length - 1, to))]);
   };
   const over = (e) => {
     const el = e.target.closest && e.target.closest("[data-i]");
-    if (el) setHot(+el.dataset.i);
+    if (el && +el.dataset.i !== hot) setHot(+el.dataset.i);
   };
+  const lines = lns.map((l, n) => {
+    const touched = range && l.first >= 0 && range.lo <= l.last && range.hi >= l.first;
+    return html`<${ProgramLine} key=${n} line=${l} toks=${toks} cmds=${cmds} open=${open} toggle=${toggle}
+      lo=${touched ? range.lo : -1} hi=${touched ? range.hi : -1} />`;
+  });
   return html`<div class="prog-box">${!max && html`<button class="prog-copy" onClick=${copy}>${copied || "Copy"}</button>`}<pre class="prog"
     style=${range ? { "--hc": range.color } : undefined}
     tabIndex=${parens.length && !max ? 0 : undefined} aria-label=${parens.length && !max ? "Program: the arrow keys move from bracket to bracket" : undefined}
     onKeyDown=${keys} onFocus=${(e) => { if (e.target === e.currentTarget && hot < 0 && parens.length) setHot(parens[0]); }}
     onBlur=${(e) => { if (e.target === e.currentTarget) setHot(-1); }}
-    onMouseOver=${over} onMouseLeave=${() => setHot(-1)}>${lns.map((l, n) => html`<span key=${n} class="ln" style=${{ "--hang": l.indent + 2 + "ch" }}>${l.pieces.map(piece)}</span>`)}</pre></div>`;
+    onMouseOver=${over} onMouseLeave=${() => setHot(-1)}>${lines}</pre></div>`;
 }
 
 // ProgramEditor is the program's editor: CodeMirror 5, coloured from
@@ -242,6 +258,10 @@ function ProgramEditor({ value, onChange, handle, placeholder }) {
   const area = useRef(null);
   const ed = useRef(null);
   const repaint = useRef(null);
+  // The values the editor has sent up and not yet seen come back down:
+  // a value that is one of them is its own edit, maybe stale, never one
+  // to put in (review 38: putting a stale one in lost the newer edits).
+  const sent = useRef([]);
   const latest = useRef({ onChange, cmds });
   latest.current = { onChange, cmds };
   const [plain] = useState(() => typeof window.CodeMirror !== "function");
@@ -249,11 +269,10 @@ function ProgramEditor({ value, onChange, handle, placeholder }) {
   useEffect(() => {
     if (plain || !box.current) return;
     const marks = [], lit = [];
-    let escaped = false, frame = 0;
+    let escaped = false, frame = 0, toks = [], tokensOf = -1;
     const cm = window.CodeMirror(box.current, {
       value, lineSeparator: "\n", lineWrapping: true, inputStyle: "contenteditable", screenReaderLabel: "program",
       indentUnit: 2, tabSize: 2, smartIndent: false, electricChars: false, spellcheck: false, autocorrect: false, autocapitalize: false,
-      viewportMargin: Infinity,
       extraKeys: {
         Tab: (c) => (c.somethingSelected() ? c.indentSelection("add") : c.replaceSelection("  ", "end")),
         "Shift-Tab": (c) => c.indentSelection("subtract"),
@@ -262,6 +281,9 @@ function ProgramEditor({ value, onChange, handle, placeholder }) {
         Enter: (c) => c.replaceSelection("\n", "end"),
       },
     });
+    // The cursor starts at the end, as a text field's does, so a command
+    // inserted before you click goes after the program (review 38).
+    cm.setCursor(cm.lastLine(), cm.getLine(cm.lastLine()).length);
     // A paste goes in as it is. CodeMirror's own paste splits lines at
     // "\r\n" and "\r" whatever the line separator, so a "\r" would be
     // lost; replaceSelection splits at the separator alone.
@@ -282,34 +304,51 @@ function ProgramEditor({ value, onChange, handle, placeholder }) {
     input.setAttribute("role", "textbox");
     input.setAttribute("aria-multiline", "true");
     const at = (i) => cm.posFromIndex(i);
-    let toks = [];
+    // first is the first token that ends after offset i (binary search).
+    const first = (i) => {
+      let a = 0, b = toks.length;
+      while (a < b) { const m = (a + b) >> 1; if (toks[m].start + toks[m].text.length <= i) a = m + 1; else b = m; }
+      return a;
+    };
     const light = () => {
       lit.splice(0).forEach((m) => m.clear());
       const i = cm.indexFromPos(cm.getCursor());
-      let hot = toks.findIndex((t) => t.kind === "paren" && t.start === i - 1);
-      if (hot < 0) hot = toks.findIndex((t) => t.kind === "paren" && t.start === i);
+      let hot = -1;
+      for (const j of [first(i - 1), first(i)]) if (toks[j] && toks[j].kind === "paren" && (toks[j].start === i - 1 || toks[j].start === i)) { hot = j; break; }
       const r = hotRange(toks, hot);
       cm.getWrapperElement().style.setProperty("--hc", r ? r.color : "transparent");
       if (!r) return;
       for (const k of new Set([r.lo, r.hi])) lit.push(cm.markText(at(toks[k].start), at(toks[k].start + 1), { className: "hot" }));
       if (r.hi - r.lo > 1) lit.push(cm.markText(at(toks[r.lo].start + 1), at(toks[r.hi].start), { className: "in" }));
     };
+    // paint colours the lines in view (and CodeMirror's margin around
+    // them), from the whole program's tokens: a program of thousands of
+    // lines costs one tokenizing per change, not thousands of marks.
     const paint = () => {
       frame = 0;
       cm.operation(() => {
+        const gen = cm.changeGeneration();
+        if (gen !== tokensOf) { toks = DD.program(cm.getValue()); tokensOf = gen; }
         marks.splice(0).forEach((m) => m.clear());
-        toks = DD.program(cm.getValue());
-        for (const t of toks) {
-          const cls = tokenClass(t, latest.current.cmds);
+        const vp = cm.getViewport();
+        const from = cm.indexFromPos({ line: vp.from, ch: 0 });
+        const to = cm.indexFromPos({ line: vp.to, ch: 0 });
+        for (let k = first(from); k < toks.length && toks[k].start <= to; k++) {
+          const t = toks[k], cls = tokenClass(t, latest.current.cmds);
           if (cls) marks.push(cm.markText(at(t.start), at(t.start + t.text.length), { className: cls }));
         }
         light();
       });
     };
+    const later = () => { if (!frame) frame = requestAnimationFrame(paint); };
     cm.on("change", () => {
-      latest.current.onChange(cm.getValue());
-      if (!frame) frame = requestAnimationFrame(paint);
+      const v = cm.getValue();
+      sent.current.push(v);
+      if (sent.current.length > 200) sent.current.shift();
+      latest.current.onChange(v);
+      later();
     });
+    cm.on("viewportChange", later);
     cm.on("cursorActivity", () => { if (!frame) cm.operation(light); });
     // After Esc, Tab is the browser's: it moves focus on. (CodeMirror.Pass
     // would hand it to CodeMirror's default keymap, which indents.)
@@ -319,15 +358,22 @@ function ProgramEditor({ value, onChange, handle, placeholder }) {
     });
     cm.on("focus", () => { escaped = false; });
     ed.current = cm;
-    repaint.current = () => { if (!frame) frame = requestAnimationFrame(paint); };
+    repaint.current = later;
     paint();
     return () => { cancelAnimationFrame(frame); ed.current = null; repaint.current = null; const w = cm.getWrapperElement(); w.parentNode && w.parentNode.removeChild(w); };
   }, []);
 
-  // A program put in from outside (an example, Ask heedle's, one put back).
+  // A program put in from outside (an example, Ask heedle's, one put
+  // back): never one the editor sent itself.
   useEffect(() => {
     const cm = ed.current;
-    if (cm && cm.getValue() !== value) cm.setValue(value);
+    if (!cm) return;
+    const k = sent.current.lastIndexOf(value);
+    if (k >= 0) { sent.current.splice(0, k + 1); return; }
+    if (cm.getValue() === value) return;
+    sent.current = [];
+    cm.setValue(value);
+    cm.setCursor(cm.lastLine(), cm.getLine(cm.lastLine()).length);
   }, [value]);
   // Recolour once the worker's skills are known.
   useEffect(() => { if (repaint.current) repaint.current(); }, [cmds]);
@@ -2451,7 +2497,8 @@ function App() {
   const commands = useMemo(() => {
     const desc = new Map(skillList.map((k) => [k.name, k.description]));
     const names = (info && Array.isArray(info.skills) ? info.skills : []).filter((n) => typeof n === "string");
-    const about = info && info.about && typeof info.about === "object" ? info.about : {};
+    const about = {};
+    if (info && info.about && typeof info.about === "object") for (const [k, v] of Object.entries(info.about)) if (typeof v === "string") about[k] = v;
     return { skills: new Map(names.map((n) => [n, desc.get(n) || ""])), about };
   }, [info, skillList]);
   useEffect(() => {

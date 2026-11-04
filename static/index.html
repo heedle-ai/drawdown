@@ -131,22 +131,23 @@
                        text-decoration:underline dotted color-mix(in srgb, var(--skill) 60%, transparent); text-underline-offset:3px; }
   .prog .str, .ed .str { color:var(--ink); }
   .prog .cm, .ed .cm { color:var(--muted); font-style:italic; }
-  .prog .in, .ed .CodeMirror-focused .in { background:color-mix(in srgb, var(--hc) 11%, transparent); }
-  .prog .hot, .ed .CodeMirror-focused .hot { background:color-mix(in srgb, var(--dc) 26%, transparent); border-radius:3px;
+  /* The tints are light enough that every colour on them keeps 4.5:1 (review 38; ui/lib.test.js checks). */
+  .prog .in, .ed .CodeMirror-focused .in { background:color-mix(in srgb, var(--hc) 8%, transparent); }
+  .prog .hot, .ed .CodeMirror-focused .hot { background:color-mix(in srgb, var(--dc) 10%, transparent); border-radius:3px;
                          box-shadow:0 0 0 1px color-mix(in srgb, var(--dc) 60%, transparent); }
-  .prog .unmatched, .ed .unmatched, .prog .bad, .ed .bad { color:var(--bad); background:color-mix(in srgb, var(--bad) 12%, transparent);
+  .prog .unmatched, .ed .unmatched, .prog .bad, .ed .bad { color:color-mix(in srgb, var(--bad) 85%, var(--ink)); background:color-mix(in srgb, var(--bad) 10%, transparent);
                          text-decoration:underline wavy var(--bad); text-underline-offset:3px; text-decoration-skip-ink:none; }
   .prog a.url, .prog a.grant { color:inherit; text-decoration:underline; text-decoration-color:color-mix(in srgb, var(--source) 70%, transparent); text-underline-offset:3px; }
   .prog a.grant { text-decoration-style:dotted; }
   .prog .why { cursor:help; text-decoration:underline dotted color-mix(in srgb, var(--muted) 70%, transparent); text-underline-offset:3px; }
   .prog-box { display:flow-root; }
-  pre.prog { font:12.5px/1.65 var(--mono); }
+  pre.prog { font:12.5px/1.65 var(--mono); tab-size:2; }
   pre.prog:focus-visible { outline-offset:4px; }
   .prog .ln { display:block; min-height:1.65em; padding-left:var(--hang); text-indent:calc(-1 * var(--hang)); }
   .prog .more { font:600 11px/1.5 var(--sans); padding:0 8px; margin-left:6px; border-radius:999px; text-indent:0; vertical-align:1px;
                 color:var(--muted); user-select:none; }
   .prog-copy { float:right; margin:0 0 4px 10px; font:600 11.5px/1.5 var(--sans); padding:2px 10px; border-radius:999px; color:var(--muted); }
-  .ed { position:relative; }
+  .ed { position:relative; min-width:0; }
   .ed .CodeMirror { height:auto; min-height:150px; font:13.5px/1.6 var(--mono); padding:8px 4px; border:1px solid var(--line);
                     border-radius:10px; background:var(--sunk); color:var(--ink); }
   .ed .CodeMirror-focused { outline:2px solid var(--focus); outline-offset:2px; }
@@ -156,6 +157,10 @@
   .ed .CodeMirror-selected, .ed .CodeMirror-focused .CodeMirror-selected, .ed .CodeMirror-line::selection, .ed .CodeMirror-line > span::selection,
   .ed .CodeMirror-line > span > span::selection { background:color-mix(in srgb, var(--focus) 24%, transparent); }
   .ed .CodeMirror-line { padding:0 10px; }
+  /* Any character may break a long run, so the editor never widens the page (review 38).
+     Specific enough to win over CodeMirror's own .CodeMirror-wrap pre.CodeMirror-line. */
+  .ed .CodeMirror-wrap pre.CodeMirror-line, .ed .CodeMirror-wrap pre.CodeMirror-line-like { overflow-wrap:anywhere; }
+  .ed .CodeMirror-scroll { max-height:70vh; } /* so CodeMirror draws only the lines in view (review 38) */
   .ed .CodeMirror pre.CodeMirror-line, .ed .CodeMirror pre.CodeMirror-line-like { font:inherit; }
   .ed-empty { position:absolute; left:15px; top:9px; color:var(--muted); font:13.5px/1.6 var(--mono); pointer-events:none; }
   .ed-keys { font-size:12.5px; margin-top:6px; }

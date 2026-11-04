@@ -556,7 +556,9 @@ func TestServeForBrowser(t *testing.T) {
 	go s.ListenAndServe()
 	defer s.Close()
 	os.WriteFile(os.Getenv("DRAWDOWN_BROWSER_SOURCES"), []byte(w.sources), 0o644)
-	for i := 0; i < 600; i++ {
+	// Until DONE exists, however long the browser takes: go test's
+	// -timeout bounds it (review 38: it stopped after 5 minutes).
+	for {
 		if _, err := os.Stat(os.Getenv("DRAWDOWN_BROWSER_DONE")); err == nil {
 			return
 		}
