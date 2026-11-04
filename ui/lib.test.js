@@ -507,3 +507,12 @@ test("cron times read as words where they're simple", () => {
   assert.equal(DD.when({ cron: "0 7 * * 0" }), "every Sunday at 7:00 (UTC)");
   for (const c of ["0 8 1 * *", "*/5 * * * *", "0 8 * * 1,3", "0 25 * * 1", "x"]) assert.match(DD.when({ cron: c }), /^at cron /, c);
 });
+
+test("the conversation survives a visit to the connectors page (review 34)", () => {
+  const plan = { nodes: [{ id: "n0", activity: "Echo", args: [] }] };
+  const kept = JSON.stringify([{ request: "a", proposal: { summary: "A", program: "(echo)", plan } }, { request: "b", error: "no" }, { request: "c", proposal: { summary: "" } }, null, { request: 5 }]);
+  assert.deepEqual(DD.restoreConversation(kept).map((t) => t.request), ["a", "b"]);
+  assert.deepEqual(DD.restoreConversation("not json"), []);
+  assert.deepEqual(DD.restoreConversation(null), []);
+  assert.equal(DD.restoreConversation(JSON.stringify(Array.from({ length: 14 }, (_, i) => ({ request: String(i), error: "e" })))).length, 10);
+});

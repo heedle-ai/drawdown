@@ -1358,7 +1358,12 @@ const ASK_EXAMPLES = [
 ];
 
 function FrontDoor({ history }) {
-  const [conv, setConv] = useState([]); // [{request, proposal?, error?}]
+  // The conversation outlives a visit to the connectors page (Connect)
+  // and back, for this tab only (review 34).
+  const [conv, setConv] = useState(() => {
+    try { return DD.restoreConversation(sessionStorage.getItem("drawdown.ask")); } catch { return []; }
+  });
+  useEffect(() => { try { sessionStorage.setItem("drawdown.ask", JSON.stringify(conv.slice(-10))); } catch {} }, [conv]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const input = useRef(null);
@@ -1417,8 +1422,9 @@ function ProposalCard({ p, history, latest }) {
     if (!p.program) return;
     api("/api/compile", { program: p.program }).then((r) => { if (r.ok && r.data.plan) setShape(r.data); });
     if (!latest) return;
-    // Coming back from the connectors page: check again, the latest card
-    // only (review 33).
+    // Back from the connectors page, the card mounts again: check at once
+    // (review 34), and again whenever the tab comes back (review 33).
+    if (p.ready) check();
     const again = () => { if (document.visibilityState === "visible") check(); };
     window.addEventListener("focus", again);
     document.addEventListener("visibilitychange", again);

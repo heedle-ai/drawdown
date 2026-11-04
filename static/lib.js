@@ -689,6 +689,21 @@ const DD = (() => {
     return out;
   }
 
+  // restoreConversation is a conversation the page kept (JSON), keeping
+  // only well-formed turns, newest ten; [] if there's none.
+  function restoreConversation(json) {
+    let v;
+    try { v = JSON.parse(json || "[]"); } catch { return []; }
+    if (!Array.isArray(v)) return [];
+    const out = [];
+    for (const t of v) {
+      if (!t || !str(t.request)) continue;
+      if (str(t.error)) out.push({ request: t.request, error: t.error });
+      else { const p = asProposal(t.proposal); if (p) out.push({ request: t.request, proposal: p }); }
+    }
+    return out.slice(-10);
+  }
+
   // goDuration is nanoseconds as a Go duration ("168h", "90m").
   function goDuration(ns) {
     const m = Math.round(ns / 6e10);
@@ -761,6 +776,6 @@ const DD = (() => {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation };
 })();
 if (typeof module !== "undefined") module.exports = DD;
