@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/heedle-ai/draft/registry"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
-	"github.com/heedle-ai/draft/registry"
 	"github.com/heedle-ai/pirn"
 	"github.com/heedle-ai/reed"
 	"github.com/heedle-ai/treadle"
