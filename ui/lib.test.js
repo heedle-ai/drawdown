@@ -396,7 +396,7 @@ test("schedules show only well-formed ones, and say when in words", () => {
   assert.equal(DD.when({ every: 3 * 3600e9 }), "every 3 hours");
   assert.equal(DD.when({ every: 60e9 }), "every minute");
   assert.equal(DD.when({ every: 90 * 60e9 }), "every 90 minutes");
-  assert.equal(DD.when({ cron: "0 9 * * 1-5", timeZone: "Europe/Lisbon" }), "at cron 0 9 * * 1-5 (Europe/Lisbon)");
+  assert.equal(DD.when({ cron: "0 9 * * 1-5", timeZone: "Europe/Lisbon" }), "every weekday at 9:00 (Europe/Lisbon)");
 });
 
 test("a step's failure says which connector or key to set up", () => {
@@ -461,4 +461,43 @@ test("components call hooks before any early return (review 32)", () => {
     });
   }
   assert.deepEqual(bad, []);
+});
+
+test("the front door reads proposals and says what's missing (roadmap 8.3)", () => {
+  const plan = { nodes: [{ id: "n0", activity: "Skill", args: ["trip", "v", "Lisbon"] }] };
+  const ready = { needs: [{ connector: "maps", problem: "absent" }, { connector: "mail", tools: ["send"], problem: "key", key: "MAIL_KEY" }, { connector: "search" }, { connector: "cal", problem: "unreadable", key: "CAL", detail: "locked" }], claude: "key", ready: false };
+  const p = DD.asProposal({ summary: "I'll plan Lisbon.", program: "(trip \"Lisbon\")\n", plan, schedule: { every: 168 * 3600e9 }, name: "lisbon-weekly", ready, attempts: 1 });
+  assert.equal(p.name, "lisbon-weekly");
+  assert.equal(DD.goDuration(p.schedule.every), "168h");
+  assert.equal(DD.goDuration(90 * 6e10), "90m");
+  const lines = DD.readyLines(p.ready);
+  assert.deepEqual(lines.map((l) => [l.what, l.ok, l.href]), [["Claude", false, "#/connectors"], ["maps", false, "#/connectors"], ["mail (send)", false, "#/connectors"], ["search", true, ""], ["cal", false, ""]]);
+  assert.match(lines[1].fix, /Add a connector named maps/);
+  assert.match(lines[2].fix, /MAIL_KEY/);
+  assert.deepEqual(DD.readyLines({ needs: [], error: "connectors file: bad", ready: false }).map((l) => l.ok), [false]);
+  assert.deepEqual(DD.readyLines(null), []);
+  assert.ok(DD.asProposal({ summary: "Nothing books flights.", skill: "Books flights." }).skill);
+  for (const bad of [
+    null, {}, { summary: "" }, { summary: "s" }, { summary: "s", program: "(x)", skill: "y", plan },
+    { summary: "s", program: "(x)" }, // no plan
+    { summary: "s", skill: "y", schedule: { every: 1 }, name: "n" }, // schedule without a program
+    { summary: "s", program: "(x)", plan, schedule: { every: 6e10, cron: "0 8 * * *" }, name: "n" },
+    { summary: "s", program: "(x)", plan, schedule: { every: 6e10 }, name: "Bad Name" },
+    { summary: "s", program: "(x)", plan, ready: { needs: [{ connector: "maps", problem: "gone" }], ready: true } },
+    { summary: "s", program: "(x)", plan, ready: { needs: [{ connector: "<b>" }], ready: true } },
+  ]) assert.equal(DD.asProposal(bad), null, JSON.stringify(bad));
+  const conv = [{ request: "a", proposal: { summary: "A", program: "(a)" } }, { request: "oops", error: "x" }, { request: "b", proposal: { summary: "B", skill: "s" } }];
+  assert.deepEqual(DD.earlierTurns(conv), [{ request: "a", summary: "A", program: "(a)" }, { request: "b", summary: "B", program: "" }]);
+  assert.equal(DD.earlierTurns(Array.from({ length: 12 }, (_, i) => ({ request: String(i), proposal: { summary: "s" } }))).length, 10);
+  assert.equal(DD.localDay(new Date(2026, 10, 4, 23, 30)), "2026-11-04");
+  assert.equal(DD.asReadiness({ needs: [], ready: true }).ready, true);
+  assert.equal(DD.asReadiness({ ready: "yes" }), null);
+});
+
+test("cron times read as words where they're simple", () => {
+  assert.equal(DD.when({ cron: "0 8 * * 1", timeZone: "Europe/Lisbon" }), "every Monday at 8:00 (Europe/Lisbon)");
+  assert.equal(DD.when({ cron: "30 7 * * 1-5" }), "every weekday at 7:30 (UTC)");
+  assert.equal(DD.when({ cron: "5 18 * * *", timeZone: "Asia/Tokyo" }), "every day at 18:05 (Asia/Tokyo)");
+  assert.equal(DD.when({ cron: "0 7 * * 0" }), "every Sunday at 7:00 (UTC)");
+  for (const c of ["0 8 1 * *", "*/5 * * * *", "0 8 * * 1,3", "0 25 * * 1", "x"]) assert.match(DD.when({ cron: c }), /^at cron /, c);
 });

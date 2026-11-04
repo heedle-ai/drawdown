@@ -202,6 +202,16 @@ func (f *fakeTemporal) WriteProgram(ctx context.Context, description string) (lo
 	return f.writer.Write(ctx, description)
 }
 
+func (f *fakeTemporal) Ask(ctx context.Context, in loom.AskRequest) (loom.Proposal, error) {
+	if f.down {
+		return loom.Proposal{}, errors.New("connection refused")
+	}
+	if f.writer == nil {
+		return loom.Proposal{}, errors.New("no writer")
+	}
+	return f.writer.Ask(ctx, in)
+}
+
 // ChangeSkills runs loom's skills workflow in Temporal's test suite, on
 // the fake's store, as a worker would.
 func (f *fakeTemporal) ChangeSkills(ctx context.Context, in loom.SkillsChange) (treadle.Skill, error) {

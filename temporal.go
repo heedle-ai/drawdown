@@ -54,6 +54,11 @@ func (t TemporalClient) DecideWrite(ctx context.Context, workflowID string, d lo
 	return loom.DecideWrite(ctx, t.Client, workflowID, d)
 }
 
+// Ask has a worker propose what heedle would do for a request.
+func (t TemporalClient) Ask(ctx context.Context, in loom.AskRequest) (loom.Proposal, error) {
+	return loom.Ask(ctx, t.Client, t.Queue, in)
+}
+
 // WriteProgram has a worker write a program for a task.
 func (t TemporalClient) WriteProgram(ctx context.Context, description string) (loom.Written, error) {
 	return loom.WriteProgram(ctx, t.Client, t.Queue, description)

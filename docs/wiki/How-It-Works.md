@@ -44,6 +44,8 @@ All responses are JSON except the diffs, which are plain text.
 | `GET /api/writes/{workflow}` (a run's workflow ID, or a merge re-run's, `…/rerun-N`) | | `{"writes": [...]}`: a running run's queued writes so far and their status (loom's `WritesQuery`); a finished run's are in its record (`record.writes`, from `writes.json`). 400 for anything but a run's workflow ID, 502 if Temporal fails |
 | `POST /api/writes/{workflow}` | `{"node", "id", "approve"}` | Approves or declines one write waiting for approval by signalling the run (loom's `WriteSignal`); the page never runs a write. Answers the run's writes |
 | `POST /api/write` | `{"description"}` | Has a worker's Claude write a program for the task (loom's `WriteProgramWorkflow`), from its commands and skills; answers `{"program", "plan", "attempts"}`. Nothing runs. 400 for an empty or overlong description, 422 if no program compiled, 502 if Temporal or the worker failed |
+| `POST /api/ask` | `{"request", "earlier", "today", "timeZone"}` | Has a worker's Claude propose what heedle would do (loom's `AskWorkflow`), from its commands and skills, the conversation so far (`earlier`: each turn's request, summary and program) and your day and time zone; answers the proposal: `{"summary", "program", "plan", "schedule", "name", "skill", "ready", "attempts"}`, `ready` saying whether the worker can run it now. Nothing runs. 422 for a request loom refuses (empty or over 4 KiB, a day or time zone that isn't one) or no usable answer, 502 if Temporal or the worker failed |
+| `POST /api/ready` | `{"program"}` | Whether the program can run now (loom's `CheckReady`, with this server's skills, connectors and keychain): `{"needs", "claude", "claudeDetail", "error", "ready"}`. 422 if it doesn't compile |
 | `POST /api/skills/create` | `{"description"}` | Has a worker's agent write a skill and its test from the description (loom's `SkillsCreate`); answers `{"skill"}`, waiting for review. Takes as long as an agent step |
 | `POST /api/skills/import` | `{"link", "path", "branch"}` | Imports a skill from a GitHub link, or an `https://` repository URL with its folder and branch (treadle's `SourceFor`; never `file://`, which would read the worker's disk), by running loom's skills workflow on a worker; `{"skill"}`, with `"pending": true` if it waits for review. 400 with the reason if refused, 502 if Temporal or the worker failed |
 | `POST /api/skills/add` | `{"files": {"PATH": "BASE64", ...}}` | Adds a folder given by hand (pasted or uploaded), at most 1 MiB, through the same workflow; it needs no review |
@@ -114,6 +116,18 @@ Clicking a step, here or in the drawdown on the home page, opens the **step insp
 - **Files**, for a step whose record holds files (an agent's `/work/out`, recorded by loom under `files/<node>/`): each file with its size, marked added, changed, the same or deleted against the previous run of the same program. A changed file opens to its diff; an added text file of an agent step opens to its contents. A file the agent kept in an OCI registry, being too big for the record, is marked *in the registry* and opens to the `oras blob fetch` command that gets it back.
 - **Produced:** its output, where it is in Git (`outputs/<node>` in the run's commit), and the steps it was passed to.
 - **Not shared with this step:** every other step whose output was never given to it, marked as running alongside, running after it, or reaching it only through its parents. What its parents passed on may still include parts of those outputs.
+
+## Ask heedle: the front door
+
+The home page opens with **What should heedle do?** Type a request in plain words ("Plan three days in Lisbon from 12 December. I like food, tiles and viewpoints."), or pick one of the examples, and **Ask**: a worker's Claude proposes what heedle would do ([loom → The front door](https://github.com/heedle-ai/loom/wiki/How-It-Works#the-front-door-ask)). The answer is a card:
+
+- **The summary**, in plain words.
+- **What it needs**, a line each: Claude, and every connector its steps ask for (each skill's `metadata.connectors`, each agent step's grants), each **ready** or what's missing (not connected, tools it doesn't allow, a key not set, a keychain that can't be read now) with **Connect**, a link to the Connectors page. Coming back to the page checks again (`POST /api/ready`), as does **Check again**.
+- **The plan**, drawn as the program composes it (the same graph as everywhere), and **The program** itself, folded.
+- **Run it now**, the ordinary run, and, when the request said when, **Run it every Monday at 8:00 (Europe/Lisbon)**, which makes the schedule as proposed (the ordinary `POST /api/schedules`). Both wait until everything it needs is ready. **Edit the program** puts it in the editor below.
+- When nothing heedle has can do it, the card says which skill would, and **Teach heedle this skill** has Claude write it with its test; it [waits for your review](#skills) like any created skill.
+
+The box then asks **Change something, or ask for something else**: "make it four days" or "every Monday at 8" refines the proposal, since the conversation so far goes with each request. Earlier proposals fold to their summary. **Start over** forgets the conversation; nothing of it is kept anywhere but the page (`lib.js`'s `asProposal`, `readyLines`, `earlierTurns`, `cronWords`). Schedules read in words where their cron is simple: every day, every weekday or one day of the week at a time.
 
 ## Describing a task
 

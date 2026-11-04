@@ -635,6 +635,73 @@ const DD = (() => {
     return (Array.isArray(steps) ? steps : []).filter((s) => s && (s.status === "Failed" || s.status === "TimedOut") && str(s.failure));
   }
 
+  // === The front door =======================================================
+
+  const NEED = /^(|absent|tools|key|unreadable)$/;
+  const isNeed = (n) => n && typeof n === "object" && str(n.connector) && /^[a-z0-9-]{1,24}$/.test(n.connector) && opt(n.tools, strs) &&
+    (n.problem === undefined || NEED.test(n.problem)) && opt(n.key, str) && opt(n.detail, str);
+  const isReady = (r) => r && typeof r === "object" && objs(r.needs || [], isNeed) && (r.claude === undefined || /^(|key|unreadable)$/.test(r.claude)) &&
+    opt(r.claudeDetail, str) && opt(r.error, str) && bool(r.ready);
+
+  // asProposal is a proposal as the API sends it, if well formed: a
+  // summary, and a program with its plan (perhaps a schedule with a name,
+  // and whether it can run now) or a skill to create; else null.
+  function asProposal(v) {
+    if (!v || typeof v !== "object" || !str(v.summary) || !v.summary.trim() || !opt(v.program, str) || !opt(v.skill, str) || !opt(v.name, str)) return null;
+    const program = v.program || "", skill = v.skill || "";
+    if (!program === !skill) return null;
+    if (program && (!v.plan || !Array.isArray(v.plan.nodes))) return null;
+    const sp = v.schedule;
+    if (sp !== undefined && sp !== null && (!program || typeof sp !== "object" || !opt(sp.every, num) || !opt(sp.cron, str) || !opt(sp.timeZone, str) ||
+      !sp.every === !sp.cron || !/^[a-z0-9-]{1,40}$/.test(v.name || ""))) return null;
+    if (v.ready !== undefined && v.ready !== null && !isReady(v.ready)) return null;
+    return { summary: v.summary, program, plan: program ? v.plan : null, schedule: sp || null, name: sp ? v.name : "", skill, ready: v.ready ? { ...v.ready, needs: v.ready.needs || [] } : null };
+  }
+
+  // asReadiness is /api/ready's answer, if well formed; else null.
+  function asReadiness(v) { return isReady(v) ? { ...v, needs: v.needs || [] } : null; }
+
+  // readyLines are what a proposal needs, a line each: what it is, whether
+  // it's there, and if not, what to do and where (a link to the Connectors
+  // page, or none when it isn't done there).
+  function readyLines(r) {
+    if (!r) return [];
+    if (r.error) return [{ what: "Connectors", ok: false, fix: `Can't tell yet: ${r.error}`, href: "#/connectors" }];
+    const out = [];
+    if (r.claude === "key") out.push({ what: "Claude", ok: false, fix: "No Anthropic API key yet. Paste one on the connectors page.", href: "#/connectors" });
+    else if (r.claude === "unreadable") out.push({ what: "Claude", ok: false, fix: `Can't read the Anthropic API key now: ${r.claudeDetail || "the keychain didn't answer"}. Unlock the keychain, then check again.`, href: "" });
+    for (const n of r.needs) {
+      const what = n.tools && n.tools.length ? `${n.connector} (${n.tools.join(", ")})` : n.connector;
+      const fix = {
+        "": "",
+        absent: `Not connected. Add a connector named ${n.connector}.`,
+        tools: `Connected, but it doesn't allow ${n.tools && n.tools.length ? "those tools" : "every tool"}. Add them to its tools.`,
+        key: `Connected, but its key ${n.key} isn't set.`,
+        unreadable: `Can't read its key ${n.key} now: ${n.detail || "the keychain didn't answer"}. Unlock the keychain, then check again.`,
+      }[n.problem || ""];
+      out.push({ what, ok: !n.problem, fix, href: n.problem && n.problem !== "unreadable" ? "#/connectors" : "" });
+    }
+    return out;
+  }
+
+  // goDuration is nanoseconds as a Go duration ("168h", "90m").
+  function goDuration(ns) {
+    const m = Math.round(ns / 6e10);
+    return m % 60 === 0 ? `${m / 60}h` : `${m}m`;
+  }
+
+  // earlierTurns is what the API is told of the conversation before a
+  // request: each turn's request, summary and program, newest MaxTurns.
+  function earlierTurns(conv, max = 10) {
+    return conv.filter((t) => t.proposal).slice(-max).map((t) => ({ request: t.request, summary: t.proposal.summary, program: t.proposal.program || "" }));
+  }
+
+  // localDay is d's date where the browser is, as YYYY-MM-DD.
+  function localDay(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
   // === Schedules ============================================================
 
   const RUN_ID = /^[A-Za-z0-9._:\-]{1,300}$/;
@@ -659,7 +726,24 @@ const DD = (() => {
       if (m % 60 === 0) return m === 60 ? "every hour" : `every ${m / 60} hours`;
       return m === 1 ? "every minute" : `every ${m} minutes`;
     }
-    return `at cron ${spec.cron} (${spec.timeZone || "UTC"})`;
+    const words = cronWords(spec.cron);
+    return words ? `${words} (${spec.timeZone || "UTC"})` : `at cron ${spec.cron} (${spec.timeZone || "UTC"})`;
+  }
+
+  // cronWords says a simple cron expression in words: a minute and an hour,
+  // every day of the month and month, on every day, weekdays, or one day
+  // of the week ("every Monday at 8:00"); else "".
+  function cronWords(cron) {
+    const f = String(cron || "").trim().split(/\s+/);
+    if (f.length !== 5 || !/^\d{1,2}$/.test(f[0]) || !/^\d{1,2}$/.test(f[1]) || f[2] !== "*" || f[3] !== "*") return "";
+    const m = +f[0], h = +f[1];
+    if (m > 59 || h > 23) return "";
+    const at = `at ${h}:${String(m).padStart(2, "0")}`;
+    const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    if (f[4] === "*") return `every day ${at}`;
+    if (f[4] === "1-5") return `every weekday ${at}`;
+    if (/^[0-7]$/.test(f[4])) return `every ${DAYS[+f[4]]} ${at}`;
+    return "";
   }
 
   // tokenName is the keychain name the server keeps a connector's token
@@ -672,6 +756,6 @@ const DD = (() => {
     return [v.anthropic, ...v.connectors.flatMap((c) => c.secrets)].filter((k) => k.from === "missing").length;
   }
 
-  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy };
+  return { asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay };
 })();
 if (typeof module !== "undefined") module.exports = DD;
