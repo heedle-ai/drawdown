@@ -110,6 +110,11 @@ test("only http and https URLs become links; every other scheme stays text", () 
   assert.deepEqual(urls("(https://x.org/a) 'https://y.org/'"), ["https://x.org/a", "https://y.org/"]);
   assert.deepEqual(urls('https://x.org/a"onmouseover=alert(1)'), ["https://x.org/a"]);
   for (const s of ["a https://x.org/ b", "(https://x.org/a)", "", "plain"]) assert.equal(DD.links(s).map((p) => p.text).join(""), s);
+  // A browse step's URL is a whole string: the URL comes straight after
+  // the string's opening quote (found making the video: it wasn't a link).
+  assert.deepEqual(urls('"https://visit.example.org/washington-dc"'), ["https://visit.example.org/washington-dc"]);
+  assert.deepEqual(urls('"see https://a.org/x, then"'), ["https://a.org/x"]);
+  assert.deepEqual(urls('"javascript:alert(1)" "blob:https://x.org/1"'), [], "a quote starts only an http or https URL");
 });
 
 test("lines split pieces at line breaks and measure each line's indent", () => {
