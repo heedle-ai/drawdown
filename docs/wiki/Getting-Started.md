@@ -3,9 +3,7 @@
 ## 1. Install and clone
 
 ```bash
-brew install go git gh temporal       # macOS; on Linux see loom's Getting Started
-gh auth login        # once; bobbin, reed, pirn and treadle are private
-gh auth setup-git    # lets git clone them with your gh login
+brew install go git temporal       # macOS; on Linux see loom's Getting Started
 mkdir -p ~/src/heedle-ai && cd ~/src/heedle-ai
 for r in weft draft shuttle warp bobbin reed pirn treadle loom drawdown; do git clone https://github.com/heedle-ai/$r.git; done
 ```
