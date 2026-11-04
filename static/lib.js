@@ -535,21 +535,43 @@ const DD = (() => {
     return out;
   }
 
+  // tokenClass is the classes a program's token is coloured by. kinds
+  // maps a built-in command to its kind of step, skills holds the skills'
+  // names (a Map or Set) and about the built-ins' descriptions: only their
+  // own names count, never an Object member such as toString (review 38).
+  const own = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+  function tokenClass(t, kinds, skills, about) {
+    if (t.kind === "paren") return "p d" + (t.depth % 4) + (t.partner < 0 ? " unmatched" : "");
+    if (t.kind === "comment") return "cm";
+    if (t.kind === "str") return "str";
+    if (t.kind === "bad") return "bad";
+    if (t.kind !== "word") return "";
+    if (t.text === "pipe" || t.text === "par") return "comb";
+    if (skills && skills.has(t.text)) return "sk";
+    if (own(kinds, t.text)) return "cmd k-" + kinds[t.text];
+    if (own(about, t.text)) return "cmd k-other";
+    return "";
+  }
+
   // FOLD_AT is how long a string grows before it folds to its start,
   // FOLD_SHOW how much of it shows when folded.
   const FOLD_AT = 240, FOLD_SHOW = 160;
 
-  // lines splits pieces of text, { text, ... }, at line breaks: the
+  // lines splits pieces of text, { text, off, ... }, at line breaks: the
   // result is the program's lines, each a list of pieces with no line
   // break in them, and each line's indent (its leading spaces and tabs,
-  // a tab counted as 2).
+  // a tab counted as 2, as the page sets tab-size). A piece's off (where
+  // its text starts in its token, 0 if not given) moves on with each part,
+  // so a part knows where it is (review 38: links were placed by the
+  // whole string's offsets in every line of it).
   function lines(pieces) {
     const out = [[]];
     for (const p of pieces) {
-      const parts = p.text.split("\n");
-      parts.forEach((t, k) => {
-        if (k > 0) out.push([]);
-        if (t !== "") out[out.length - 1].push({ ...p, text: t });
+      let off = p.off || 0;
+      p.text.split("\n").forEach((t, k) => {
+        if (k > 0) { out.push([]); off += 1; }
+        if (t !== "") out[out.length - 1].push({ ...p, text: t, off });
+        off += t.length;
       });
     }
     return out.map((ps) => {
@@ -958,6 +980,6 @@ const DD = (() => {
     return asSchedules(res.data).filter((s) => s.paused && str(s.note) && FAILURE_PAUSE.test(s.note)).length;
   }
 
-  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW };
+  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
 })();
 if (typeof module !== "undefined") module.exports = DD;

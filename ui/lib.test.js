@@ -663,3 +663,51 @@ test("the page's keyboard shortcuts never fire while typing in the program edito
   assert.ok(checks.length >= 2);
   for (const c of checks) assert.match(c, /\[contenteditable\]/, c);
 });
+
+test("each part of a piece split at line breaks knows where it starts in its token", () => {
+  // Review 38: every line of a multi-line string had offset 0, so a URL was
+  // drawn over the wrong characters of the lines after the first.
+  const s = '"Summarise https://example.org/report\nthen delete every file and\nwrite a note."';
+  const l = DD.lines([{ text: "(agent " }, { text: s, i: 3, off: 0 }, { text: ")" }]);
+  const parts = l.flatMap((x) => x.pieces).filter((p) => p.i === 3);
+  for (const p of parts) assert.equal(s.slice(p.off, p.off + p.text.length), p.text);
+  assert.deepEqual(parts.map((p) => p.off), [0, 38, 65]);
+  assert.equal(DD.lines([{ text: "a\nb", off: 5 }])[1].pieces[0].off, 7);
+});
+
+test("only the worker's own command names read as commands, never an Object member", () => {
+  // Review 38: toString and constructor were coloured and described as commands.
+  const kinds = { echo: "echo", agent: "agent" }, about = { echo: "Echoes.", report: "Reports." }, skills = new Map([["brief", ""]]);
+  const cls = (w) => DD.tokenClass({ kind: "word", text: w }, kinds, skills, about);
+  for (const w of ["toString", "constructor", "hasOwnProperty", "__proto__", "valueOf", "isPrototypeOf"]) assert.equal(cls(w), "", w);
+  assert.equal(cls("echo"), "cmd k-echo");
+  assert.equal(cls("report"), "cmd k-other");
+  assert.equal(cls("brief"), "sk");
+  assert.equal(cls("pipe"), "comb");
+  assert.equal(DD.tokenClass({ kind: "paren", depth: 5, partner: -1 }, kinds, skills, about), "p d1 unmatched");
+});
+
+test("program colours keep 4.5:1 on the page, its editor and their tints, light and dark", () => {
+  // Review 38: error marks and the pointed-at bracket fell below 4.5:1 in light mode.
+  const css = require("node:fs").readFileSync(require("node:path").join(__dirname, "../static/index.html"), "utf8");
+  const vars = (block) => Object.fromEntries([...block.matchAll(/--([a-z0-9]+):(#[0-9a-f]{6})/g)].map((m) => [m[1], m[2]]));
+  const light = vars(css.slice(css.indexOf(":root {"), css.indexOf("@media (prefers-color-scheme: dark)")));
+  const dark = vars(css.slice(css.indexOf("@media (prefers-color-scheme: dark)"), css.indexOf("* { box-sizing")));
+  const depths = (re) => Object.fromEntries([...re.matchAll(/--(d[0-3]):(#[0-9a-f]{6})/g)].map((m) => [m[1], m[2]]));
+  const progLight = depths(/\.prog, \.ed \{([^}]*)\}/.exec(css)[1]);
+  const progDark = depths(/@media \(prefers-color-scheme: dark\) \{ \.prog, \.ed \{([^}]*)\}/.exec(css)[1]);
+  // The percentages the page uses; the checks below fail if the CSS changes them.
+  for (const rule of ["var(--hc) 8%, transparent", "var(--dc) 10%, transparent", "var(--bad) 85%, var(--ink)", "var(--bad) 10%, transparent"]) assert.ok(css.includes(rule), rule);
+  for (const [m, d] of [[light, progLight], [dark, progDark]]) {
+    const D = ["d0", "d1", "d2", "d3"].map((k) => d[k]);
+    for (const ground of [m.surface, m.sunk]) {
+      const errText = DD.mix(m.bad, m.ink, 0.85);
+      assert.ok(DD.contrast(errText, DD.mix(m.bad, ground, 0.1)) >= 4.5, "error mark on " + ground);
+      for (const c of D) {
+        assert.ok(DD.contrast(c, ground) >= 4.5, c + " on " + ground);
+        assert.ok(DD.contrast(c, DD.mix(c, ground, 0.1)) >= 4.5, c + " hot on " + ground);
+        for (const h of D) assert.ok(DD.contrast(c, DD.mix(h, ground, 0.08)) >= 4.5, `${c} in a ${h} form on ${ground}`);
+      }
+    }
+  }
+});
