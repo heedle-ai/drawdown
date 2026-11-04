@@ -24,4 +24,15 @@ go vet ./...
 go test -race ./...
 bash .github/invariants.sh
 bash .github/sri.sh
+node --test ui/lib.test.js
 ```
+
+The top bar's check (CI's `topbar` step) opens the page in Chromium, so it needs Node 22 and Playwright 1.63 with its Chromium. It serves the page's files itself, takes the CDN files from their npm packages and answers the API from its own fixtures, so it needs no server:
+
+```bash
+npm install --no-save --no-audit --no-fund --prefix ~/.cache/drawdown-playwright playwright@1.63.0
+~/.cache/drawdown-playwright/node_modules/.bin/playwright install chromium
+NODE_PATH=~/.cache/drawdown-playwright/node_modules node ui/topbar.check.js
+```
+
+Give it a directory (`node ui/topbar.check.js shots`) to save its screenshots: the home page and a review, at 375 and 1280 px, light and dark.

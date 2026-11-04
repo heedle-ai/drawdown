@@ -1328,7 +1328,7 @@ function ReviewPage({ name }) {
         : "A new skill: the diff shows every text file."} No program can use it until it's approved.</p>
       ${binary.length > 0 && html`<p class="error">Not in the diff, because git takes them for binary: ${binary.map((b, i) => html`<code key=${i}>${b}</code> `)}. Read them yourself before approving.</p>`}
       <${Decide} sk=${sk} replaces=${replaces} />
-      <p class="muted">Or at the terminal: <code>loom skills -store DIR -approve ${at}${replaces ? " -replacing " + replaces : ""}</code> or <code>-reject ${at}</code></p>
+      <p class="muted cg-wrap">Or at the terminal: <code>loom skills -store DIR -approve ${at}${replaces ? " -replacing " + replaces : ""}</code> or <code>-reject ${at}</code></p>
     </div>
     <h3>Changes</h3>
     ${diff === null && html`<div class="panel muted">The diff is too large to show here. Print it with <code>loom skills -store DIR -review ${sk.name}</code>.</div>`}
@@ -2184,6 +2184,53 @@ function Home({ info, refs, heads, current }) {
     <${Runs} data=${shown} day=${day} />`;
 }
 
+// === Top bar ===============================================================
+// The sections, the current one marked, each with a count of what there
+// needs you; then Temporal's Web UI, set apart as a tool outside drawdown.
+
+const SECTION_LINKS = [
+  { section: "runs", href: "#/", label: "Runs", dye: "source" },
+  { section: "skills", href: "#/skills", label: "Skills", dye: "skill", need: (n) => `${n} waiting for review` },
+  { section: "schedules", href: "#/schedules", label: "Schedules", dye: "record", need: (n) => `${n} paused by a failed run` },
+  { section: "connectors", href: "#/connectors", label: "Connectors", dye: "agent", need: (n) => `${n} key${n === 1 ? "" : "s"} to set` },
+];
+
+// useNeeds fetches what needs you once on load and again each time the
+// route changes, never on a timer. An answer that fails or isn't
+// understood is no count, never an error; a late answer to an earlier
+// fetch is dropped.
+function useNeeds(at) {
+  const [needs, setNeeds] = useState({});
+  const seq = useRef(0);
+  useEffect(() => {
+    const mine = ++seq.current;
+    Promise.all([api("/api/skills"), api("/api/schedules"), api("/api/connectors")]).then(([sk, sc, co]) => {
+      if (mine !== seq.current) return;
+      setNeeds({ skills: DD.skillsWaiting(sk), schedules: DD.schedulesStopped(sc), connectors: DD.keysToSet(co) });
+    });
+  }, [at]);
+  return needs;
+}
+
+function TopBar({ section, at, temporalUI }) {
+  const needs = useNeeds(at);
+  // Temporal is after the nav, not in it: it isn't one of drawdown's
+  // sections, and on a phone it can sit on the first row by itself.
+  return html`<${React.Fragment}><nav class="topbar" aria-label="drawdown">
+    <ul>
+      ${SECTION_LINKS.map((s) => {
+        const n = needs[s.section];
+        const here = s.section === section;
+        return html`<li key=${s.section}>
+          <a href=${s.href} class=${here ? "here" : ""} style=${{ "--c": `var(--${s.dye})` }} aria-current=${here ? "page" : undefined}>
+            ${s.label}${n > 0 && html`<span class="need" title=${s.need(n)}>${n}<span class="sr"> ${s.need(n)}</span></span>`}
+          </a></li>`;
+      })}
+    </ul>
+  </nav>
+  <a class="temporal" href=${temporalUI} target="_blank" rel="noopener">Temporal<span aria-hidden="true"> ↗</span><span class="sr"> (opens in a new tab)</span></a><//>`;
+}
+
 function App() {
   const route = useRoute();
   const [info, setInfo] = useState(null);
@@ -2214,17 +2261,22 @@ function App() {
   // A remembered ref that no longer exists falls back to the default.
   const current = refs.includes(ref) ? ref : info.ref;
 
+  // What to show, and which section of the top bar it's in, both come
+  // from DD.page, so they can't disagree (DRAW-68).
+  const pg = DD.page(route);
   let body;
-  if (route[0] === "agent" && route.length === 2) body = html`<${AgentPage} agent=${route[1]} refs=${refs} heads=${heads} info=${info} />`;
-  else if (route[0] === "run" && route.length === 3) body = html`<${RunDetail} workflow=${route[1]} run=${route[2]} history=${current} />`;
-  else if (route[0] === "step" && route.length === 4) body = html`<${StepPage} key=${route.join("/")} workflow=${route[1]} run=${route[2]} node=${route[3]} history=${current} />`;
-  else if (route[0] === "diff" && route.length === 3) body = html`<${Diff} from=${route[1]} to=${route[2]} />`;
-  else if (route[0] === "skills" && route.length === 1) body = html`<${SkillsPage} />`;
-  else if (route[0] === "connectors" && route.length === 1) body = html`<${ConnectorsPage} />`;
-  else if (route[0] === "schedules" && route.length === 1) body = html`<${SchedulesPage} />`;
-  else if (route[0] === "review" && route.length === 2) body = html`<${ReviewPage} key=${route[1]} name=${route[1]} />`;
-  else if (route[0] === "skill" && (route.length === 2 || route.length === 3)) body = html`<${SkillPage} key=${route.join("/")} name=${route[1]} version=${route[2]} />`;
-  else body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;
+  switch (pg.name) {
+    case "agent": body = html`<${AgentPage} agent=${route[1]} refs=${refs} heads=${heads} info=${info} />`; break;
+    case "run": body = html`<${RunDetail} workflow=${route[1]} run=${route[2]} history=${current} />`; break;
+    case "step": body = html`<${StepPage} key=${route.join("/")} workflow=${route[1]} run=${route[2]} node=${route[3]} history=${current} />`; break;
+    case "diff": body = html`<${Diff} from=${route[1]} to=${route[2]} />`; break;
+    case "skills": body = html`<${SkillsPage} />`; break;
+    case "connectors": body = html`<${ConnectorsPage} />`; break;
+    case "schedules": body = html`<${SchedulesPage} />`; break;
+    case "review": body = html`<${ReviewPage} key=${route[1]} name=${route[1]} />`; break;
+    case "skill": body = html`<${SkillPage} key=${route.join("/")} name=${route[1]} version=${route[2]} />`; break;
+    default: body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;
+  }
 
   const dyes = ["source", "assess", "browse", "ask", "record", "container", "echo", "source"];
   return html`
@@ -2241,11 +2293,7 @@ function App() {
               ${(refs.length ? refs : [info.ref]).map((r) => html`<option key=${r} value=${r}>${agentName(r)}</option>`)}
             </select></label>`}
       <span class="spacer"></span>
-      <a href="#/skills">skills</a>
-      <a href="#/schedules">schedules</a>
-      <a href="#/connectors">connectors</a>
-      <${Pill} cls="k-other" plain>${(info.commands || []).length} commands<//>
-      <a href=${info.temporalUI} target="_blank" rel="noopener">Temporal Web UI ↗</a>
+      <${TopBar} section=${pg.section} at=${route.join("/")} temporalUI=${info.temporalUI} />
     </header>
     <main><${ErrorBoundary} route=${route.join("/")}>${body}<//></main>
     <${TipLayer} tip=${tip} />
