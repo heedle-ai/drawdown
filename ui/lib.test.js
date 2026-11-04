@@ -476,10 +476,10 @@ test("the front door reads proposals and says what's missing (roadmap 8.3)", () 
   assert.match(lines[2].fix, /MAIL_KEY/);
   assert.deepEqual(DD.readyLines({ needs: [], error: "connectors file: bad", ready: false }).map((l) => l.ok), [false]);
   // Review 33: what a step could change, and an agent image, are said.
-  const w = DD.readyLines(DD.asReadiness({ needs: [{ connector: "mail", writes: ["send"], approve: true }, { connector: "slack", writes: ["post"] }], agent: "no agent image", ready: false }));
-  assert.deepEqual(w.map((l) => [l.what, l.ok]), [["Agent steps", false], ["mail", true], ["slack", true]]);
-  assert.match(w[1].writes, /send, each waiting for your approval/);
-  assert.match(w[2].writes, /post, without asking you/);
+  const w = DD.readyLines(DD.asReadiness({ needs: [{ connector: "mail", writes: ["send"], approve: true }, { connector: "slack", writes: ["post"] }], agent: "no agent image", browser: "no browser image", ready: false }));
+  assert.deepEqual(w.map((l) => [l.what, l.ok]), [["Agent steps", false], ["Browse steps", false], ["mail", true], ["slack", true]]);
+  assert.match(w[2].writes, /send, each waiting for your approval/);
+  assert.match(w[3].writes, /post, without asking you/);
   assert.equal(DD.asReadiness({ needs: [{ connector: "mail", writes: "send" }], ready: true }), null);
   assert.deepEqual(DD.readyLines(null), []);
   assert.ok(DD.asProposal({ summary: "Nothing books flights.", skill: "Books flights." }).skill);

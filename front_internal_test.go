@@ -12,7 +12,9 @@ import (
 
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
+	"github.com/heedle-ai/draft/registry"
 	"github.com/heedle-ai/pirn"
+	"github.com/heedle-ai/reed"
 	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
 )
@@ -39,7 +41,15 @@ func TestInv_ReadyChecksAsARunWould(t *testing.T) {
 	cs := pirn.Connectors{{Name: "search", URL: "https://search.example/mcp", TokenEnv: "SEARCH_KEY"}}
 	var csErr error
 	keys := memSecrets{"SEARCH_KEY": "s"}
-	s := &Server{Store: store, Ref: loom.DefaultRef, Skills: lib, Commands: shipment.Registry, Registry: shipment.Registry(),
+	// The shipment's commands, and browse.
+	commands := func() *registry.Registry {
+		reg := shipment.Registry()
+		if err := reg.Register(reed.BuiltinSpec()); err != nil {
+			t.Fatal(err)
+		}
+		return reg
+	}
+	s := &Server{Store: store, Ref: loom.DefaultRef, Skills: lib, Commands: commands, Registry: commands(),
 		Connectors: func() (pirn.Connectors, error) { return cs, csErr }, Secrets: keys}
 	call := func(program string) (int, loom.Readiness) {
 		b, _ := json.Marshal(map[string]string{"program": program})
@@ -78,6 +88,14 @@ func TestInv_ReadyChecksAsARunWould(t *testing.T) {
 	s.StepKeys = nil
 	if _, r := call(`(echo "hi")`); !r.Ready || len(r.Needs) != 0 || r.Claude != "" {
 		t.Errorf("needs nothing: %+v", r)
+	}
+	// Review 35: a browse step needs a browser image.
+	if _, r := call(`(browse "example.org")`); r.Ready || r.Browser == "" {
+		t.Errorf("browse with no browser image: %+v", r)
+	}
+	s.Browsers = true
+	if _, r := call(`(browse "example.org")`); !r.Ready {
+		t.Errorf("browse with a browser image: %+v", r)
 	}
 	if code, _ := call(`(nope)`); code != 422 {
 		t.Errorf("doesn't compile: %d", code)

@@ -159,6 +159,7 @@ type Server struct {
 	// front door's ready check reads them as a run would.
 	StepKeys pirn.Vault
 	Agents   bool
+	Browsers bool // has a browser image for browse steps
 	// MCPRegistry is the MCP Registry the page adds connectors from
 	// (DefaultMCPRegistry if empty); RegistryClient, if set, reaches it.
 	MCPRegistry    string
