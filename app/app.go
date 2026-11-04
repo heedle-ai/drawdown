@@ -143,9 +143,11 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		// Skills change only through a workflow on this worker (drawdown never
 		// writes), never through a program.
 		loom.RegisterSkills(w, loom.Skills{Library: lib, Create: creator(agent)})
-		// The program writer: Claude with this worker's key, told about
-		// its commands and the store's newest skills.
-		loom.RegisterWriter(w, loom.Writer{Asker: claude, Commands: func(ctx context.Context) (*registry.Registry, []loom.Command, error) {
+		// The program writer and the front door (ask): Claude with this
+		// worker's key, told about its commands and the store's newest
+		// skills; a proposal says whether it can run now, from this worker's
+		// skills, connectors and keys.
+		writer := loom.Writer{Asker: claude, Commands: func(ctx context.Context) (*registry.Registry, []loom.Command, error) {
 			reg := commands()
 			if _, err := lib.AddTo(ctx, reg); err != nil {
 				return nil, nil, err
@@ -162,7 +164,15 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 				known[sk.Name] = loom.Command{Args: "(" + sk.Name + ` "arg" ...)`, About: "A skill: " + sk.Description}
 			}
 			return reg, loom.Commands(reg, known), nil
-		}})
+		}, Ready: func(ctx context.Context, p plan.Plan) (loom.Readiness, error) {
+			cs, err := loadConnectors()
+			if err != nil {
+				return loom.Readiness{}, err
+			}
+			return loom.CheckReady(ctx, p, lib, cs, agent.Vault)
+		}}
+		loom.RegisterWriter(w, writer)
+		loom.RegisterAsk(w, writer)
 		shipment.RegisterCommands(w, *sources)
 		// Without Temporal the worker can't start; keep serving the
 		// recorded history, and say why runs won't execute.

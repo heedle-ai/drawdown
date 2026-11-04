@@ -76,6 +76,9 @@ type Temporal interface {
 	// WriteProgram has a worker's Claude write a program for a task
 	// (loom.WriteProgram); nothing runs.
 	WriteProgram(ctx context.Context, description string) (loom.Written, error)
+	// Ask has a worker's Claude propose what heedle would do for a request
+	// (loom.Ask); nothing runs.
+	Ask(ctx context.Context, in loom.AskRequest) (loom.Proposal, error)
 	// ListSkills lists a repository's skills on a worker
 	// (loom.ListSkills); nothing changes.
 	ListSkills(ctx context.Context, src treadle.Source) (loom.Catalog, error)
@@ -193,6 +196,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/writes/{workflow...}", s.writes)
 	mux.HandleFunc("POST /api/writes/{workflow...}", s.decideWrite)
 	mux.HandleFunc("POST /api/write", s.writeProgram)
+	mux.HandleFunc("POST /api/ask", s.ask)
+	mux.HandleFunc("POST /api/ready", s.ready)
 	mux.HandleFunc("POST /api/skills/create", s.createSkill)
 	mux.HandleFunc("POST /api/skills/import", s.importSkill)
 	mux.HandleFunc("POST /api/skills/catalog", s.catalog)

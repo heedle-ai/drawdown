@@ -1345,6 +1345,143 @@ function ReviewPage({ name }) {
     </div>`;
 }
 
+// === The front door ========================================================
+// Ask heedle in plain words. A worker's Claude proposes what heedle would
+// do (a program, a schedule if you said when, or a skill to create), and
+// the worker says whether it can run now. Nothing runs until Run or the
+// schedule button, which are the ordinary run and schedule.
+
+const ASK_EXAMPLES = [
+  "Plan three days in Lisbon from 12 December. I like food, tiles and viewpoints.",
+  "Every weekday at 8, check whether shipment 4471 will be late.",
+  "Read the three shipment sources and tell me if the shipment will be late.",
+];
+
+function FrontDoor({ history }) {
+  const [conv, setConv] = useState([]); // [{request, proposal?, error?}]
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const input = useRef(null);
+  const ask = async (request) => {
+    request = request.trim();
+    if (!request || busy) return;
+    setBusy(true); setText("");
+    const body = { request, earlier: DD.earlierTurns(conv), today: DD.localDay(new Date()), timeZone: localZone() };
+    const r = await api("/api/ask", body);
+    setBusy(false);
+    const proposal = r.ok ? DD.asProposal(r.data) : null;
+    setConv((c) => [...c, proposal ? { request, proposal } : { request, error: (r.data && r.data.error) || "The answer wasn't understood." }]);
+  };
+  const last = conv.length - 1;
+  return html`
+    <section class="front" aria-label="Ask heedle">
+      <form class="front-ask" onSubmit=${(e) => { e.preventDefault(); ask(text); }}>
+        <label for="ask" class="front-label">${conv.length ? "Change something, or ask for something else" : "What should heedle do?"}</label>
+        <div class="front-row">
+          <input id="ask" ref=${input} type="text" autocomplete="off" value=${text} disabled=${busy} onInput=${(e) => setText(e.target.value)}
+            placeholder=${conv.length ? "Make it four days, or every Monday at 8" : "Plan three days in Lisbon from 12 December…"} />
+          <button class="primary" type="submit" disabled=${busy || !text.trim()}>${busy ? "Thinking…" : "Ask"}</button>
+        </div>
+        ${!conv.length && !busy && html`<div class="front-examples">${ASK_EXAMPLES.map((e) => html`
+          <button type="button" key=${e} class="chip" onClick=${() => { setText(e); input.current && input.current.focus(); }}>${e}</button>`)}</div>`}
+      </form>
+      ${conv.map((t, i) => html`<div class="turn" key=${i}>
+        <p class="you"><span class="muted">You asked</span> ${t.request}</p>
+        ${t.error ? html`<p class="error" role="alert">${t.error}</p>`
+          : html`<${ProposalCard} p=${t.proposal} history=${history} latest=${i === last} />`}
+      </div>`)}
+      ${busy && html`<p class="muted" role="status">heedle is working out how to do that…</p>`}
+      ${conv.length > 0 && !busy && html`<p><button class="link-btn" onClick=${() => setConv([])}>Start over</button></p>`}
+    </section>`;
+}
+
+// ProposalCard is one proposal: what heedle would do, what it needs and
+// whether that's there, the plan drawn as the program composes it, and
+// what you can do with it.
+function ProposalCard({ p, history, latest }) {
+  const [ready, setReady] = useState(p.ready);
+  const [shape, setShape] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [note, setNote] = useState(null);
+  const check = async () => {
+    const r = await api("/api/ready", { program: p.program });
+    const v = r.ok && DD.asReadiness(r.data);
+    if (v) setReady(v);
+  };
+  useEffect(() => {
+    if (!p.program) return;
+    api("/api/compile", { program: p.program }).then((r) => { if (r.ok && r.data.plan) setShape(r.data); });
+    // Coming back from the connectors page: check again.
+    const again = () => { if (document.visibilityState === "visible") check(); };
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    return () => { window.removeEventListener("focus", again); document.removeEventListener("visibilitychange", again); };
+  }, [p.program]);
+  const run = async () => {
+    setBusy("run"); setNote(null);
+    const r = await api("/api/runs", { program: p.program, ref: history });
+    setBusy("");
+    if (r.ok) go("run", r.data.workflowId, r.data.runId);
+    else setNote({ error: (r.data && r.data.error) || String(r.data) });
+  };
+  const schedule = async () => {
+    setBusy("schedule"); setNote(null);
+    const sp = p.schedule;
+    const body = { name: p.name, program: p.program, ref: history, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
+    const r = await api("/api/schedules", body);
+    setBusy("");
+    setNote(r.ok ? { ok: html`Scheduled <a href="#/schedules" class="mono">${p.name}</a>, ${DD.when(sp)}. Each run is recorded like any other.` }
+      : { error: (r.data && r.data.error) || String(r.data) });
+  };
+  const teach = async () => {
+    setBusy("teach"); setNote(null);
+    const r = await api("/api/skills/create", { description: p.skill });
+    setBusy("");
+    const sk = r.ok ? DD.asSkill(r.data.skill) : null;
+    setNote(sk ? { ok: html`Claude wrote the skill <a class="mono" href=${"#/review/" + encodeURIComponent(sk.name)}>${sk.name}</a>, with its test. Review it before anything can use it.` }
+      : { error: (r.data && r.data.error) || String(r.data) });
+  };
+  const edit = () => { window.dispatchEvent(new CustomEvent("dd-program", { detail: p.program })); };
+  const lines = DD.readyLines(ready);
+  const canRun = !!p.program && (!ready || ready.ready);
+  // An earlier proposal is its summary, with the rest a click away.
+  if (!latest) return html`
+    <div class="panel proposal">
+      <p class="summary">${p.summary}</p>
+      ${p.program && html`<details class="program"><summary>The program</summary><${Program} text=${p.program} /></details>`}
+      ${p.skill && html`<p class="muted">${p.skill}</p>`}
+    </div>`;
+  return html`
+    <div class=${"panel proposal" + (latest ? " latest" : "")}>
+      <p class="summary">${p.summary}</p>
+      ${p.skill ? html`
+        <div class="teach">
+          <p class="muted">A skill that could do it:</p>
+          <p>${p.skill}</p>
+          ${latest && html`<button class="primary" disabled=${!!busy} onClick=${teach}>${busy === "teach" ? "Claude is writing it…" : "Teach heedle this skill"}</button>`}
+        </div>` : html`
+        ${lines.length > 0 && html`<ul class="needs" aria-label="What it needs">
+          ${lines.map((l) => html`<li key=${l.what} class=${l.ok ? "ok" : "missing"}>
+            <span class="mark" aria-hidden="true">${l.ok ? "✓" : "!"}</span>
+            <span class="mono">${l.what}</span>
+            <span>${l.ok ? "ready" : l.fix}</span>
+            ${!l.ok && l.href && html`<a class="btn" href=${l.href}>Connect</a>`}
+          </li>`)}
+        </ul>`}
+        ${ready && !ready.ready && html`<p><button class="link-btn" onClick=${check}>Check again</button></p>`}
+        ${shape && html`<${CompositionGraph} plan=${shape.plan} shape=${shape.shape} />`}
+        <details class="program"><summary>The program</summary><${Program} text=${p.program} /></details>
+        ${latest && html`<div class="row">
+          <button class="primary" disabled=${!canRun || !!busy} onClick=${run}>${busy === "run" ? "Starting…" : "Run it now"}</button>
+          ${p.schedule && html`<button disabled=${!canRun || !!busy} onClick=${schedule}>${busy === "schedule" ? "Scheduling…" : `Run it ${DD.when(p.schedule)}`}</button>`}
+          <button onClick=${edit}>Edit the program</button>
+          ${!canRun && html`<span class="muted">Connect what's missing first.</span>`}
+        </div>`}`}
+      ${note && note.ok && html`<p role="status">${note.ok}</p>`}
+      ${note && note.error && html`<p class="error" role="alert">${note.error}</p>`}
+    </div>`;
+}
+
 // === New run ===============================================================
 
 const TEMPLATES = {
@@ -1395,6 +1532,12 @@ function NewRun({ info, history: ref }) {
   const [submitError, setSubmitError] = useState("");
   const [scheduling, setScheduling] = useState(false);
   const area = useRef(null);
+  // Edit the program, from a proposal of the front door: into this editor.
+  useEffect(() => {
+    const take = (e) => { if (typeof e.detail === "string") { setProgram(e.detail); setTimeout(() => area.current && area.current.scrollIntoView({ behavior: "smooth", block: "center" }), 50); } };
+    window.addEventListener("dd-program", take);
+    return () => window.removeEventListener("dd-program", take);
+  }, []);
 
   useEffect(() => {
     try { localStorage.setItem("drawdown.program", program); } catch {}
@@ -1983,6 +2126,7 @@ function Home({ info, refs, heads, current }) {
   const shown = runs && day ? { ...runs, runs: DD.onDay(runs.runs, day) } : runs;
   const dayName = day && new Date(day + "T12:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   return html`
+    <${FrontDoor} history=${current} />
     <h2>Drawdown</h2>
     <p class="lede">Recent runs, woven: one column per run, one cell per step, coloured by the kind of step. Hover for details; click to open. Pick a day on the calendar to see only its runs.</p>
     ${day && html`<p class="filter-note">Showing runs started on ${dayName}. <button class="link" onClick=${() => setDay("")}>Show every day</button></p>`}

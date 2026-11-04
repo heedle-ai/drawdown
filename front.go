@@ -1,0 +1,83 @@
+package drawdown
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/heedle-ai/loom"
+	"github.com/heedle-ai/pirn"
+	"github.com/heedle-ai/warp"
+)
+
+// The front door: "Ask heedle" on the home page. A request (with the
+// conversation so far) goes to a worker's Claude (loom.Ask), which
+// proposes a program, a schedule if asked for, or a skill to create; the
+// worker says whether it can run now. Nothing runs until Run or Schedule,
+// which are the ordinary submit and schedule.
+
+// maxAskBody bounds an ask's request body: the request, and the earlier
+// turns, each with its program.
+const maxAskBody = loom.MaxRequest + loom.MaxTurns*(loom.MaxRequest+loom.MaxSummary+loom.MaxTurnProgram) + 4<<10
+
+func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
+	var req loom.AskRequest
+	if !readJSONUpTo(w, r, &req, maxAskBody) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), loom.AskTimeout+90*time.Second)
+	defer cancel()
+	out, err := s.Temporal.Ask(ctx, req)
+	switch {
+	case errors.Is(err, warp.ErrInvalid) || errors.Is(err, pirn.ErrInvalid) || errors.Is(err, loom.ErrNoProgram):
+		writeJSON(w, http.StatusUnprocessableEntity, apiError{Error: err.Error()})
+	case err != nil:
+		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+// ready says whether a program can run now, as loom.CheckReady does on a
+// worker: for a proposal's card to check again after something is
+// connected. It compiles the program as a run would.
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	var req programRequest
+	if !readJSON(w, r, &req) {
+		return
+	}
+	p, ce := s.compileProgram(r.Context(), req.Program)
+	if ce != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, ce)
+		return
+	}
+	var cs pirn.Connectors
+	if s.Connectors != nil {
+		var err error
+		if cs, err = s.Connectors(); err != nil {
+			writeJSON(w, http.StatusOK, loom.Readiness{Needs: []pirn.Need{}, Error: err.Error()})
+			return
+		}
+	}
+	var v pirn.Vault
+	if s.Secrets != nil {
+		v = s.Secrets
+	}
+	files, _ := s.Skills.(loom.SkillFiles)
+	if files == nil {
+		files = noSkills{}
+	}
+	out, err := loom.CheckReady(r.Context(), p, files, cs, v)
+	if err != nil {
+		out = loom.Readiness{Needs: []pirn.Need{}, Error: err.Error()}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// noSkills is a library with no skill versions.
+type noSkills struct{}
+
+func (noSkills) Files(context.Context, warp.ID) (map[string][]byte, error) {
+	return nil, errors.New("this server has no skills")
+}

@@ -224,6 +224,30 @@
   .link-btn { background:none; border:0; color:var(--muted); text-decoration:underline; padding:2px 4px; font-size:13px; }
   .connect-prompt { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:6px 0; }
   .connect-prompt a.btn { font-weight:600; }
+  /* The front door: Ask heedle */
+  .front { margin:8px 0 28px; }
+  .front-label { display:block; font-size:28px; font-weight:650; letter-spacing:-.4px; margin:0 0 12px; }
+  .front-row { display:flex; gap:10px; }
+  .front-row input { flex:1; font-size:18px; padding:14px 16px; border-radius:12px; border:1.5px solid var(--line); background:var(--surface); color:var(--ink); }
+  .front-row input:focus { outline:none; border-color:var(--focus); box-shadow:0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent); }
+  .front-row button { font-size:16px; padding:0 22px; border-radius:12px; }
+  .front-examples { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  .chip { font:inherit; font-size:13px; padding:6px 12px; border-radius:999px; border:1px solid var(--line); background:var(--sunk); color:var(--muted); cursor:pointer; }
+  .chip:hover { color:var(--ink); border-color:var(--muted); }
+  .turn { margin-top:18px; }
+  .turn .you { margin:0 0 8px; font-size:15px; }
+  .proposal { border-left:4px solid var(--line); }
+  .proposal.latest { border-left-color:var(--focus); }
+  .proposal .summary { font-size:19px; line-height:1.45; margin:0 0 14px; }
+  .needs { list-style:none; padding:0; margin:0 0 12px; display:grid; gap:6px; }
+  .needs li { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:7px 10px; border-radius:8px; background:var(--sunk); }
+  .needs li.missing { background:color-mix(in srgb, var(--bad) 9%, var(--surface)); }
+  .needs .mark { width:20px; height:20px; border-radius:50%; display:inline-grid; place-items:center; font-size:12px; font-weight:700; color:#fff; background:var(--ok); }
+  .needs li.missing .mark { background:var(--bad); }
+  .needs a.btn { margin-left:auto; font-weight:600; }
+  .proposal details.program { margin:10px 0; }
+  .proposal details.program summary { cursor:pointer; color:var(--muted); }
+  .teach p { margin:6px 0; }
   .went-wrong { margin-bottom:12px; } .went-wrong p.mono { margin:8px 0; }
   .note { padding:8px 12px; border-radius:8px; background:color-mix(in srgb, var(--bad) 10%, var(--surface)); }
   .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
