@@ -280,9 +280,22 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
 		return
 	}
+	// Skills are the commands treadle added; every other command is built
+	// in, and says what it does in a line as loom's program writer tells
+	// Claude (loom.BuiltinCommands). A skill's own description is on
+	// /api/skills.
+	skills, about := []string{}, map[string]string{}
+	for _, name := range reg.Names() {
+		spec, _ := reg.Lookup(name)
+		if spec.AgentID == treadle.ActivityName {
+			skills = append(skills, name)
+		} else if c, ok := loom.BuiltinCommands[name]; ok {
+			about[name] = c.About
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ref": s.Ref, "temporalUI": s.TemporalUI, "namespace": s.namespace(),
-		"commands": reg.Names(), "examples": s.Examples,
+		"commands": reg.Names(), "skills": skills, "about": about, "examples": s.Examples,
 	})
 }
 

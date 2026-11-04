@@ -1,6 +1,6 @@
 ## Ground rules
 
-- **Reuse, never rewrite.** The server composes draft, loom, Temporal's SDK and warp; the page uses React, htm and diff2html unmodified. If something seems to need modifying one of them, stop and ask first.
+- **Reuse, never rewrite.** The server composes draft, loom, Temporal's SDK and warp; the page uses React, htm, diff2html and CodeMirror unmodified. If something seems to need modifying one of them, stop and ask first.
 - **Read and submit only.** No endpoint edits history.
 - **No unescaped data in HTML.** Let React render text, the graphs included; never set HTML from data.
 - **Pin and hash every CDN file.** To upgrade one, change the version in `static/index.html` and recompute its hash from the npm package file:
@@ -24,4 +24,13 @@ go vet ./...
 go test -race ./...
 bash .github/invariants.sh
 bash .github/sri.sh
+node --test ui/lib.test.js
+```
+
+The browser tests need Playwright 1.63.0 and its Chromium (Node 22, Go):
+
+```bash
+npm install --no-save --prefix /tmp/pw playwright@1.63.0
+/tmp/pw/node_modules/.bin/playwright install chromium
+NODE_PATH=/tmp/pw/node_modules node --test ui/browser.test.js
 ```

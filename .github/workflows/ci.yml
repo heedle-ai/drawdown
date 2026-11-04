@@ -80,6 +80,15 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         working-directory: drawdown
         run: node --test ui/lib.test.js
+      - name: browser
+        # The program viewer and editor in Chromium (Playwright), on the real
+        # server with the fake Temporal (TestServeForBrowser).
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: drawdown
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+          NODE_PATH="$RUNNER_TEMP/pw/node_modules" node --test ui/browser.test.js
       - name: sri
         if: matrix.os == 'ubuntu-latest'
         working-directory: drawdown

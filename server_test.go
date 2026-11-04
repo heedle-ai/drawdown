@@ -21,9 +21,12 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/heedle-ai/draft"
+	"github.com/heedle-ai/draft/registry"
 	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
+	"github.com/heedle-ai/pirn"
+	"github.com/heedle-ai/reed"
 	"github.com/heedle-ai/shuttle/plan"
 	"github.com/heedle-ai/treadle"
 	"github.com/heedle-ai/warp"
@@ -531,14 +534,25 @@ func TestPage(t *testing.T) {
 
 // TestServeForBrowser serves the UI with the fake Temporal, for driving it
 // from a real browser. It runs only when DRAWDOWN_BROWSER_ADDR is set, and
-// keeps serving until DRAWDOWN_BROWSER_DONE (a file path) exists.
+// keeps serving until DRAWDOWN_BROWSER_DONE (a file path) exists. Besides
+// the hello world's commands it has ask, agent and browse, so programs
+// that use them compile and show (the fake runs only the hello world's).
 func TestServeForBrowser(t *testing.T) {
 	addr := os.Getenv("DRAWDOWN_BROWSER_ADDR")
 	if addr == "" {
 		t.Skip("set DRAWDOWN_BROWSER_ADDR to serve the UI for a browser test")
 	}
 	w := newWorld(t)
-	s := &http.Server{Addr: addr, Handler: w.srv.Config.Handler}
+	commands := func() *registry.Registry {
+		reg := shipment.Registry()
+		reg.MustRegister(pirn.BuiltinSpec())
+		reg.MustRegister(pirn.AgentBuiltinSpec())
+		reg.MustRegister(reed.BuiltinSpec())
+		return reg
+	}
+	ui := &drawdown.Server{Skills: &treadle.Library{Store: w.store}, Commands: commands, Store: w.store, Ref: loom.DefaultRef, Registry: commands(),
+		Temporal: w.fake, TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}}
+	s := &http.Server{Addr: addr, Handler: ui.Handler()}
 	go s.ListenAndServe()
 	defer s.Close()
 	os.WriteFile(os.Getenv("DRAWDOWN_BROWSER_SOURCES"), []byte(w.sources), 0o644)
