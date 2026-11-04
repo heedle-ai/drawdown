@@ -424,21 +424,139 @@ const DD = (() => {
     return typeof before === "string" && before.trim() !== "" && before !== written ? before : "";
   }
 
-  // tokens splits a program into strings, parentheses, words and spaces,
-  // keeping every character.
+  // === Programs, as draft reads them ========================================
+  // tokens splits a program as draft's lexer (draft/sexpr) does, rule for
+  // rule and in its order, the first rule to match at a place winning:
+  // comments (";" anywhere, "//" only where a token starts), whitespace
+  // (unicode.IsSpace's), strings (escapes \n \t \r \" \\ only), brackets
+  // and atoms. A string draft can't read (another escape, or no closing
+  // quote) is one "bad" token, so every character is kept and joining the
+  // tokens gives back the program. testdata/tokens.json holds programs
+  // both must split alike (TestInv_TokensAgreeWithDraft, ui/lib.test.js).
+  const SPACE = "\\t\\n\\f\\r \\v\\u0085\\p{Z}";
+  const LEX = new RegExp(
+    `(;[^\\n]*|//[^\\n]*)|([${SPACE}]+)|("(?:\\\\[ntr"\\\\]|[^"\\\\])*")|([()])|([^${SPACE}()";]+)|("(?:[^"\\\\]|\\\\[^])*"?|[^])`, "uy");
+  const TOKEN_KINDS = ["comment", "space", "str", "paren", "word", "bad"];
   function tokens(src) {
     const out = [];
-    const re = /("(?:[^"\\]|\\.)*"?)|([()])|([^\s()"]+)|(\s+)/g;
-    let m;
-    while ((m = re.exec(src))) {
-      if (m[1]) out.push(["str", m[1]]);
-      else if (m[2]) out.push(["paren", m[2]]);
-      else if (m[3]) out.push(["word", m[3]]);
-      else out.push(["space", m[4]]);
+    src = String(src);
+    LEX.lastIndex = 0;
+    while (LEX.lastIndex < src.length) {
+      const m = LEX.exec(src);
+      const i = m.findIndex((g, k) => k > 0 && g !== undefined);
+      out.push([TOKEN_KINDS[i - 1], m[0]]);
     }
     return out;
   }
 
+  // program is a program's tokens with where each sits: start (its offset
+  // in the source), depth (for a bracket, how many forms enclose the one
+  // it opens or closes; for anything else, how many forms enclose it),
+  // partner (a bracket's other half, -1 if it has none) and, inside a
+  // form, its head word and arg (0 for the head, then 1, 2, … for each
+  // form after it). Brackets in strings and comments are text: they
+  // don't count.
+  function program(src) {
+    const out = [];
+    const open = [];
+    let at = 0;
+    for (const [kind, text] of tokens(src)) {
+      const t = { kind, text, start: at, depth: open.length, partner: -1, head: null, arg: -1 };
+      at += text.length;
+      const i = out.length;
+      out.push(t);
+      if (kind === "paren" && text === ")") {
+        if (open.length) {
+          const o = open.pop();
+          t.partner = o.i; out[o.i].partner = i;
+          t.depth = open.length;
+        }
+        continue;
+      }
+      if (kind === "space" || kind === "comment") continue;
+      const form = open[open.length - 1];
+      if (form) {
+        t.arg = form.n++;
+        if (t.arg === 0 && kind === "word") form.head = text;
+        t.head = form.head;
+      }
+      if (kind === "paren") open.push({ i, n: 0, head: null });
+    }
+    return out;
+  }
+
+  // unquote is the text a string token stands for, or null if draft can't
+  // read it.
+  function unquote(text) {
+    if (!/^"(?:\\[ntr"\\]|[^"\\])*"$/u.test(text)) return null;
+    return text.slice(1, -1).replace(/\\([ntr"\\])/g, (_, c) => ({ n: "\n", t: "\t", r: "\r" })[c] || c);
+  }
+
+  // GRANT is an agent step's grant: a connector, or connector/tool (pirn's
+  // connectorName and toolName).
+  const GRANT = /^([a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?)(?:\/([A-Za-z0-9_.-]{1,64}))?$/;
+
+  // grantOf is the connector and tool a program's token grants, if it is
+  // an agent step's grant: a string after its instruction. Else null.
+  function grantOf(t) {
+    if (t.kind !== "str" || t.head !== "agent" || t.arg < 2) return null;
+    const m = GRANT.exec(unquote(t.text) || "");
+    return m ? { connector: m[1], tool: m[2] || "" } : null;
+  }
+
+  // links splits a string's text into pieces, each { text } or, for an
+  // http or https URL, { text, url }. No other scheme is ever a link. A
+  // URL starts a word (the text's start, or after whitespace or an opening
+  // bracket), so "blob:https://…" is no link; it ends at whitespace, a
+  // quote, a backslash or an angle bracket, and leaves off closing
+  // punctuation (a bracket only if it closes nothing).
+  function links(text) {
+    const out = [];
+    const re = /(?<=^|[\s(\[{<'‘“])https?:\/\/[^\s"\\<>]+/giu;
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      let u = m[0];
+      for (;;) {
+        const c = u[u.length - 1];
+        if (/[.,;:!?'’]/.test(c)) u = u.slice(0, -1);
+        else if (c === ")" && (u.match(/\)/g) || []).length > (u.match(/\(/g) || []).length) u = u.slice(0, -1);
+        else if (c === "]" && (u.match(/\]/g) || []).length > (u.match(/\[/g) || []).length) u = u.slice(0, -1);
+        else break;
+      }
+      re.lastIndex = m.index + u.length;
+      let ok = false;
+      try { const p = new URL(u); ok = (p.protocol === "http:" || p.protocol === "https:") && p.hostname !== ""; } catch {}
+      if (!ok) continue;
+      if (m.index > last) out.push({ text: text.slice(last, m.index) });
+      out.push({ text: u, url: u });
+      last = m.index + u.length;
+    }
+    if (last < text.length || !out.length) out.push({ text: text.slice(last) });
+    return out;
+  }
+
+  // FOLD_AT is how long a string grows before it folds to its start,
+  // FOLD_SHOW how much of it shows when folded.
+  const FOLD_AT = 240, FOLD_SHOW = 160;
+
+  // lines splits pieces of text, { text, ... }, at line breaks: the
+  // result is the program's lines, each a list of pieces with no line
+  // break in them, and each line's indent (its leading spaces and tabs,
+  // a tab counted as 2).
+  function lines(pieces) {
+    const out = [[]];
+    for (const p of pieces) {
+      const parts = p.text.split("\n");
+      parts.forEach((t, k) => {
+        if (k > 0) out.push([]);
+        if (t !== "") out[out.length - 1].push({ ...p, text: t });
+      });
+    }
+    return out.map((ps) => {
+      const lead = /^[ \t]*/.exec(ps.map((p) => p.text).join(""))[0];
+      return { pieces: ps, indent: [...lead].reduce((n, c) => n + (c === "\t" ? 2 : 1), 0) };
+    });
+  }
 
   // === Composition ==========================================================
   // A program's shape (draft.Composition): steps, run one after another in
@@ -840,6 +958,6 @@ const DD = (() => {
     return asSchedules(res.data).filter((s) => s.paused && str(s.note) && FAILURE_PAUSE.test(s.note)).length;
   }
 
-  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation };
+  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW };
 })();
 if (typeof module !== "undefined") module.exports = DD;

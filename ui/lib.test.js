@@ -69,6 +69,57 @@ test("program tokens keep every character", () => {
   }
 });
 
+// Roadmap 9.4: the page reads programs as draft does. TestInv_TokensAgreeWithDraft
+// checks testdata/tokens.json against draft's reader; this checks the page.
+test("the page splits every program in testdata/tokens.json as the corpus says", () => {
+  const cases = JSON.parse(require("node:fs").readFileSync(require("node:path").join(__dirname, "../testdata/tokens.json"), "utf8"));
+  assert.ok(cases.length >= 20);
+  for (const c of cases) assert.deepEqual(DD.tokens(c.src), c.tokens, c.name);
+  // Comments are their own tokens, never words and strings (the old tokenizer's mistake).
+  assert.deepEqual(DD.tokens('; a "b" (c)'), [["comment", '; a "b" (c)']]);
+  assert.deepEqual(DD.tokens('x // y "z"'), [["word", "x"], ["space", " "], ["comment", '// y "z"']]);
+});
+
+test("brackets pair by depth; brackets in strings and comments don't count; unmatched ones have no partner", () => {
+  const at = (src) => DD.program(src).filter((t) => t.kind === "paren").map((t) => [t.text, t.depth, t.partner]);
+  const p = DD.program('(pipe (par (echo "(") ; )\n x) echo)');
+  const parens = p.map((t, i) => [t, i]).filter(([t]) => t.kind === "paren");
+  assert.deepEqual(parens.map(([t]) => t.text + t.depth), ["(0", "(1", "(2", ")2", ")1", ")0"]);
+  for (const [t, i] of parens) assert.equal(p[t.partner].partner, i);
+  assert.deepEqual(at("(a))"), [["(", 0, 2], [")", 0, 0], [")", 0, -1]]);
+  assert.deepEqual(at("((a)"), [["(", 0, -1], ["(", 1, 3], [")", 1, 1]]);
+  assert.deepEqual(at(")("), [[")", 0, -1], ["(", 0, -1]]);
+  assert.deepEqual(at('(echo "))" ; )\n)'), [["(", 0, 7], [")", 0, 0]]);
+  // Heads and argument positions: a grant is an agent step's third form or later.
+  const q = DD.program('(agent "go" "maps" "maps/directions" (x) "browse" "Bad!")');
+  const grants = q.map(DD.grantOf).filter(Boolean);
+  assert.deepEqual(grants, [{ connector: "maps", tool: "" }, { connector: "maps", tool: "directions" }, { connector: "browse", tool: "" }]);
+  assert.equal(DD.grantOf(DD.program('(ask "maps")')[3]), null);
+  assert.equal(DD.grantOf(DD.program('(agent "maps")')[3]), null, "the instruction is not a grant");
+});
+
+test("only http and https URLs become links; every other scheme stays text", () => {
+  const urls = (s) => DD.links(s).filter((p) => p.url).map((p) => p.url);
+  for (const hostile of ["javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,<script>x</script>", "vbscript:x", "file:///etc/passwd",
+    "//evil.example/x", "http://", "https://", "java\tscript:alert(1)", "ftp://x.org/", "blob:https://x.org/1", "mailto:a@b.c"]) {
+    assert.deepEqual(urls(hostile), [], hostile);
+    assert.equal(DD.links(hostile).map((p) => p.text).join(""), hostile);
+  }
+  assert.deepEqual(urls("see https://a.org/x_(y). Then HTTP://B.io/q?a=1, done"), ["https://a.org/x_(y)", "HTTP://B.io/q?a=1"]);
+  assert.deepEqual(urls("javascript:alert(1)//https://x.org/"), [], "a URL starts a word");
+  assert.deepEqual(urls("(https://x.org/a) 'https://y.org/'"), ["https://x.org/a", "https://y.org/"]);
+  assert.deepEqual(urls('https://x.org/a"onmouseover=alert(1)'), ["https://x.org/a"]);
+  for (const s of ["a https://x.org/ b", "(https://x.org/a)", "", "plain"]) assert.equal(DD.links(s).map((p) => p.text).join(""), s);
+});
+
+test("lines split pieces at line breaks and measure each line's indent", () => {
+  const l = DD.lines([{ text: "(pipe\n  (a" }, { text: " \"b\nc\")", k: 1 }, { text: "\n\t(x)" }]);
+  assert.deepEqual(l.map((x) => [x.pieces.map((p) => p.text).join(""), x.indent]), [["(pipe", 0], ['  (a "b', 2], ['c")', 0], ["\t(x)", 2]]);
+  assert.equal(l[1].pieces[1].k, 1);
+  assert.equal(DD.unquote('"a\\n\\"b"'), 'a\n"b');
+  assert.equal(DD.unquote('"a\\q"'), null);
+});
+
 const agentJSON = (over) => JSON.stringify(Object.assign({ pirn: 1, agent: 1, model: "claude-sonnet-5-5", text: "Done.", image: "abc", turns: 2,
   commands: [{ command: "ls", exitCode: 0, stdout: "a", ms: 5 }, { command: "false", exitCode: 1, ms: 2 }],
   files: [{ path: "out.txt", size: 2, text: "hi" }], changes: [{ kind: "added", path: "/work/out/out.txt" }], inputs: { n0: "in/n0.txt" },
@@ -601,4 +652,14 @@ test("the top bar counts only from answers it understands (DRAW-69)", () => {
   assert.equal(DD.keysToSet(ok({ file: "/c.json", anthropic: key("ANTHROPIC_API_KEY", "missing"), connectors: "x" })), null);
   assert.equal(DD.schedulesStopped(ok({ schedules: "not a list" })), null);
   assert.equal(DD.schedulesStopped(ok({})), null);
+});
+
+test("the page's keyboard shortcuts never fire while typing in the program editor", () => {
+  // Roadmap 9.4: the editor is contenteditable (CodeMirror), so "+" typed
+  // into a program zoomed the graph while the check named only inputs and
+  // textareas.
+  const app = require("node:fs").readFileSync(require("node:path").join(__dirname, "../static/app.js"), "utf8");
+  const checks = app.match(/closest\("[^"]*textarea[^"]*"\)/g) || [];
+  assert.ok(checks.length >= 2);
+  for (const c of checks) assert.match(c, /\[contenteditable\]/, c);
 });
