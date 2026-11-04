@@ -122,7 +122,9 @@ const ownAbout = (cmds, name) => (Object.prototype.hasOwnProperty.call(cmds.abou
 // pointing at a bracket redraws only the lines of its form (review 38).
 const ProgramLine = React.memo(function ProgramLine({ line, toks, cmds, open, toggle, lo, hi }) {
   const word = (t, p, k, cls) => {
-    if (cls === "sk") {
+    // A skill's name is a link wherever it is, inside the form a bracket
+    // points at too ("sk in"; found making the video: it lost its link).
+    if (cls.split(" ")[0] === "sk") {
       const about = cmds.skills.get(t.text);
       return html`<${Tip} tag="a" key=${k} class="sk" href=${"#/skill/" + encodeURIComponent(t.text)}
         content=${html`<${Card} title=${html`<${KindPill} kind="skill">${t.text}<//>`}><${Field} k="Skill">${about || "A skill you added."}<//><//>`}>${p.text}<//>`;
