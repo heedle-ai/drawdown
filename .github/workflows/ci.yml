@@ -75,6 +75,10 @@ jobs:
       - name: invariants
         working-directory: drawdown
         run: bash .github/invariants.sh
+      - uses: actions/setup-node@v4     # the ui and topbar steps: Node 22, as Contributing says (review 37)
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          node-version: 22
       - name: ui
         # The page's pure logic (static/lib.js), with Node's own test runner.
         if: matrix.os == 'ubuntu-latest'
