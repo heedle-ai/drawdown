@@ -53,7 +53,7 @@ test.after(async () => {
   fs.rmSync(work, { recursive: true, force: true });
 });
 
-async function page({ program, ask, width = 1280 } = {}) {
+async function page({ program, ask, info, width = 1280 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 } });
   await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
   await ctx.route(/^https:\/\/cdn\.jsdelivr\.net\/npm\//, (r) => {
@@ -61,6 +61,7 @@ async function page({ program, ask, width = 1280 } = {}) {
     const f = path.join(unpack(m[1]), m[2]);
     r.fulfill({ path: f, headers: { "access-control-allow-origin": "*", "content-type": f.endsWith(".css") ? "text/css" : "application/javascript" } });
   });
+  if (info) await ctx.route("**/api/info", async (r) => { const res = await r.fetch(); r.fulfill({ response: res, json: { ...(await res.json()), ...info } }); });
   if (ask) await ctx.route("**/api/ask", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify(ask) }));
   if (program !== undefined) await ctx.addInitScript((p) => { try { if (!sessionStorage.getItem("t")) { localStorage.setItem("drawdown.program", p); sessionStorage.setItem("t", "1"); } } catch {} }, program);
   const p = await ctx.newPage();
@@ -151,6 +152,27 @@ test("Copy gives the exact program, whatever is folded", async () => {
   assert.ok((await view.textContent()).includes(long));
   await card.getByRole("button", { name: "Copy" }).click();
   assert.equal(await p.evaluate(() => navigator.clipboard.readText()), program);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("pointing at a bracket keeps the links inside its form", async () => {
+  // Found making the video: inside the pointed-at form a skill's name
+  // ("sk in") lost its link.
+  const program = '(pipe (trip-planner "Lisbon") (agent "plan" "maps") (browse "https://a.example.org/x"))';
+  const plan = await (await fetch(BASE + "/api/compile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program: '(agent "x")' }) })).json();
+  const { p, ctx, errors } = await page({ ask: { summary: "A test.", program, plan: plan.plan }, info: { skills: ["trip-planner"] } });
+  await p.locator(".front-row input").fill("anything");
+  await p.getByRole("button", { name: "Ask", exact: true }).click();
+  const view = p.locator(".proposal pre.prog").first();
+  await view.waitFor();
+  const links = () => view.locator("a").evaluateAll((as) => as.map((a) => ["sk", "grant", "url"].find((c) => a.classList.contains(c)) + " " + a.getAttribute("href")).sort());
+  const want = ["grant #/connectors", "sk #/skill/trip-planner", "url https://a.example.org/x"];
+  assert.deepEqual(await links(), want);
+  await view.locator(".p.d0").first().hover();
+  await p.waitForTimeout(200);
+  assert.ok(await view.locator(".in").count(), "the form is lit");
+  assert.deepEqual(await links(), want);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
