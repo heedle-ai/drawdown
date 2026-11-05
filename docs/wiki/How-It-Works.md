@@ -65,16 +65,16 @@ Requests are limited to 1 MB, and unknown JSON fields and trailing data are reje
 
 ## The top bar
 
-[[/images/top-bar.png|alt=drawdown's top bar: the brand and the history picker on the left; Runs (underlined in blue, the current section), Skills with a count of 1, Schedules with 2, Connectors with 2 and Memory on the right; then Temporal with an arrow, set apart by a thin line]]
+[[/images/top-bar.png|alt=drawdown's top bar: the brand and the history picker on the left; Runs (underlined in blue, the current section), Skills with a count of 1, Schedules with 3, Costs, Connectors with 2, Memory and System on the right; then Temporal with an arrow, set apart by a thin line]]
 
-The header holds the brand and the **history** picker (or, on an agent's page, its name) on the left, and on the right drawdown's six sections: **Runs** (the home page), **Skills**, **Schedules**, **Connectors**, **Memory** and **System**. Each is an ordinary link to its page (`#/`, `#/skills`, `#/schedules`, `#/connectors`, `#/memory`, `#/system`). Memory has no count: nothing there waits for you. On a phone the sections wrap onto a second row rather than scroll sideways. The section you're in is underlined with a thread in its own colour and marked `aria-current="page"`; a page inside a section counts as that section, so a skill's page (`#/skill/…`) and a review (`#/review/…`) are Skills, and a run, a step, a diff and an agent's page are Runs. Which page a route shows and which section it's in both come from `lib.js`'s `page`, so they can't disagree; anything no page takes shows the home page, which is Runs.
+The header holds the brand and the **history** picker (or, on an agent's page, its name) on the left, and on the right drawdown's seven sections: **Runs** (the home page), **Skills**, **Schedules**, **Costs**, **Connectors**, **Memory** and **System**. Each is an ordinary link to its page (`#/`, `#/skills`, `#/schedules`, `#/costs`, `#/connectors`, `#/memory`, `#/system`). Memory has no count: nothing there waits for you. On a phone the sections wrap onto a second row rather than scroll sideways. The section you're in is underlined with a thread in its own colour and marked `aria-current="page"`; a page inside a section counts as that section, so a skill's page (`#/skill/…`) and a review (`#/review/…`) are Skills, and a run, a step, a diff and an agent's page are Runs. Which page a route shows and which section it's in both come from `lib.js`'s `page`, so they can't disagree; anything no page takes shows the home page, which is Runs.
 
 A small count beside a section says how many things there need you:
 
 | Beside | Counts | Read from |
 |---|---|---|
 | Skills | skills waiting for review | `GET /api/skills` (`skillsWaiting`) |
-| Schedules | schedules paused after a run failed or timed out: Temporal's own notes for that pause, not one from heedle or anywhere else | `GET /api/schedules` (`schedulesStopped`) |
+| Schedules | schedules paused after a run failed or timed out (Temporal's own notes for that pause), or by their monthly budget (loom's note, `BUDGET_PAUSE`); not a pause from heedle or anywhere else | `GET /api/schedules` (`schedulesStopped`) |
 | Connectors | keys set nowhere, Claude's included, as the Connectors page counts them. A sign-in keeps its token as one of the connector's keys, so a connector signed in to counts once its token is gone; one whose sign-in has expired still has its token, so it isn't counted until a step finds the token can't be refreshed and says to sign in again | `GET /api/connectors` (`keysToSet`) |
 
 The bar asks once when the page loads and again whenever the route changes, never on a timer. When the Skills, Schedules or Connectors page loads its own answer, after an approval, a resumed schedule or a saved key too, it hands the bar that same answer, so the count beside it always agrees with the page. A screen reader reads each section with its count once, such as "Skills (1 waiting for review)". A count is shown only from an answer that is well formed; a request that fails, or an answer that isn't understood, shows no count, and nothing in the bar says so: the section's own page says what's wrong.
@@ -224,6 +224,21 @@ drawdown's own worker (`-worker`) takes the same `-connectors FILE` as `loom wor
 - **Podman's machine**, on a Mac: its CPUs, memory and disk, with a note for each thing browser agents lack (at least 2 CPUs and 4 GiB of memory), and the `podman machine set` command that fixes it.
 
 A running run's own page offers **Cancel run** too, through the same API. Containers, images and the machine come from Podman through bobbin, and runs from Temporal through loom; a part Podman or Temporal couldn't give says why. The System API acts only from this machine, as keys are set: a request through a proxy or from another address, or to a server given `-hosts`, gets 403 before anything is asked. A page served elsewhere says so. CI's `system` step checks the page in Chromium (`ui/system.check.js`). It checks what the page shows and what its buttons send, and only after asking, at 375 and 1280 px in light and dark mode.
+
+[[/images/schedule-budget.png|alt=A schedule paused by its budget: the note "paused: monthly budget $0.01 reached (est.) in November 2026", its program, this month's estimate of one run against a $0.01 budget and the last 30 days, the budget field with "resume in a new month", Save and Remove, and its recent runs]]
+
+Each schedule also shows what it used this month, in its own time zone (as its budget counts it), and in the last 30 days, with an estimate in dollars, and its **monthly budget**, which you set, change or **Remove** there (`POST /api/schedules/{name}/budget` with `{"usd": 5, "resumeNextMonth": true}`, through Temporal: [loom → Costs and budgets](https://github.com/heedle-ai/loom/wiki/How-It-Works#costs-and-budgets)). Before a scheduled run starts any step, the worker adds up the month; at or over the budget the run starts nothing and the schedule is paused, saying so, and the run's page says "Not run: …" instead of waiting for a record. Raising the budget resumes it; **resume in a new month** resumes it when the month turns. A budget can't stop a run already going.
+
+## Costs
+
+[[/images/costs.png|alt=The Costs page: November 2026 at $0.01 est., by model (claude-sonnet-5-5, one run, its input and output tokens and estimate), the six months before, and the costliest run this month; the price table's date and a link to Anthropic's pricing]]
+
+Every Claude step's record has its model and tokens, as Claude counted them, so drawdown shows them as they are, and estimates dollars with loom's price table (built in, of 2026-11-05, from [Anthropic's pricing](https://platform.claude.com/docs/en/about-claude/pricing); your prices file, `-prices`, beside `-connectors` by default, overrides models one by one). Every dollar figure says "est."; one that covers a step whose model has no price is never shown as a whole: the page shows the priced part and how many steps have no price, or "no estimate", and the step's tokens. heedle isn't connected to your Anthropic account.
+
+- **A run's page** has **Claude usage**: each Claude step (ask, agent, act, skill) with its model, input and output tokens and requests, the total, and the estimate (`usage` in `GET /api/runs/{workflow}/{run}`).
+
+  [[/images/run-costs.png|alt=Claude usage on the Lisbon trip's run page: n0, an ask, and n1, an agent of six requests, both claude-sonnet-5-5, with their tokens, the total and $0.07 est.]]
+- **Costs** in the top bar (`#/costs`, `GET /api/costs?tz=ZONE&month=YYYY-MM`) has this month and the six before it by model, in your browser's time zone, the month's costliest runs and schedules, and the price table's date. The front door's own asks aren't recorded, so they aren't on it: each proposal card says what proposing used.
 
 ## Connectors
 

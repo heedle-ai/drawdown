@@ -589,7 +589,7 @@ test("every route the app shows is one page in one section (DRAW-68)", () => {
   const cases2 = {
     "": "runs", "agent/refs/loom/main": "runs", "run/w/r": "runs", "step/w/r/n0": "runs", "diff/a/b": "runs",
     skills: "skills", "skill/pdf": "skills", "skill/pdf/abc": "skills", "review/pdf": "skills",
-    schedules: "schedules", connectors: "connectors", memory: "memory",
+    schedules: "schedules", costs: "costs", connectors: "connectors", memory: "memory",
   };
   for (const [hash, section] of Object.entries(cases2)) assert.equal(DD.page(hash.split("/")).section, section, hash);
   assert.deepEqual(DD.page(["agent", "refs/loom/main"]), { name: "agent", section: "runs" });
@@ -842,4 +842,47 @@ test("memory: the page's answer, the card's suggestions and its used line (roadm
   assert.equal(DD.usedMemory(["m0123456789ab", "m0123456789ac", "m0123456789ad"]), "Used 3 things heedle remembers");
   assert.deepEqual(DD.page(["memory"]), { name: "memory", section: "memory" });
   assert.deepEqual(DD.page(["memory", "x"]), { name: "home", section: "runs" });
+});
+
+// Roadmap 10.4: tokens are what the records say; a dollar figure only
+// where every step it covers had a price.
+test("costs show a dollar figure only where every step had a price", () => {
+  const sp = (usd, priced, unpriced = []) => ({ runs: 1, tokens: { input: 10, output: 2 }, usd, priced, unpriced });
+  const none = { node: "n2", model: "claude-mythos-5-1", tokens: { input: 9000, output: 700 }, why: "no price for claude-mythos-5-1" };
+  assert.equal(DD.estimate(sp(0.0312, 0.0312)), "$0.03 est.");
+  assert.equal(DD.estimate(sp(0.001, 0.001)), "<$0.01 est.");
+  assert.equal(DD.estimate(sp(null, 0.12, [none])), "$0.12 est. + 1 step with no price");
+  assert.equal(DD.estimate(sp(null, 0, [none, none])), "no estimate (no price)");
+  assert.equal(DD.count(1234567), "1,234,567");
+
+  const costs = { zone: "Europe/Lisbon", asOf: "2026-11-05", source: "https://platform.claude.com/docs/en/about-claude/pricing",
+    months: [{ month: "2026-11", ...sp(null, 0.12, [none]), byModel: [{ model: "claude-sonnet-5-5", ...sp(0.12, 0.12) }, { model: "claude-mythos-5-1", ...sp(null, 0, [none]) }] }],
+    runs: [{ workflowId: "loom-a", runId: "r1", at: "2026-11-05T09:00:00Z", ...sp(null, 0.12, [none]) }], schedules: [{ name: "news", ...sp(0.03, 0.03) }] };
+  assert.ok(DD.asCosts(costs));
+  for (const bad of [{ ...costs, months: [{ ...costs.months[0], usd: "0.12" }] }, { ...costs, runs: [{ ...costs.runs[0], runId: "a b" }] },
+    { ...costs, schedules: [{ name: "Bad Name", ...sp(1, 1) }] }, { ...costs, asOf: undefined }, { ...costs, months: [{ ...costs.months[0], unpriced: [{ node: "n" }] }] }]) {
+    assert.equal(DD.asCosts(bad), null, JSON.stringify(bad).slice(0, 120));
+  }
+  const usage = { steps: [{ node: "n0", kind: "ask", model: "claude-sonnet-5-5", tokens: { input: 5, output: 1 }, requests: 1 }, { node: "n1", kind: "agent", tokens: { input: 0, output: 0 }, missing: "no counts" }],
+    total: { input: 5, output: 1 }, cost: { usd: 0.00002, byModel: {}, unpriced: [{ node: "n1", tokens: { input: 0, output: 0 }, why: "no counts" }], complete: false, asOf: "2026-11-05", source: "https://x" } };
+  assert.ok(DD.asRunUsage(usage));
+  assert.equal(DD.asRunUsage({ ...usage, steps: [{ node: "n0", kind: "ask", tokens: { input: -1, output: 0 } }] }), null);
+  assert.equal(DD.asRunUsage({ ...usage, cost: { ...usage.cost, complete: "no" } }), null);
+  assert.deepEqual(DD.asSpend({ spend: { news: { month: sp(0.03, 0.03), last30: sp(0.05, 0.05) }, bad: { month: sp(1, 1) } } }), { news: { month: sp(0.03, 0.03), last30: sp(0.05, 0.05) } });
+  assert.deepEqual(DD.asStepUsages({ steps: usage.steps }), usage.steps);
+  assert.deepEqual(DD.asStepUsages({ steps: [{ node: 1 }] }), []);
+});
+
+test("a schedule its budget paused is counted, and its budget read (roadmap 10.4)", () => {
+  const ok = (data) => ({ ok: true, status: 200, data });
+  const sched = (name, note, budget) => ({ name, program: "(echo)", ref: "refs/loom/main", spec: { every: 6e10 }, paused: true, note, next: [], recent: [], budget });
+  const all = [
+    sched("a", "paused: monthly budget $5.00 reached (est.) in November 2026", { usd: 5 }),
+    sched("b", "paused: monthly budget $100.00 can't be checked in November 2026: 1 of its steps this month have no estimate", { usd: 100, resumeNextMonth: true }),
+    sched("c", "paused: monthly budget reached", { usd: 5 }),
+    sched("d", "resumed: monthly budget changed to $10.00", undefined),
+  ];
+  assert.equal(DD.schedulesStopped(ok({ schedules: all })), 2);
+  assert.deepEqual(DD.asSchedules({ schedules: all }).map((s) => s.name), ["a", "b", "c", "d"]);
+  assert.deepEqual(DD.asSchedules({ schedules: [sched("e", "", { usd: -1 }), sched("f", "", { usd: "5" }), sched("g", "", { usd: 5, resumeNextMonth: "yes" })] }), []);
 });

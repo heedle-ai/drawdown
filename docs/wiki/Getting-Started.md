@@ -47,6 +47,7 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 | `-agent-image` | none | A content-pinned image ID with `/bin/sh` that [agent steps](https://github.com/heedle-ai/pirn/wiki/How-It-Works#agent-steps) run in. Without it, `agent` steps fail with `AgentSetup` |
 | `-image-registry` | none | An OCI repository, such as `ghcr.io/acme/heedle-images`, that `(image "<Containerfile>" "push")` pushes to, with the worker's own `podman login`; see [bobbin → Image builds](https://github.com/heedle-ai/bobbin/wiki/How-It-Works#image-builds). Without it, such steps fail with `ImageSetup`; builds without `"push"` still work |
 | `-agent-registry` | none | An OCI repository, such as `ghcr.io/acme/heedle-files`, where agent files too big for the record are kept, pushed with `oras` and the worker's own login; see [pirn → Large files](https://github.com/heedle-ai/pirn/wiki/How-It-Works#large-files). Without it, they're listed as skipped |
+| `-prices` | `prices.json` beside `-connectors`, if given | Your prices file, overriding the built-in Claude prices model by model (USD per million tokens) for the estimates on the run, Schedules and Costs pages and for schedules' budgets; a file that can't be used is said and the built-in prices are used ([loom → Costs and budgets](https://github.com/heedle-ai/loom/wiki/How-It-Works#costs-and-budgets)) |
 | `-connectors` | none | A JSON file of the MCP servers agent steps may be granted, with tokens named by environment variable; see [pirn → Connectors](https://github.com/heedle-ai/pirn/wiki/How-It-Works#connectors). Without it, a step that asks for a connector fails with `AgentSetup` |
 | `-keep-images` | none | The images heedle's release pins, comma-separated (`heedle up` gives them). The System page never removes them, or the worker's own images (`-browser-image`, `-agent-image`, `-browser-agent-image`), and removes no image without them |
 | `-sources` | loom's `examples/hello/sources` | Folder the `source` command reads |
@@ -101,6 +102,18 @@ ANTHROPIC_API_KEY=sk-ant-... go run ./cmd/drawdown -store ~/heedle-store.git -me
 ```
 
 Ask heedle *Plan a weekend in Porto, I'm vegetarian*. The card suggests remembering that you're vegetarian, with **Remember** and **Not now**; nothing is remembered until you press **Remember**. Ask *Plan three days in Lisbon* next, and its card says **Used 1 thing heedle remembers**. **Memory** in the top bar shows everything remembered, word for word, to edit or forget. Without the UI, the same file is `heedle memory -memory ~/heedle-memory.json` ([loom → Getting Started](https://github.com/heedle-ai/loom/wiki/Getting-Started#6-what-heedle-remembers)).
+
+## See what it costs
+
+Open **Costs** in the top bar for this month's Claude usage by model, and a run's page for its tokens per step. To correct a price, write the models you want to change to a prices file and give it with `-prices` (`heedle up` uses `~/.heedle/prices.json`, beside its connectors file):
+
+```bash
+mkdir -p ~/.heedle
+printf '{"models": {"claude-sonnet-5-5": {"input": 2, "output": 10}}}\n' > ~/.heedle/prices.json
+go run ./cmd/drawdown -store ~/heedle-store.git -prices ~/.heedle/prices.json
+```
+
+A schedule's monthly budget is set on the Schedules page.
 
 ## Your own programs
 

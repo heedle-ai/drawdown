@@ -66,6 +66,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	connectorsFile := fs.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by name: an environment variable, or a keychain secret set with `heedle secret set NAME`)")
 	imageRegistry := fs.String("image-registry", "", "OCI repository (such as ghcr.io/acme/heedle-images) that (image … \"push\") pushes to, with the worker's podman login")
 	keepImages := fs.String("keep-images", "", "the images heedle's release pins, comma-separated (heedle up gives them): the System page never removes them or the worker's own, and removes none without them")
+	pricesFile := fs.String("prices", "", "your prices file, overriding the built-in prices model by model (USD per million tokens; default: prices.json beside -connectors)")
 	agentRegistry := fs.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
 	memoryFile := fs.String("memory", "", "the file of what heedle remembers about you, sent to Claude with every request to the front door (default: memory.json beside the -connectors file, if given)")
 	if err := fs.Parse(args); err != nil {
@@ -79,6 +80,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	if *store == "" {
 		return errors.New("give -store DIR, e.g. -store ~/heedle-store.git")
 	}
+	*pricesFile = pricesPath(*pricesFile, *connectorsFile)
 
 	s, err := warp.Init(ctx, *store)
 	if err != nil {
@@ -161,7 +163,10 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		}
 		loom.RegisterWith(w, &loom.Checker{Registry: reg, RegistryFor: func(ctx context.Context, p plan.Plan) (*registry.Registry, error) {
 			return lib.Pinned(ctx, commands(), p)
-		}}, &loom.Recorder{Store: s, Uses: lib.Uses})
+		}}, &loom.Recorder{Store: s, Uses: lib.Uses, Schedules: loom.TemporalSchedules{Client: c}, PricesFile: *pricesFile})
+		if _, err := loom.ReadPrices(*pricesFile); err != nil {
+			log.Print(err)
+		}
 		// Skills change only through a workflow on this worker (drawdown never
 		// writes), never through a program.
 		loom.RegisterSkills(w, loom.Skills{Library: lib, Create: creator(agent)})
@@ -219,6 +224,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		Connectors:     func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) },
 		ConnectorsFile: *connectorsFile,
 		MemoryFile:     *memoryFile,
+		PricesFile:     *pricesFile,
 		Secrets:        vault,
 		StepKeys:       stepKeys,
 		Agents:         *agentImage != "",
@@ -339,4 +345,13 @@ func kept(list string, worker ...string) []string {
 		}
 	}
 	return out
+}
+
+// pricesPath is the prices file: the one given, else prices.json beside
+// the connectors file, else none (the built-in prices).
+func pricesPath(prices, connectors string) string {
+	if prices == "" && connectors != "" {
+		return filepath.Join(filepath.Dir(connectors), "prices.json")
+	}
+	return prices
 }
