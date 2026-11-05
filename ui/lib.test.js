@@ -776,9 +776,11 @@ test("costs show a dollar figure only where every step had a price", () => {
   const none = { node: "n2", model: "claude-mythos-5-1", tokens: { input: 9000, output: 700 }, why: "no price for claude-mythos-5-1" };
   assert.equal(DD.estimate(sp(0.0312, 0.0312)), "$0.03 est.");
   assert.equal(DD.estimate(sp(0.001, 0.001)), "<$0.01 est.");
-  assert.equal(DD.estimate(sp(null, 0.12, [none])), "$0.12 est. + 1 step with no price");
-  assert.equal(DD.estimate(sp(null, 0, [none, none])), "no estimate (no price)");
+  assert.equal(DD.estimate(sp(null, 0.12, [none])), "$0.12 est. + 1 step with no estimate");
+  assert.equal(DD.estimate(sp(null, 0, [none, none])), "no estimate");
   assert.equal(DD.count(1234567), "1,234,567");
+  // A step that can only be bounded, as a budget counts it (review 48).
+  assert.equal(DD.estimate({ ...sp(null, 0.03, [none]), atMost: 0.114 }), "at most $0.11 est.");
 
   const costs = { zone: "Europe/Lisbon", asOf: "2026-11-05", source: "https://platform.claude.com/docs/en/about-claude/pricing",
     months: [{ month: "2026-11", ...sp(null, 0.12, [none]), byModel: [{ model: "claude-sonnet-5-5", ...sp(0.12, 0.12) }, { model: "claude-mythos-5-1", ...sp(null, 0, [none]) }] }],
@@ -807,10 +809,11 @@ test("a schedule its budget paused is counted, and its budget read (roadmap 10.4
   const all = [
     sched("a", "paused: monthly budget $5.00 reached (est.) in November 2026", { usd: 5 }),
     sched("b", "paused: monthly budget $100.00 can't be checked in November 2026: 1 of its steps this month have no estimate", { usd: 100, resumeNextMonth: true }),
+    sched("e", "paused: monthly budget $0.10 reached (at most $0.11, est.) in November 2026", { usd: 0.1 }),
     sched("c", "paused: monthly budget reached", { usd: 5 }),
     sched("d", "resumed: monthly budget changed to $10.00", undefined),
   ];
-  assert.equal(DD.schedulesStopped(ok({ schedules: all })), 2);
-  assert.deepEqual(DD.asSchedules({ schedules: all }).map((s) => s.name), ["a", "b", "c", "d"]);
+  assert.equal(DD.schedulesStopped(ok({ schedules: all })), 3);
+  assert.deepEqual(DD.asSchedules({ schedules: all }).map((s) => s.name), ["a", "b", "e", "c", "d"]);
   assert.deepEqual(DD.asSchedules({ schedules: [sched("e", "", { usd: -1 }), sched("f", "", { usd: "5" }), sched("g", "", { usd: 5, resumeNextMonth: "yes" })] }), []);
 });
