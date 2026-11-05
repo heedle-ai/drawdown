@@ -31,14 +31,26 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), loom.AskTimeout+90*time.Second)
 	defer cancel()
 	out, err := s.Temporal.Ask(ctx, req)
+	var hosts []string
+	if out.Plan != nil {
+		hosts = loom.ActHosts(*out.Plan)
+	}
 	switch {
 	case errors.Is(err, warp.ErrInvalid) || errors.Is(err, pirn.ErrInvalid) || errors.Is(err, loom.ErrNoProgram):
 		writeJSON(w, http.StatusUnprocessableEntity, apiError{Error: err.Error()})
 	case err != nil:
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
 	default:
-		writeJSON(w, http.StatusOK, out)
+		writeJSON(w, http.StatusOK, proposal{Proposal: out, ActHosts: hosts})
 	}
+}
+
+// proposal is a proposal as the page gets it: with the hosts its act steps
+// may click, type and submit forms on without asking again (loom.ActHosts),
+// for the card to disclose before Run (roadmap 9.5).
+type proposal struct {
+	loom.Proposal
+	ActHosts []string `json:"actHosts,omitempty"`
 }
 
 // ready says whether a program can run now, as loom.CheckReady does on a
@@ -70,7 +82,7 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	if skills == nil {
 		skills = noSkills{}
 	}
-	out, err := loom.CheckReady(r.Context(), p, skills, loom.Worker{Connectors: cs, Keys: v, Agents: s.Agents, Browsers: s.Browsers})
+	out, err := loom.CheckReady(r.Context(), p, skills, loom.Worker{Connectors: cs, Keys: v, Agents: s.Agents, Browsers: s.Browsers, BrowserAgents: s.BrowserAgents})
 	if err != nil {
 		out = loom.Readiness{Needs: []pirn.Need{}, Error: err.Error()}
 	}

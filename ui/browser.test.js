@@ -287,3 +287,86 @@ test("a command inserted before the editor is clicked goes after the program", a
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+// Roadmap 9.5: an act step's proposal says, in red, where it may act
+// without asking again, before Run.
+test("a proposal with act steps discloses their hosts in red before Run", async () => {
+  const program = '(act "Join the volunteer list as Ada" "https://forms.example.org/volunteer" "cdn.example.org")';
+  const plan = { nodes: [{ id: "n0", activity: "Act", args: ["Join the volunteer list as Ada", "https://forms.example.org/volunteer", "cdn.example.org"] }] };
+  const { p, ctx, errors } = await page({ ask: { summary: "I'll put you on the volunteer list.", program, plan, actHosts: ["cdn.example.org", "forms.example.org"],
+    ready: { needs: [], browserAgent: "this worker has no browser-agent image, so it can't run act steps: give heedle up -- -browser-agent-image ID", ready: false } } });
+  await p.locator(".front-row input").fill("Sign me up as a volunteer");
+  await p.getByRole("button", { name: "Ask", exact: true }).click();
+  const note = p.locator(".proposal .acts");
+  await note.waitFor();
+  assert.equal(await note.textContent(), "Its act steps can click, type and submit forms on cdn.example.org, forms.example.org without asking again.");
+  const [color, bad] = await note.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(document.documentElement).getPropertyValue("--bad").trim()]);
+  const rgb = (h) => `rgb(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
+  assert.equal(color, rgb(bad));
+  // The disclosure comes before Run, and Run waits for the image.
+  const before = await p.evaluate(() => {
+    const acts = document.querySelector(".proposal .acts"), run = [...document.querySelectorAll(".proposal button")].find((b) => b.textContent === "Run it now");
+    return !!run && !!(acts.compareDocumentPosition(run) & Node.DOCUMENT_POSITION_FOLLOWING) && run.disabled;
+  });
+  assert.ok(before);
+  // The card checks again with the server: no browser-agent image here.
+  await p.locator(".needs li.missing", { hasText: "-browser-agent-image" }).waitFor();
+  assert.equal(await p.locator(".needs li.missing .mono").first().textContent(), "Act steps");
+  if (process.env.DRAWDOWN_SHOTS) await p.locator(".proposal").first().screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, "act-card.png") });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// Roadmap 9.5: a run's act step shows every action, in order, with the
+// page it left and a screenshot of it.
+test("an act step's page shows its actions in order, each with its screenshot", async () => {
+  const sub = await (await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program: '(echo "x")' }) })).json();
+  const detailURL = `/api/runs/${encodeURIComponent(sub.workflowId)}/${encodeURIComponent(sub.runId)}`;
+  for (let i = 0; ; i++) {
+    const d = await (await fetch(BASE + detailURL)).json();
+    if (d.record) break;
+    if (i > 100) throw new Error("the run wasn't recorded");
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const shotPage = await browser.newPage({ viewport: { width: 320, height: 200 } });
+  await shotPage.setContent('<body style="margin:0;background:#e9f0fb;font:20px sans-serif"><p style="padding:20px">Volunteer form</p></body>');
+  const jpeg = "data:image/jpeg;base64," + (await shotPage.screenshot({ type: "jpeg", quality: 40 })).toString("base64");
+  await shotPage.close();
+  const act = {
+    pirn: 1, model: "claude-sonnet-5-5", text: "You're on the volunteer list.\nResult: finished", stopReason: "end_turn", inputTokens: 900, outputTokens: 60,
+    act: 1, image: "sha256:" + "b".repeat(64), turns: 4,
+    calls: [
+      { tool: "browser_navigate", input: '{"url":"https://forms.example.org/volunteer"}', output: "ok", url: "https://forms.example.org/volunteer", screenshot: jpeg },
+      { tool: "browser_snapshot", input: "{}", output: '- textbox "Name" [ref=e2]', url: "https://forms.example.org/volunteer" },
+      { tool: "browser_type", input: '{"target":"e2","text":"Ada"}', output: "ok", url: "https://forms.example.org/volunteer", screenshot: jpeg },
+      { tool: "browser_click", input: '{"target":"e5"}', output: "ok", url: "https://forms.example.org/volunteer/done", screenshot: jpeg },
+    ],
+    url: "https://forms.example.org/volunteer/done", allowed: ["forms.example.org"], blocked: ["https://elsewhere.example.org/pixel"], blockedTotal: 1, inputs: [], ended: "finished",
+  };
+  const { p, ctx, errors } = await page({});
+  await ctx.route("**" + detailURL + "*", async (r) => {
+    const res = await r.fetch(), d = await res.json();
+    d.record.plan.nodes = [{ id: "n0", activity: "Act", args: ["Join the volunteer list as Ada", "https://forms.example.org/volunteer"] }];
+    d.record.outputs = { n0: JSON.stringify(act) };
+    r.fulfill({ response: res, json: d });
+  });
+  await p.goto(BASE + "/#/step/" + [sub.workflowId, sub.runId, "n0"].map(encodeURIComponent).join("/"));
+  const steps = p.getByRole("list", { name: "Actions" });
+  await steps.waitFor();
+  assert.deepEqual(await steps.locator(".act-head code").allTextContents(), ["navigate", "snapshot", "type", "click"]);
+  assert.equal(await steps.locator("img.act-shot").count(), 3);
+  await p.waitForFunction(() => [...document.querySelectorAll("img.act-shot")].every((i) => i.complete && i.naturalWidth === 320));
+  await p.getByText("Claude finished").first().waitFor();
+  // act's own dye, on the timeline and the step's pill.
+  const dye = await p.evaluate(() => {
+    const act = getComputedStyle(document.documentElement).getPropertyValue("--act").trim();
+    const probe = document.createElement("i"); probe.style.color = act; document.body.append(probe);
+    const want = getComputedStyle(probe).color; probe.remove();
+    return { act, want, line: getComputedStyle(document.querySelector(".act-steps li")).borderLeftColor, pill: getComputedStyle(document.querySelector(".pill.k-act")).getPropertyValue("--c").trim() };
+  });
+  assert.equal(dye.line, dye.want);
+  assert.equal(dye.pill, dye.act);
+  if (process.env.DRAWDOWN_SHOTS) await p.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, "act-run.png"), fullPage: true });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

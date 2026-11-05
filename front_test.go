@@ -8,6 +8,7 @@ import (
 	"github.com/heedle-ai/draft/registry"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
+	"github.com/heedle-ai/pirn"
 )
 
 // TestInv_AskRunsOnAWorker: Ask heedle sends the request, the earlier
@@ -46,5 +47,30 @@ func TestInv_AskRunsOnAWorker(t *testing.T) {
 	w.fake.down = true
 	if code, _, _ := w.call("POST", "/api/ask", map[string]any{"request": "x"}); code != 502 {
 		t.Errorf("Temporal down: %d", code)
+	}
+}
+
+// TestInv_AskDisclosesActHosts: a proposal with act steps comes with the
+// hosts they may click, type and submit forms on without asking again,
+// for the card to disclose before Run; one without act steps has none.
+// (Roadmap 9.5.)
+func TestInv_AskDisclosesActHosts(t *testing.T) {
+	w := newWorld(t)
+	reg := shipment.Registry()
+	reg.MustRegister(pirn.ActBuiltinSpec())
+	writer := func(reply string) *loom.Writer {
+		return &loom.Writer{Asker: claude(reply), Commands: func(context.Context) (*registry.Registry, []loom.Command, error) {
+			return reg, loom.Commands(reg, loom.BuiltinCommands), nil
+		}}
+	}
+	w.fake.writer = writer("```json\n" + `{"summary": "I'll sign you up.", "program": "(act \"Join as Ada\" \"https://forms.example.org/volunteer\" \"cdn.example.org\")"}` + "\n```")
+	code, got, body := w.call("POST", "/api/ask", map[string]any{"request": "Sign me up as a volunteer"})
+	hosts, _ := got["actHosts"].([]any)
+	if code != 200 || len(hosts) != 2 || hosts[0] != "cdn.example.org" || hosts[1] != "forms.example.org" || got["plan"] == nil {
+		t.Errorf("ask: %d %s", code, body)
+	}
+	w.fake.writer = writer("```json\n" + `{"summary": "Hi.", "program": "(echo \"hi\")"}` + "\n```")
+	if code, got, body := w.call("POST", "/api/ask", map[string]any{"request": "Say hi"}); code != 200 || got["actHosts"] != nil {
+		t.Errorf("no act step: %d %s", code, body)
 	}
 }

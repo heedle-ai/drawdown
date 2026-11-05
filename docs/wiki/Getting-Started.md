@@ -27,7 +27,7 @@ go run ./cmd/drawdown -store ~/heedle-store.git
 drawdown on http://127.0.0.1:8090 (store /Users/you/heedle-store.git, queue "loom", worker true)
 ```
 
-Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the same process, so these two terminals are all you need. The worker knows draft's `echo`, the hello world's `source` and `assess`, reed's `browse` (with `-browser-image`), and pirn's `ask` and `agent` (with `ANTHROPIC_API_KEY` set, and `-agent-image` for `agent`; see [Ask Claude](#ask-claude)).
+Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the same process, so these two terminals are all you need. The worker knows draft's `echo`, the hello world's `source` and `assess`, reed's `browse` (with `-browser-image`), and pirn's `ask`, `agent` and `act` (with `ANTHROPIC_API_KEY` set, `-agent-image` for `agent` and `-browser-agent-image` for `act`; see [Ask Claude](#ask-claude)).
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -40,6 +40,7 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 | `-hosts` | (none) | Extra host names the UI answers to, comma-separated. `localhost` and loopback addresses always work; any other `Host` header is refused |
 | `-ref` | `refs/loom/runs` | warp ref runs are recorded on |
 | `-worker` | `true` | Also run a loom worker. Set `false` if you run `loom worker` separately. If Temporal is down at startup, the UI still starts and shows recorded history; restart once Temporal is up to run programs |
+| `-browser-agent-image` | none | A [reed](https://github.com/heedle-ai/reed/wiki/Getting-Started#6-a-browser-agent-image-for-act) browser-agent image ID, for programs that use `act` (roadmap 9.5). Without it, the front door says act steps can't run, and they fail as setup |
 | `-browser-image` | none | A [reed](https://github.com/heedle-ai/reed/wiki/Getting-Started) browser image ID, for programs that use `browse`. Without it, `browse` steps fail with `BrowserSetup` |
 | `-browser-network` | Podman's default | The Podman network browse pods join |
 | `-ask-model` | `claude-sonnet-5-5` | The Claude model `ask` and `agent` use. The key comes from `ANTHROPIC_API_KEY` in drawdown's environment; without it, `ask` steps fail with `AskSetup` and `agent` steps with `AgentSetup` |

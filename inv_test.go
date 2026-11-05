@@ -117,7 +117,7 @@ func TestInv_AnswersAreShownAsText(t *testing.T) {
 	}
 	js := string(b)
 	for _, want := range []string{
-		"const { agent, answer, page } = DD.parse(text);",
+		"const { agent, act, answer, page } = DD.parse(text);", // act since roadmap 9.5
 		"<pre class=\"answer-text\">${answer.text}</pre>",
 	} {
 		if !strings.Contains(js, want) {

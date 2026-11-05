@@ -547,6 +547,7 @@ func TestServeForBrowser(t *testing.T) {
 		reg := shipment.Registry()
 		reg.MustRegister(pirn.BuiltinSpec())
 		reg.MustRegister(pirn.AgentBuiltinSpec())
+		reg.MustRegister(pirn.ActBuiltinSpec())
 		reg.MustRegister(reed.BuiltinSpec())
 		return reg
 	}

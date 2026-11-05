@@ -716,3 +716,52 @@ test("program colours keep 4.5:1 on the page, its editor and their tints, light 
     }
   }
 });
+
+// Roadmap 9.5: an act step's record, as pirn writes it.
+const JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+const actJSON = (over) => JSON.stringify({
+  pirn: 1, model: "claude-sonnet-5-5", text: "Signed up.\nResult: finished", stopReason: "end_turn", inputTokens: 40, outputTokens: 9,
+  act: 1, image: "sha256:" + "a".repeat(64), turns: 3,
+  calls: [
+    { tool: "browser_snapshot", input: "{}", output: "- textbox \"Name\" [ref=e2]", url: "https://forms.example.org/volunteer" },
+    { tool: "browser_type", input: "{\"target\":\"e2\",\"text\":\"Ada\"}", output: "ok", url: "https://forms.example.org/volunteer", screenshot: JPEG },
+    { tool: "browser_evaluate", input: "{}", output: "No such tool.", isError: true },
+  ],
+  url: "https://forms.example.org/volunteer/done", allowed: ["forms.example.org"], blocked: ["https://elsewhere.example.org/x"], blockedTotal: 1,
+  inputs: ["n0"], ended: "finished", ...over,
+});
+
+test("act results are recognised, and only well-formed ones", () => {
+  const a = DD.parse(actJSON({})).act;
+  assert.ok(a);
+  assert.equal(a.calls.length, 3);
+  assert.equal(DD.preview(actJSON({})), "Signed up.\nResult: finished");
+  assert.deepEqual(DD.decisions("act", actJSON({})), [["Model", "claude-sonnet-5-5"], ["Turns", "3"], ["Actions", "3"], ["Ended", "Claude finished"],
+    ["Last page", "https://forms.example.org/volunteer/done"], ["Could reach", "forms.example.org"], ["Blocked", "1 request"], ["Tokens", "40 in, 9 out"]]);
+  for (const e of ["finished", "stopped", "max_calls", "max_turns", "timeout"]) assert.ok(DD.parse(actJSON({ ended: e })).act, e);
+  for (const bad of [actJSON({ act: 2 }), actJSON({ ended: "crashed" }), actJSON({ calls: "x" }), actJSON({ calls: [{ tool: 1, input: "{}" }] }),
+    actJSON({ allowed: [1] }), actJSON({ blockedTotal: "1" }), actJSON({ inputs: { n0: "x" } }), actJSON({ image: 7 }), actJSON({ model: "" }),
+    // Only a JPEG data URL is ever an image source.
+    actJSON({ calls: [{ tool: "browser_click", input: "{}", screenshot: "javascript:alert(1)" }] }),
+    actJSON({ calls: [{ tool: "browser_click", input: "{}", screenshot: "data:image/svg+xml;base64,PHN2Zz4=" }] }),
+    actJSON({ calls: [{ tool: "browser_click", input: "{}", screenshot: JPEG + "\"><script>" }] }),
+    actJSON({ calls: [{ tool: "browser_click", input: "{}", screenshot: "https://elsewhere.example.org/x.jpg" }] })]) {
+    assert.deepEqual(DD.parse(bad), { text: bad }, bad);
+    assert.doesNotThrow(() => DD.decisions("act", bad));
+  }
+  assert.equal(DD.actEnding("max_calls"), "stopped at the limit on actions");
+});
+
+test("a proposal discloses the hosts its act steps may submit forms on, and a missing browser-agent image", () => {
+  const plan = { nodes: [{ id: "n0", activity: "Act", args: ["sign up", "https://forms.example.org/"] }] };
+  const p = DD.asProposal({ summary: "I'll sign you up.", program: "(act \"sign up\" \"https://forms.example.org/\")", plan, actHosts: ["forms.example.org"], attempts: 1 });
+  assert.deepEqual(p.actHosts, ["forms.example.org"]);
+  assert.deepEqual(DD.asProposal({ summary: "Hi.", program: "(echo \"hi\")", plan: { nodes: [] }, attempts: 1 }).actHosts, []);
+  for (const bad of [{ actHosts: "forms.example.org" }, { actHosts: [1] }, { actHosts: ["Forms.Example.org"] }, { actHosts: ["<b>x</b>"] },
+    { program: "", plan: undefined, skill: "x", actHosts: ["forms.example.org"] }]) {
+    assert.equal(DD.asProposal({ summary: "x", program: "(act \"a\" \"https://forms.example.org/\")", plan, ...bad }), null, JSON.stringify(bad));
+  }
+  const lines = DD.readyLines(DD.asReadiness({ needs: [], browserAgent: "no browser-agent image", claude: "key", ready: false }));
+  assert.deepEqual(lines.map((l) => [l.what, l.ok]), [["Act steps", false], ["Claude", false]]);
+  assert.equal(lines[0].fix, "no browser-agent image");
+});

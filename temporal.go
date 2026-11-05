@@ -13,6 +13,7 @@ import (
 	"go.temporal.io/sdk/converter"
 
 	"github.com/heedle-ai/loom"
+	"github.com/heedle-ai/pirn"
 	"github.com/heedle-ai/reed"
 	"github.com/heedle-ai/treadle"
 )
@@ -94,7 +95,9 @@ func (t TemporalClient) Describe(ctx context.Context, workflowID, runID string) 
 }
 
 // Live reads the heartbeat of each browsing step running in the run's plan
-// (its child workflow, "<workflow ID>/plan"): reed heartbeats a Frame.
+// (its child workflow, "<workflow ID>/plan"): browse (reed) and act (pirn,
+// roadmap 9.5) heartbeat a reed.Frame. A frame with no picture yet (an
+// act step before its first action) isn't shown.
 func (t TemporalClient) Live(ctx context.Context, workflowID string) ([]LiveFrame, error) {
 	d, err := t.Client.DescribeWorkflowExecution(ctx, workflowID+"/plan", "")
 	if err != nil {
@@ -102,17 +105,24 @@ func (t TemporalClient) Live(ctx context.Context, workflowID string) ([]LiveFram
 	}
 	var out []LiveFrame
 	for _, a := range d.PendingActivities {
-		if a.GetActivityType().GetName() != reed.ActivityName || a.GetHeartbeatDetails() == nil {
+		kind, ok := liveKinds[a.GetActivityType().GetName()]
+		if !ok || a.GetHeartbeatDetails() == nil {
 			continue
 		}
 		var f reed.Frame
-		if converter.GetDefaultDataConverter().FromPayloads(a.GetHeartbeatDetails(), &f) != nil {
+		if converter.GetDefaultDataConverter().FromPayloads(a.GetHeartbeatDetails(), &f) != nil || len(f.JPEG) == 0 {
 			continue
 		}
-		out = append(out, liveFrame(a.GetActivityId(), a.GetAttempt(), f))
+		lf := liveFrame(a.GetActivityId(), a.GetAttempt(), f)
+		lf.Kind = kind
+		out = append(out, lf)
 	}
 	return out, nil
 }
+
+// liveKinds are the activities whose heartbeats are frames, with their
+// commands.
+var liveKinds = map[string]string{reed.ActivityName: "browse", pirn.ActActivityName: "act"}
 
 func liveFrame(id string, attempt int32, f reed.Frame) LiveFrame {
 	return LiveFrame{Activity: id, Attempt: attempt, URL: f.URL,
