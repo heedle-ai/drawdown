@@ -2,13 +2,16 @@ package drawdown_test
 
 import (
 	"context"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/heedle-ai/draft/registry"
+	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/loom/examples/hello/shipment"
 	"github.com/heedle-ai/pirn"
+	"github.com/heedle-ai/treadle"
 )
 
 // TestInv_AskRunsOnAWorker: Ask heedle sends the request, the earlier
@@ -71,6 +74,59 @@ func TestInv_AskDisclosesActHosts(t *testing.T) {
 	}
 	w.fake.writer = writer("```json\n" + `{"summary": "Hi.", "program": "(echo \"hi\")"}` + "\n```")
 	if code, got, body := w.call("POST", "/api/ask", map[string]any{"request": "Say hi"}); code != 200 || got["actHosts"] != nil {
+		t.Errorf("no act step: %d %s", code, body)
+	}
+}
+
+// submitsOnly is the fake Temporal, but a submitted run is only kept,
+// not run: the fake's worker has no act.
+type submitsOnly struct {
+	*fakeTemporal
+	got []loom.RunInput
+}
+
+func (s *submitsOnly) Submit(_ context.Context, in loom.RunInput) (string, string, error) {
+	s.got = append(s.got, in)
+	return "wf", "run", nil
+}
+
+// TestInv_ActRunsOnlyWhereShown: a program with act steps runs or is
+// scheduled only when the request carries exactly the hosts the page
+// showed it may act on (loom.ActHosts); otherwise 422, naming them, and
+// nothing starts. /api/compile gives the hosts for the editor to show.
+// (Review 39: only the front door's card disclosed them, and the editor,
+// a changed program or a direct request ran act steps unannounced.)
+func TestInv_ActRunsOnlyWhereShown(t *testing.T) {
+	w := newWorld(t)
+	commands := func() *registry.Registry {
+		reg := shipment.Registry()
+		reg.MustRegister(pirn.ActBuiltinSpec())
+		return reg
+	}
+	tc := &submitsOnly{fakeTemporal: w.fake}
+	ui := &drawdown.Server{Skills: &treadle.Library{Store: w.store}, Commands: commands, Store: w.store, Ref: loom.DefaultRef, Registry: commands(), Temporal: tc}
+	w.srv = httptest.NewServer(ui.Handler())
+	t.Cleanup(w.srv.Close)
+	prog := `(act "Join as Ada" "https://forms.example.org/" "cdn.example.org")`
+	_, got, _ := w.call("POST", "/api/compile", map[string]any{"program": prog})
+	if hosts, _ := got["actHosts"].([]any); len(hosts) != 2 || hosts[0] != "cdn.example.org" {
+		t.Errorf("compile: %v", got)
+	}
+	for _, shown := range [][]string{nil, {"forms.example.org"}, {"forms.example.org", "cdn.example.org"}, {"cdn.example.org", "forms.example.org", "x.example.org"}} {
+		if code, got, body := w.call("POST", "/api/runs", map[string]any{"program": prog, "actHosts": shown}); code != 422 || got["actHosts"] == nil || !strings.Contains(body, "without asking again") {
+			t.Errorf("run, shown %v: %d %s", shown, code, body)
+		}
+		if code, _, body := w.call("POST", "/api/schedules", map[string]any{"name": "act", "program": prog, "every": "24h", "actHosts": shown}); code != 422 {
+			t.Errorf("schedule, shown %v: %d %s", shown, code, body)
+		}
+	}
+	if len(tc.got) != 0 {
+		t.Fatalf("a run started: %v", tc.got)
+	}
+	if code, _, body := w.call("POST", "/api/runs", map[string]any{"program": prog, "actHosts": []string{"cdn.example.org", "forms.example.org"}}); code != 202 || len(tc.got) != 1 {
+		t.Errorf("shown: %d %s", code, body)
+	}
+	if code, _, body := w.call("POST", "/api/runs", map[string]any{"program": `(echo "hi")`}); code != 202 {
 		t.Errorf("no act step: %d %s", code, body)
 	}
 }

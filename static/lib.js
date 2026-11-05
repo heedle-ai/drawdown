@@ -44,20 +44,22 @@ const DD = (() => {
   // roadmap 9.5), with every field the page reads of the right type and
   // every screenshot a JPEG data URL; else null.
   const JPEG_DATA = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
-  const ENDED = ["finished", "stopped", "max_calls", "max_turns", "timeout"];
+  const ENDED = ["finished", "stopped", "max_calls", "max_turns", "timeout", "error"];
   function asAct(v) {
     if (!asAnswer(v) || v.act !== 1 || !str(v.image) || !num(v.turns) || !str(v.url) || !ENDED.includes(v.ended)) return null;
     if (!objs(v.calls, (c) => str(c.tool) && str(c.input) && opt(c.output, str) && opt(c.isError, bool) && opt(c.truncated, bool) &&
       opt(c.url, str) && opt(c.screenshot, (x) => str(x) && JPEG_DATA.test(x)))) return null;
-    if (!strs(v.allowed) || !strs(v.blocked) || !num(v.blockedTotal) || !strs(v.inputs)) return null;
+    if (!strs(v.allowed) || !strs(v.blocked) || !num(v.blockedTotal) || !strs(v.inputs) || !opt(v.blockedUnknown, bool)) return null;
     return v;
   }
 
   // actEnding says, in words, how an act step ended.
   function actEnding(ended) {
     return {
-      finished: "Claude finished",
+      // Claude's own word, which a page could talk it into (review 39).
+      finished: "Claude said it finished",
       stopped: "Claude stopped and said why",
+      error: "stopped: asking Claude failed after it had acted",
       max_calls: "stopped at the limit on actions",
       max_turns: "stopped at the turn limit",
       timeout: "stopped when its time ran out",
@@ -133,7 +135,7 @@ const DD = (() => {
     if (o.act) {
       const a = o.act;
       const rows = [["Model", a.model], ["Turns", String(a.turns)], ["Actions", String(a.calls.length)], ["Ended", actEnding(a.ended)],
-        ["Last page", a.url || "none"], ["Could reach", a.allowed.join(", ")], ["Blocked", `${a.blockedTotal} request${a.blockedTotal === 1 ? "" : "s"}`]];
+        ["Last page", a.url || "none"], ["Could reach", a.allowed.join(", ")], ["Blocked", a.blockedUnknown ? "unknown: the browser couldn't say" : `${a.blockedTotal} request${a.blockedTotal === 1 ? "" : "s"}`]];
       if (num(a.inputTokens) && num(a.outputTokens)) rows.push(["Tokens", `${a.inputTokens} in, ${a.outputTokens} out`]);
       return rows;
     }
@@ -822,6 +824,8 @@ const DD = (() => {
   // An act step's host, as reed's allowlist writes it: a lower-case name
   // or address.
   const ACT_HOST = /^[a-z0-9.:\[\]-]{1,253}$/;
+  // strsOf is v if it's a list of hosts as act writes them, else [].
+  function strsOf(v) { return strs(v) && v.every((x) => ACT_HOST.test(x)) ? v : []; }
 
   // asProposal is a proposal as the API sends it, if well formed: a
   // summary, and a program with its plan (perhaps a schedule with a name,
@@ -1025,6 +1029,6 @@ const DD = (() => {
     return asSchedules(res.data).filter((s) => s.paused && str(s.note) && FAILURE_PAUSE.test(s.note)).length;
   }
 
-  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
+  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
 })();
 if (typeof module !== "undefined") module.exports = DD;

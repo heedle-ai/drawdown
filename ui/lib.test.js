@@ -736,11 +736,14 @@ test("act results are recognised, and only well-formed ones", () => {
   assert.ok(a);
   assert.equal(a.calls.length, 3);
   assert.equal(DD.preview(actJSON({})), "Signed up.\nResult: finished");
-  assert.deepEqual(DD.decisions("act", actJSON({})), [["Model", "claude-sonnet-5-5"], ["Turns", "3"], ["Actions", "3"], ["Ended", "Claude finished"],
+  assert.deepEqual(DD.decisions("act", actJSON({})), [["Model", "claude-sonnet-5-5"], ["Turns", "3"], ["Actions", "3"], ["Ended", "Claude said it finished"],
     ["Last page", "https://forms.example.org/volunteer/done"], ["Could reach", "forms.example.org"], ["Blocked", "1 request"], ["Tokens", "40 in, 9 out"]]);
-  for (const e of ["finished", "stopped", "max_calls", "max_turns", "timeout"]) assert.ok(DD.parse(actJSON({ ended: e })).act, e);
+  for (const e of ["finished", "stopped", "max_calls", "max_turns", "timeout", "error"]) assert.ok(DD.parse(actJSON({ ended: e })).act, e);
+  // Review 39: blocked requests the browser couldn't list read as unknown, never none.
+  assert.deepEqual(DD.decisions("act", actJSON({ blockedUnknown: true, blockedTotal: 0, blocked: [] })).find((r) => r[0] === "Blocked"), ["Blocked", "unknown: the browser couldn't say"]);
+  assert.equal(DD.actEnding("error"), "stopped: asking Claude failed after it had acted");
   for (const bad of [actJSON({ act: 2 }), actJSON({ ended: "crashed" }), actJSON({ calls: "x" }), actJSON({ calls: [{ tool: 1, input: "{}" }] }),
-    actJSON({ allowed: [1] }), actJSON({ blockedTotal: "1" }), actJSON({ inputs: { n0: "x" } }), actJSON({ image: 7 }), actJSON({ model: "" }),
+    actJSON({ allowed: [1] }), actJSON({ blockedUnknown: "yes" }), actJSON({ blockedTotal: "1" }), actJSON({ inputs: { n0: "x" } }), actJSON({ image: 7 }), actJSON({ model: "" }),
     // Only a JPEG data URL is ever an image source.
     actJSON({ calls: [{ tool: "browser_click", input: "{}", screenshot: "javascript:alert(1)" }] }),
     actJSON({ calls: [{ tool: "browser_click", input: "{}", screenshot: "data:image/svg+xml;base64,PHN2Zz4=" }] }),

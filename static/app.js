@@ -518,7 +518,7 @@ function ActWork({ act: a, part = "all" }) {
         <${Pill} cls="k-other" plain>${a.calls.length} action${a.calls.length === 1 ? "" : "s"}${failed ? `, ${failed} refused or failed` : ""}<//>
         <${Pill} cls="k-other" plain>${a.turns} turn${a.turns === 1 ? "" : "s"}<//>
         ${a.allowed.map((h) => html`<${Pill} key=${h} cls="s-Completed" mono>${h}<//>`)}
-        <${Pill} cls=${a.blockedTotal ? "s-Failed" : "k-other"}>${a.blockedTotal} blocked<//>
+        <${Pill} cls=${a.blockedTotal || a.blockedUnknown ? "s-Failed" : "k-other"}>${a.blockedUnknown ? "blocked requests unknown" : `${a.blockedTotal} blocked`}<//>
         <${Pill} cls="k-container" mono>image ${a.image.replace(/^sha256:/, "").slice(0, 12)}<//>
       </div>
       <div class="mono muted">ended on ${a.url || "no page"}</div>`}
@@ -1068,7 +1068,7 @@ function nodeCard(n, step, output) {
 const localZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } };
 const EVERY = [["1h", "every hour"], ["6h", "every 6 hours"], ["24h", "every day"], ["168h", "every week"]];
 
-function ScheduleForm({ program, history, onDone }) {
+function ScheduleForm({ program, history, actHosts, onDone }) {
   const [name, setName] = useState("");
   const [how, setHow] = useState("every");
   const [every, setEvery] = useState("24h");
@@ -1079,7 +1079,7 @@ function ScheduleForm({ program, history, onDone }) {
   const [made, setMade] = useState("");
   const make = async () => {
     setBusy(true); setErr("");
-    const body = { name, program, ref: history, ...(how === "every" ? { every } : { cron, timeZone: zone }) };
+    const body = { name, program, ref: history, actHosts, ...(how === "every" ? { every } : { cron, timeZone: zone }) };
     const r = await api("/api/schedules", body);
     setBusy(false);
     if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
@@ -1774,7 +1774,7 @@ function ProposalCard({ p, history, latest }) {
   }, [p.name, latest]);
   const run = async () => {
     setBusy("run"); setNote(null);
-    const r = await api("/api/runs", { program: p.program, ref: history });
+    const r = await api("/api/runs", { program: p.program, ref: history, actHosts: p.actHosts });
     setBusy("");
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setNote({ error: (r.data && r.data.error) || String(r.data) });
@@ -1782,7 +1782,7 @@ function ProposalCard({ p, history, latest }) {
   const schedule = async () => {
     setBusy("schedule"); setNote(null);
     const sp = p.schedule;
-    const body = { name, program: p.program, ref: history, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
+    const body = { name, program: p.program, ref: history, actHosts: p.actHosts, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
     const r = await api("/api/schedules", body);
     setBusy("");
     setNote(r.ok ? { ok: html`Scheduled <a href="#/schedules" class="mono">${name}</a>, ${DD.when(sp)}. Each run is recorded like any other.` }
@@ -1845,6 +1845,7 @@ function ProposalCard({ p, history, latest }) {
 // === New run ===============================================================
 
 const TEMPLATES = {
+  act: '(act "Fill in the form with the inputs, and submit it." "https://forms.example.org/")',
   echo: '(echo "hello")', source: '(source "weather")', assess: '(assess "the shipment will be late")',
   browse: '(browse "example.org")', ask: '(ask "Summarize the sources.")', agent: '(agent "Write out/summary.md from the inputs.")', container: '(container "IMAGE-ID" "arg")',
   image: '(image "FROM IMAGE@sha256:DIGEST\nCOPY in/n0.txt /n0.txt")',
@@ -1914,7 +1915,7 @@ function NewRun({ info, history: ref }) {
 
   const run = async () => {
     setBusy(true); setSubmitError("");
-    const r = await api("/api/runs", { program, ref });
+    const r = await api("/api/runs", { program, ref, actHosts });
     setBusy(false);
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setSubmitError(r.data.error || String(r.data));
@@ -1930,17 +1931,21 @@ function NewRun({ info, history: ref }) {
   if (!program.trim()) lastGood.current = null;
   const shown = plan ? lastGood.current : err ? lastGood.current : null;
   const kinds = plan ? [...new Set((plan.nodes || []).map((n) => kindOf(n.activity)))] : [];
+  // Where its act steps may act, shown above Run and sent with it: the
+  // server starts nothing it wasn't (review 39).
+  const actHosts = plan && DD.strsOf(result.data.actHosts);
   return html`
     <${Describe} program=${program} onProgram=${setProgram} />
     <div class="panel">
       <${ProgramEditor} value=${program} onChange=${setProgram} handle=${editor} placeholder='(pipe (par (echo "a") (echo "b")) echo)' />
+      ${actHosts && actHosts.length > 0 && html`<p class="acts" role="note"><strong>Its act steps can click, type and submit forms on ${actHosts.map((h, i) => html`${i ? ", " : ""}<span class="mono" key=${h}>${h}</span>`)} without asking again.</strong></p>`}
       <div class="row">
         <button class="primary" disabled=${!plan || busy} onClick=${run}>${busy ? "Starting…" : "Run"}</button>
         <button disabled=${!plan || busy} onClick=${() => setScheduling((x) => !x)} aria-expanded=${scheduling}>Schedule…</button>
         ${Object.entries(info.examples || {}).map(([name, src]) => html`
           <button key=${name} onClick=${() => setProgram(src)}>Example: ${name}</button>`)}
       </div>
-      ${scheduling && plan && html`<${ScheduleForm} program=${program} history=${ref} onDone=${() => setScheduling(false)} />`}
+      ${scheduling && plan && html`<${ScheduleForm} program=${program} history=${ref} actHosts=${actHosts} onDone=${() => setScheduling(false)} />`}
       <div class="row">
         <span class="muted">Insert a command:</span>
         ${(info.commands || []).map((c) => {

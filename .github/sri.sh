@@ -47,6 +47,8 @@ lib = open("static/lib.js").read()
 for u in url.findall(js):
     if u == "http://www.w3.org/2000/svg":
         continue  # the SVG namespace: an identifier, never fetched
+    if re.match(r"^https://([a-z0-9-]+\.)*example\.org/", u):
+        continue  # a program template's page (act's): a reserved example domain, never fetched
     if u.startswith("https://github.com/${") and u in url.findall(lib):
         continue  # lib.js's checked source link: a link to follow, never fetched (the CSP allows no such load)
     print(f"sri: app.js refers to {u}; load external code only from index.html, with integrity", file=sys.stderr); bad = True
