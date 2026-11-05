@@ -48,7 +48,7 @@ Open http://127.0.0.1:8090. By default drawdown also runs a loom worker in the s
 | `-image-registry` | none | An OCI repository, such as `ghcr.io/acme/heedle-images`, that `(image "<Containerfile>" "push")` pushes to, with the worker's own `podman login`; see [bobbin → Image builds](https://github.com/heedle-ai/bobbin/wiki/How-It-Works#image-builds). Without it, such steps fail with `ImageSetup`; builds without `"push"` still work |
 | `-agent-registry` | none | An OCI repository, such as `ghcr.io/acme/heedle-files`, where agent files too big for the record are kept, pushed with `oras` and the worker's own login; see [pirn → Large files](https://github.com/heedle-ai/pirn/wiki/How-It-Works#large-files). Without it, they're listed as skipped |
 | `-connectors` | none | A JSON file of the MCP servers agent steps may be granted, with tokens named by environment variable; see [pirn → Connectors](https://github.com/heedle-ai/pirn/wiki/How-It-Works#connectors). Without it, a step that asks for a connector fails with `AgentSetup` |
-| `-keep-images` | none | Images the System page never removes, comma-separated, such as `heedle up`'s release pins. The worker's own images (`-browser-image`, `-agent-image`, `-browser-agent-image`) are always kept |
+| `-keep-images` | none | The images heedle's release pins, comma-separated (`heedle up` gives them). The System page never removes them, or the worker's own images (`-browser-image`, `-agent-image`, `-browser-agent-image`), and removes no image without them |
 | `-sources` | loom's `examples/hello/sources` | Folder the `source` command reads |
 
 ## 3. Try the hello world

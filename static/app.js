@@ -2194,7 +2194,7 @@ function RunDetail({ workflow, run, history: ref }) {
           color=${css("--record")}><${Pill} cls="k-record" mono>${short(rec.commit)}<//><//>`}
         <a href=${temporalLink} target="_blank" rel="noopener" style=${{ marginLeft: "auto" }}>Open in Temporal Web UI ↗</a>
       </div>
-      ${status === "Running" && html`<${CancelRun} workflow=${workflow} />`}
+      ${status === "Running" && html`<${CancelRun} workflow=${workflow} run=${(ex && ex.runId) || run} />`}
       ${rec && html`<div style=${{ marginTop: "12px" }}><${Program} text=${rec.program} /></div>`}
       <div class="meta" style=${{ marginTop: "12px" }}>
         <span class="muted">Workflow</span><span class="mono">${workflow}</span>
@@ -2488,13 +2488,14 @@ const gb = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e
 const gib = (n) => `${(n / 2 ** 30).toFixed(n % 2 ** 30 ? 1 : 0)} GiB`;
 
 // StopRun asks, then stops a run through Temporal: its steps end and Podman
-// removes their containers. onDone gets the answer.
-function StopRun({ workflow, label = "Stop run", onDone }) {
+// removes their containers. It names the run exactly, so it never stops a
+// newer run of the same workflow ID. onDone gets the answer.
+function StopRun({ workflow, run, label = "Stop run", onDone }) {
   const [sure, setSure] = useState(false);
   const [busy, setBusy] = useState(false);
   const stop = async () => {
     setBusy(true);
-    const r = await api("/api/system/stop", { workflow });
+    const r = await api("/api/system/stop", { workflow, run });
     setBusy(false);
     setSure(false);
     onDone(r);
@@ -2506,10 +2507,10 @@ function StopRun({ workflow, label = "Stop run", onDone }) {
 }
 
 // CancelRun is the Run page's way to stop a running run.
-function CancelRun({ workflow }) {
+function CancelRun({ workflow, run }) {
   const [msg, setMsg] = useState(null);
   return html`<div class="row" style=${{ marginTop: "12px" }}>
-    <${StopRun} workflow=${workflow} label="Cancel run" onDone=${(r) => setMsg(r.ok
+    <${StopRun} workflow=${workflow} run=${run} label="Cancel run" onDone=${(r) => setMsg(r.ok
       ? { ok: true, text: "Cancelled. Its steps end, and Podman removes their containers; the run shows as canceled in a moment." }
       : { ok: false, text: (r.data && r.data.error) || String(r.data) })} />
     ${msg && html`<p class=${msg.ok ? "" : "error"} role=${msg.ok ? "status" : "alert"}>${msg.text}</p>`}</div>`;
@@ -2553,7 +2554,7 @@ function SystemPage() {
             ${c.status && html`<${Pill} cls=${c.status === "running" ? "s-Running" : "k-other"} plain>${c.status}<//>`}
             ${c.labels.step && html`<${Pill} cls="k-other" plain mono>step ${c.labels.step}<//>`}
             <${Pill} cls="k-other" plain>${ago(c.created) || "just now"}<//>
-            <span style=${{ marginLeft: "auto" }}>${DD.stoppable(c) && html`<${StopRun} workflow=${c.workflow} onDone=${(r) => done(r, () => `Stopped ${c.workflow}: its steps end, and Podman removes their containers.`)} />`}</span>
+            <span style=${{ marginLeft: "auto" }}>${DD.stoppable(c) && html`<${StopRun} workflow=${c.workflow} run=${c.run} onDone=${(r) => done(r, () => `Stopped ${c.workflow}: its steps end, and Podman removes their containers.`)} />`}</span>
           </div>
           <p class="mono muted cg-wrap" style=${{ margin: "8px 0 0" }}>${c.image}</p>
           ${(c.cpu || c.memory) && html`<p class="muted" style=${{ margin: "4px 0 0" }}>CPU ${c.cpu || "?"} · memory ${c.memory || "?"}</p>`}
@@ -2572,7 +2573,7 @@ function SystemPage() {
           <span class="muted">${gb(total)} in all${old.images.length ? `; ${gb(old.bytes)} is old` : ""}.</span>
           <button type="button" disabled=${pruning || old.images.length === 0 || v.keep.length === 0} onClick=${prune}>${pruning ? "Removing…" : "Remove old images"}</button>
         </div>
-        ${v.keep.length === 0 && html`<p class="muted">Old images can be removed only when the worker knows which to keep (heedle up tells it).</p>`}
+        ${v.keep.length === 0 && html`<p class="muted">Old images can be removed only when the worker knows which images its release pins (heedle up tells it).</p>`}
       </div>`}
 
     ${v.machine && html`
