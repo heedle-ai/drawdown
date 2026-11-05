@@ -147,7 +147,8 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if err := pirn.RegisterAgent(reg, steps, agent); err != nil {
 			return err
 		}
-		act := pirn.Act{Confirm: loom.Confirmer(c), Profile: pirn.ProfileFrom(vault), Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage}
+		act := pirn.Act{Confirm: loom.Confirmer(c), Profile: pirn.ProfileFrom(vault), Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage,
+			Script: loom.Scripts(c, s)} // the program's last script, replayed without Claude (roadmap 9.9)
 		if err := pirn.RegisterAct(reg, steps, act); err != nil {
 			return err
 		}
