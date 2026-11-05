@@ -138,3 +138,56 @@ func (s *Server) call(t *testing.T, method, path, body, remote string) (int, map
 	json.Unmarshal(w.Body.Bytes(), &m)
 	return w.Code, m, w.Body.String()
 }
+
+// TestInv_DetailsAreHereOnly: the person's details (the Connectors page's
+// You section) are read, kept and forgotten only from this machine,
+// straight in the keychain (as pirn keeps them), never cached; from
+// anywhere else, or through a proxy, nothing is shown or changed; a
+// value that isn't one line of text, or a field that isn't a detail, is
+// refused. (Roadmap 9.8.)
+func TestInv_DetailsAreHereOnly(t *testing.T) {
+	keys := memSecrets{}
+	h := (&Server{Secrets: keys}).Handler()
+	call := func(method, path, body, remote string, hdr ...string) (int, string, http.Header) {
+		r := httptest.NewRequest(method, "http://127.0.0.1:8090"+path, strings.NewReader(body))
+		r.RemoteAddr = remote
+		r.Header.Set("Content-Type", "application/json")
+		for i := 0; i+1 < len(hdr); i += 2 {
+			r.Header.Set(hdr[i], hdr[i+1])
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code, w.Body.String(), w.Header()
+	}
+	const here, there = "127.0.0.1:50000", "192.0.2.7:50000"
+	if code, raw, _ := call("POST", "/api/profile", `{"field":"name","value":"Ada Lovelace"}`, here); code != 200 || !strings.Contains(raw, `"value":"Ada Lovelace"`) {
+		t.Fatalf("set: %d %s", code, raw)
+	}
+	if v, ok, _ := pirn.LookupProfile(context.Background(), keys, "name"); v != "Ada Lovelace" || !ok {
+		t.Errorf("not in the keychain as pirn reads it: %q %v", v, ok)
+	}
+	code, raw, hdr := call("GET", "/api/profile", "", here)
+	if code != 200 || !strings.Contains(raw, "Ada Lovelace") || hdr.Get("Cache-Control") != "no-store" {
+		t.Errorf("read here: %d %s %v", code, raw, hdr)
+	}
+	for _, c := range []struct{ method, path, body, remote string }{
+		{"GET", "/api/profile", "", there},
+		{"POST", "/api/profile", `{"field":"name","value":"Eve"}`, there},
+		{"POST", "/api/profile/delete", `{"field":"name"}`, there},
+	} {
+		if code, raw, _ := call(c.method, c.path, c.body, c.remote); code != 403 || strings.Contains(raw, "Ada") {
+			t.Errorf("%s %s from elsewhere: %d %s", c.method, c.path, code, raw)
+		}
+	}
+	if code, raw, _ := call("GET", "/api/profile", "", here, "X-Forwarded-For", "192.0.2.7"); code != 403 || strings.Contains(raw, "Ada") {
+		t.Errorf("through a proxy: %d %s", code, raw)
+	}
+	for _, body := range []string{`{"field":"ssn","value":"1"}`, `{"field":"name","value":"Ada\nLovelace"}`, `{"field":"name","value":""}`} {
+		if code, _, _ := call("POST", "/api/profile", body, here); code != 400 {
+			t.Errorf("%s: %d", body, code)
+		}
+	}
+	if code, raw, _ := call("POST", "/api/profile/delete", `{"field":"name"}`, here); code != 200 || strings.Contains(raw, "Ada") || len(keys) != 0 {
+		t.Errorf("forget: %d %s %v", code, raw, keys)
+	}
+}

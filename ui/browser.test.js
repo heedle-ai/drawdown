@@ -447,3 +447,47 @@ test("a run page shows a filled form waiting, with Send and Cancel", async () =>
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+// Roadmap 9.8: the card names the details act steps may use, and the
+// Connectors page keeps them under You, shown only here.
+test("the card names the details act steps may use, and You keeps them", async () => {
+  const program = '(act "Send the contact form as me" "https://forms.example.org/contact" :uses "name email")';
+  const plan = { nodes: [{ id: "n0", activity: "Act", args: ["Send the contact form as me", "https://forms.example.org/contact", ":uses", "name email"] }] };
+  const { p, ctx, errors } = await page({ ask: { summary: "I'll send it as you.", program, plan, actHosts: ["forms.example.org"], actUses: ["name", "email"], ready: { needs: [], ready: true } } });
+  await ctx.route("**/api/ready", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ needs: [], ready: true }) }));
+  await p.locator(".front-row input").fill("Send the contact form as me");
+  await p.getByRole("button", { name: "Ask", exact: true }).click();
+  const note = p.locator(".proposal .acts", { hasText: "may use" });
+  await note.waitFor();
+  assert.equal(await note.textContent(), "They may use your name and email, from You. Claude never sees them.");
+  let sent = null;
+  await ctx.route("**/api/runs", (r) => { sent = r.request().postDataJSON(); r.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: "not here" }) }); });
+  await p.getByRole("button", { name: "Run it now" }).click();
+  await p.getByText("not here").waitFor();
+  assert.deepEqual(sent.actUses, ["name", "email"]);
+  // You, on the Connectors page: kept here, in a keychain the test gives.
+  let kept = {};
+  await ctx.route(/\/api\/profile(\/delete)?$/, async (r) => {
+    const req = r.request();
+    if (req.method() === "POST") {
+      const b = req.postDataJSON();
+      if (req.url().endsWith("/delete")) delete kept[b.field]; else kept[b.field] = b.value;
+    }
+    const fields = ["name", "email", "phone", "address", "birthdate"].map((f) => ({ field: f, label: f, set: f in kept, value: kept[f] }));
+    r.fulfill({ contentType: "application/json", body: JSON.stringify({ fields }) });
+  });
+  await p.goto(BASE + "/#/connectors");
+  const name = p.getByLabel("Your name");
+  await name.waitFor();
+  await name.fill("Ada Lovelace");
+  await p.locator("#you form", { has: name }).getByRole("button", { name: "Save" }).click();
+  await p.locator("#you form", { has: name }).getByRole("button", { name: "Forget" }).waitFor();
+  assert.deepEqual(kept, { name: "Ada Lovelace" });
+  assert.equal(await p.getByLabel("Your date of birth").inputValue(), "");
+  if (process.env.DRAWDOWN_SHOTS) await p.locator("#you").screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, "you.png") });
+  await p.locator("#you form", { has: name }).getByRole("button", { name: "Forget" }).click();
+  await p.locator("#you form", { has: name }).getByRole("button", { name: "Forget" }).waitFor({ state: "detached" });
+  assert.deepEqual(kept, {});
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

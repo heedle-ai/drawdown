@@ -796,3 +796,16 @@ test("a proposal names apart the hosts its act steps send forms on without askin
   assert.deepEqual(DD.asProposal(base).actSendsFreely, []);
   for (const bad of [{ actSendsFreely: "forms.example.org" }, { actSendsFreely: ["other.example.org"] }]) assert.equal(DD.asProposal({ ...base, ...bad }), null, JSON.stringify(bad));
 });
+
+// Roadmap 9.8: the person's details a program's act steps may use.
+test("a proposal names the details its act steps may use, only real ones", () => {
+  const plan = { nodes: [{ id: "n0", activity: "Act", args: ["x", "https://forms.example.org/", ":uses", "name birthdate"] }] };
+  const base = { summary: "Me.", program: "(act \"x\" \"https://forms.example.org/\" :uses \"name birthdate\")", plan, actHosts: ["forms.example.org"], attempts: 1 };
+  assert.deepEqual(DD.asProposal({ ...base, actUses: ["name", "birthdate"] }).actUses, ["name", "birthdate"]);
+  assert.deepEqual(DD.asProposal(base).actUses, []);
+  assert.equal(DD.usesWords(["name", "email", "birthdate"]), "name, email and date of birth");
+  assert.equal(DD.usesWords(["phone"]), "phone number");
+  for (const bad of [{ actUses: "name" }, { actUses: ["ssn"] }, { actUses: ["name", "name"] }, { actUses: ["__proto__"] }, { program: "", plan: undefined, skill: "x", actUses: ["name"] }]) {
+    assert.equal(DD.asProposal({ ...base, ...bad }), null, JSON.stringify(bad));
+  }
+});
