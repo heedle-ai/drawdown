@@ -28,7 +28,17 @@ func (s *Server) schedules(w http.ResponseWriter, r *http.Request) {
 	if ss == nil {
 		ss = []loom.Schedule{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"schedules": ss})
+	// Each one's spend, as its budget counts it (roadmap 10.4).
+	spend, perr, err := s.scheduleSpend(r.Context(), ss, time.Now())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
+		return
+	}
+	resp := map[string]any{"schedules": ss, "spend": spend}
+	if perr != "" {
+		resp["pricesError"] = perr
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // scheduleRequest makes a schedule: a program, compiled now and run as

@@ -847,7 +847,7 @@ const DD = (() => {
     // (roadmap 9.5): only with a program.
     if (!opt(v.actHosts, (h) => strs(h) && h.every((x) => ACT_HOST.test(x))) || (v.actHosts && v.actHosts.length && !program)) return null;
     return { summary: v.summary, program, plan: program ? v.plan : null, schedule: sp || null, name: sp ? v.name : "", skill, ready: v.ready ? { ...v.ready, needs: v.ready.needs || [] } : null,
-      actHosts: v.actHosts || [], remember, memory: v.memory || [] };
+      actHosts: v.actHosts || [], remember, memory: v.memory || [], usage: asStepUsages(v.usage) };
   }
 
   // === Memory (roadmap 10.1) ===============================================
@@ -975,7 +975,7 @@ const DD = (() => {
     if (!v || !Array.isArray(v.schedules)) return [];
     return v.schedules.filter((s) => s && str(s.name) && /^[a-z0-9-]{1,40}$/.test(s.name) && str(s.program) && str(s.ref) &&
       s.spec && typeof s.spec === "object" && opt(s.spec.every, num) && opt(s.spec.cron, str) && opt(s.spec.timeZone, str) &&
-      bool(s.paused) && opt(s.note, str) && (s.next === null || strs(s.next)) &&
+      bool(s.paused) && opt(s.note, str) && (s.next === null || strs(s.next)) && (s.budget === undefined || asBudget(s.budget)) &&
       (s.recent === null || objs(s.recent, (r) => str(r.workflowId) && RUN_ID.test(r.workflowId) && str(r.runId) && RUN_ID.test(r.runId) && str(r.at))));
   }
 
@@ -1021,7 +1021,7 @@ const DD = (() => {
   // === The top bar ==========================================================
 
   // SECTIONS are the top bar's sections, in its order.
-  const SECTIONS = ["runs", "skills", "schedules", "connectors", "memory", "system"];
+  const SECTIONS = ["runs", "skills", "schedules", "costs", "connectors", "memory", "system"];
 
   // PAGES is every page the app shows other than the home page: the
   // route's first segment, the lengths of route it takes, and the section
@@ -1036,6 +1036,7 @@ const DD = (() => {
     skill: { sizes: [2, 3], section: "skills" },
     review: { sizes: [2], section: "skills" },
     schedules: { sizes: [1], section: "schedules" },
+    costs: { sizes: [1], section: "costs" },
     connectors: { sizes: [1], section: "connectors" },
     memory: { sizes: [1], section: "memory" },
     system: { sizes: [1], section: "system" },
@@ -1077,10 +1078,11 @@ const DD = (() => {
   // newer one. A pause from heedle or anywhere else isn't a failure.
   const FAILURE_PAUSE = /^(paused due to workflow (failure|timeout): |paused, workflow (failed|timedout): )/;
 
-  // schedulesStopped counts the schedules paused by a run that failed.
+  // schedulesStopped counts the schedules paused by a run that failed, or
+  // by their monthly budget (roadmap 10.4).
   function schedulesStopped(res) {
     if (!answered(res) || !Array.isArray(res.data.schedules)) return null;
-    return asSchedules(res.data).filter((s) => s.paused && str(s.note) && FAILURE_PAUSE.test(s.note)).length;
+    return asSchedules(res.data).filter((s) => s.paused && str(s.note) && (FAILURE_PAUSE.test(s.note) || BUDGET_PAUSE.test(s.note))).length;
   }
 
   // === System (roadmap 9.2) ================================================
@@ -1124,6 +1126,55 @@ const DD = (() => {
     return { images: old, bytes: old.reduce((n, im) => n + im.size, 0) };
   }
 
-  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow };
+  // === Costs (roadmap 10.4) =================================================
+  // Tokens are what the records say; dollars are estimates, and a figure is
+  // shown only when every step it covers had a price.
+
+  // loom's note for a schedule its budget paused (loom.BudgetPaused).
+  const BUDGET_PAUSE = /^paused: monthly budget \$[0-9]+\.[0-9]{2} (reached \(est\.\)|can't be checked) in [A-Z][a-z]+ [0-9]{4}/;
+  const isTokens = (t) => t && typeof t === "object" && num(t.input) && num(t.output) && t.input >= 0 && t.output >= 0;
+  const isStepUsage = (s) => str(s.node) && str(s.kind) && opt(s.model, str) && isTokens(s.tokens) && opt(s.requests, num) && opt(s.missing, str);
+  const isUnpriced = (u) => str(u.node) && opt(u.model, str) && isTokens(u.tokens) && str(u.why);
+  // isSpent is drawdown's spent: tokens, and usd only if all was priced.
+  const isSpent = (v) => v && typeof v === "object" && num(v.runs) && isTokens(v.tokens) && (v.usd === null || num(v.usd)) && num(v.priced) && objs(v.unpriced, isUnpriced);
+  // asStepUsages is a usage's steps, if well formed; else [].
+  function asStepUsages(v) { return v && objs(v.steps, isStepUsage) ? v.steps : []; }
+  // asBudget is a schedule's budget, if it has one and it's well formed.
+  function asBudget(b) { return b && typeof b === "object" && num(b.usd) && b.usd > 0 && opt(b.resumeNextMonth, bool) ? b : null; }
+  // asRunUsage is the run page's usage: each Claude step and the cost.
+  function asRunUsage(v) {
+    if (!v || typeof v !== "object" || !objs(v.steps, isStepUsage) || !isTokens(v.total) || !v.cost || typeof v.cost !== "object") return null;
+    const c = v.cost;
+    if (!num(c.usd) || !bool(c.complete) || !objs(c.unpriced, isUnpriced) || !str(c.asOf) || !str(c.source) || !c.byModel || typeof c.byModel !== "object") return null;
+    return { steps: v.steps, total: v.total, cost: c, pricesError: str(v.pricesError) ? v.pricesError : "" };
+  }
+  // asSpend is the Schedules page's spend per schedule: month and last30.
+  function asSpend(v) {
+    const out = {};
+    if (!v || typeof v.spend !== "object" || v.spend === null) return out;
+    for (const [k, x] of Object.entries(v.spend)) if (x && isSpent(x.month) && isSpent(x.last30)) out[k] = x;
+    return out;
+  }
+  // asCosts is the Costs page's answer, if well formed; else null.
+  function asCosts(v) {
+    if (!v || typeof v !== "object" || !str(v.asOf) || !str(v.source) || !str(v.zone) || !opt(v.yours, strs) || !opt(v.pricesError, str)) return null;
+    const months = objs(v.months, (m) => str(m.month) && /^\d{4}-\d{2}$/.test(m.month) && isSpent(m) && objs(m.byModel, (x) => str(x.model) && isSpent(x)));
+    const runs = objs(v.runs, (r) => str(r.workflowId) && RUN_ID.test(r.workflowId) && str(r.runId) && RUN_ID.test(r.runId) && opt(r.schedule, str) && str(r.at) && isSpent(r));
+    const scheds = objs(v.schedules, (s) => str(s.name) && /^[a-z0-9-]{1,40}$/.test(s.name) && isSpent(s));
+    return months && runs && scheds ? { ...v, yours: v.yours || [] } : null;
+  }
+  // usd is dollars to the cent, or "<$0.01" for less than half a cent.
+  const usd = (x) => (x > 0 && x < 0.005 ? "<$0.01" : `$${x.toFixed(2)}`);
+  // estimate says what a spent costs: a figure only if every step had a
+  // price; otherwise the priced part, saying how many steps have none.
+  function estimate(v) {
+    if (v.usd !== null) return `${usd(v.usd)} est.`;
+    const n = v.unpriced.length;
+    return v.priced > 0 ? `${usd(v.priced)} est. + ${n} step${n === 1 ? "" : "s"} with no price` : "no estimate (no price)";
+  }
+  // count is n with thousands separated.
+  const count = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE };
 })();
 if (typeof module !== "undefined") module.exports = DD;

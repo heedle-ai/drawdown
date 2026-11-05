@@ -54,6 +54,9 @@ type Execution struct {
 	Start      time.Time `json:"start"`
 	Close      time.Time `json:"close,omitzero"`
 	Ref        string    `json:"ref,omitempty"` // the ref it records on (loom.MemoRef), if known
+	// Skipped is why a run started nothing and has no record: its
+	// schedule's budget paused it (loom.MemoSkipped; roadmap 10.4).
+	Skipped string `json:"skipped,omitempty"`
 }
 
 // Temporal is what the UI needs from Temporal. TemporalClient implements
@@ -154,6 +157,9 @@ type Server struct {
 	// (its connectors file, ConnectorsFile), for the Connectors page.
 	Connectors     func() (pirn.Connectors, error)
 	ConnectorsFile string
+	// PricesFile is your prices file, if any (loom.ReadPrices): costs are
+	// estimated with it (roadmap 10.4).
+	PricesFile string
 	// Secrets, if set, is the keychain the Connectors page keeps keys in.
 	Secrets Secrets
 	// StepKeys, if set, is the vault steps read keys through (Secrets
@@ -224,6 +230,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/schedules", s.schedules)
 	mux.HandleFunc("POST /api/schedules", s.createSchedule)
 	mux.HandleFunc("POST /api/schedules/{name}/{action}", s.scheduleAction)
+	mux.HandleFunc("POST /api/schedules/{name}/budget", s.setBudget)
+	mux.HandleFunc("GET /api/costs", s.costs)
 	mux.HandleFunc("GET /api/connectors", s.connectors)
 	mux.HandleFunc("GET /api/memory", s.memory)
 	mux.HandleFunc("POST /api/memory/{op}", s.changeMemory)
@@ -729,6 +737,7 @@ func (s *Server) detail(w http.ResponseWriter, r *http.Request) {
 	if found {
 		rec.Shape = s.shapeOf(ctx, rec.Program, rec.Plan)
 		resp["record"] = rec
+		resp["usage"] = s.usageOf(rec)
 	}
 	if !found && terr != nil {
 		writeJSON(w, http.StatusNotFound, apiError{Error: "no record of this run, and Temporal: " + terr.Error()})

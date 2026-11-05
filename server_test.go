@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
@@ -50,6 +51,52 @@ type fakeTemporal struct {
 	listed  []treadle.Source
 	sched   map[string]*loom.Schedule
 	schedIn map[string]loom.RunInput
+	// realTime records runs at the time they run, not at fixed times.
+	realTime bool
+}
+
+// fakeSchedules is the fake's schedules as loom's budget check reads and
+// pauses them; f.mu is held.
+type fakeSchedules struct{ f *fakeTemporal }
+
+func (s fakeSchedules) Budget(_ context.Context, name string) (loom.ScheduleBudget, error) {
+	sc := s.f.sched[name]
+	if sc == nil {
+		return loom.ScheduleBudget{}, loom.ErrNoSchedule
+	}
+	b := loom.ScheduleBudget{TimeZone: sc.Spec.TimeZone, Paused: sc.Paused, Note: sc.Note}
+	if sc.Budget != nil {
+		b.Budget = *sc.Budget
+	}
+	return b, nil
+}
+
+func (s fakeSchedules) Pause(_ context.Context, name, note string) error {
+	if sc := s.f.sched[name]; sc != nil {
+		sc.Paused, sc.Note = true, note
+	}
+	return nil
+}
+
+// standInClaude answers ask, agent and act steps as Claude would, without
+// Claude: each a pirn result whose tokens depend on its arguments.
+func standInClaude(env *testsuite.TestWorkflowEnvironment) {
+	answer := func(in plan.Input) pirn.Answer {
+		n := int64(len(strings.Join(in.Args, " ")))
+		return pirn.Answer{Pirn: 1, Model: "claude-sonnet-5-5", Text: "A stand-in answer.", StopReason: "end_turn", InputTokens: 1200 + 40*n, OutputTokens: 300 + 3*n}
+	}
+	reply := func(v any) (string, error) { b, err := json.Marshal(v); return string(b), err }
+	env.RegisterActivityWithOptions(func(_ context.Context, in plan.Input) (string, error) { return reply(answer(in)) }, activity.RegisterOptions{Name: pirn.ActivityName})
+	env.RegisterActivityWithOptions(func(_ context.Context, in plan.Input) (string, error) {
+		a := answer(in)
+		a.InputTokens, a.OutputTokens = a.InputTokens*6, a.OutputTokens*4
+		return reply(pirn.AgentResult{Answer: a, Agent: 1, Turns: 6, Inputs: map[string]string{}})
+	}, activity.RegisterOptions{Name: pirn.AgentActivityName})
+	env.RegisterActivityWithOptions(func(_ context.Context, in plan.Input) (string, error) {
+		a := answer(in)
+		a.InputTokens, a.OutputTokens = a.InputTokens*3, a.OutputTokens*2
+		return reply(pirn.ActResult{Answer: a, Act: 1, Turns: 3, Ended: "done"})
+	}, activity.RegisterOptions{Name: pirn.ActActivityName})
 }
 
 func (f *fakeTemporal) CreateSchedule(ctx context.Context, name string, in loom.RunInput, spec loom.ScheduleSpec) error {
@@ -99,7 +146,7 @@ func (f *fakeTemporal) ScheduleAction(ctx context.Context, name, action string) 
 		f.mu.Unlock()
 	case "run":
 		// As Temporal does: the workflow ID with the time added.
-		wf, run, err := f.start(ctx, in, time.Now().UTC().Format("-2006-01-02T15:04:05.000000000Z"))
+		wf, run, err := f.start(ctx, in, time.Now().UTC().Format("-2006-01-02T15:04:05.000000000Z"), name)
 		if err != nil {
 			return err
 		}
@@ -118,22 +165,44 @@ func (f *fakeTemporal) Live(_ context.Context, wf string) ([]drawdown.LiveFrame,
 }
 
 func (f *fakeTemporal) Submit(ctx context.Context, in loom.RunInput) (string, string, error) {
-	return f.start(ctx, in, "")
+	return f.start(ctx, in, "", "")
 }
 
 // start runs and records in, its workflow ID with suffix added: a
-// schedule's runs have the time Temporal adds.
-func (f *fakeTemporal) start(ctx context.Context, in loom.RunInput, suffix string) (string, string, error) {
+// schedule's runs have the time Temporal adds, and are checked against
+// the schedule's budget first by loom's own check (roadmap 10.4).
+func (f *fakeTemporal) start(ctx context.Context, in loom.RunInput, suffix, schedule string) (string, string, error) {
 	// Real Temporal only starts the workflow here; a worker runs and records
 	// it later. The fake does both now, so it mustn't be bound by the
 	// server's Temporal timeout (DRAW-18).
 	ctx = context.WithoutCancel(ctx)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	wf, err := loom.WorkflowID(ctx, in)
+	if err != nil {
+		return "", "", err
+	}
+	wf += suffix
+	run := fmt.Sprintf("run-%d", len(f.execs)+1)
+	start := time.Unix(1761900000+int64(len(f.execs))*60, 0).UTC()
+	if f.realTime {
+		start = time.Now().UTC().Truncate(time.Second)
+	}
+	if schedule != "" {
+		note, err := (&loom.Recorder{Store: f.store, Schedules: fakeSchedules{f}}).Budget(ctx, loom.BudgetInput{Schedule: schedule, Ref: in.Ref, At: start})
+		if err != nil {
+			return "", "", err
+		}
+		if note != "" {
+			f.execs = append(f.execs, drawdown.Execution{WorkflowID: wf, RunID: run, Status: "Completed", Start: start, Close: start, Ref: in.Ref, Skipped: note})
+			return wf, run, nil
+		}
+	}
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	plan.Register(env)
 	shipment.RegisterCommands(env, f.sources)
+	standInClaude(env)
 	env.ExecuteWorkflow(plan.WorkflowName, in.Plan)
 	if err := env.GetWorkflowError(); err != nil {
 		return "", "", err
@@ -142,15 +211,8 @@ func (f *fakeTemporal) start(ctx context.Context, in loom.RunInput, suffix strin
 	if err := env.GetWorkflowResult(&res); err != nil {
 		return "", "", err
 	}
-	wf, err := loom.WorkflowID(ctx, in)
-	if err != nil {
-		return "", "", err
-	}
-	wf += suffix
-	run := fmt.Sprintf("run-%d", len(f.execs)+1)
-	start := time.Unix(1761900000+int64(len(f.execs))*60, 0).UTC()
 	if _, err := (&loom.Recorder{Store: f.store}).Record(ctx, loom.RecordInput{
-		Program: in.Program, Plan: in.Plan, Result: res, Ref: in.Ref, WorkflowID: wf, RunID: run, At: start,
+		Program: in.Program, Plan: in.Plan, Result: res, Ref: in.Ref, WorkflowID: wf, RunID: run, At: start, Schedule: schedule,
 	}); err != nil {
 		return "", "", err
 	}
@@ -544,6 +606,7 @@ func TestServeForBrowser(t *testing.T) {
 		t.Skip("set DRAWDOWN_BROWSER_ADDR to serve the UI for a browser test")
 	}
 	w := newWorld(t)
+	w.fake.realTime = true // runs this month, for the Costs page
 	commands := func() *registry.Registry {
 		reg := shipment.Registry()
 		reg.MustRegister(pirn.BuiltinSpec())
@@ -712,4 +775,27 @@ func TestSteps_ReportsTemporalErrorsWithoutFailing(t *testing.T) {
 	if steps, _ := m["steps"].([]any); code != 200 || steps == nil || len(steps) != 0 || !strings.Contains(fmt.Sprint(m["temporalError"]), "connection refused") {
 		t.Errorf("steps with Temporal down: %d %v", code, m)
 	}
+}
+
+// SetBudget sets a schedule's budget as loom.SetBudget does: raising it
+// resumes one its budget paused.
+func (f *fakeTemporal) SetBudget(_ context.Context, name string, b loom.Budget) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.sched[name]
+	if s == nil {
+		return serviceerror.NewNotFound("schedule not found")
+	}
+	was := 0.0
+	if s.Budget != nil {
+		was = s.Budget.USD
+	}
+	s.Budget = nil
+	if b.USD > 0 {
+		s.Budget = &b
+	}
+	if _, byBudget := loom.BudgetPaused(s.Note); s.Paused && byBudget && (b.USD == 0 || b.USD > was) {
+		s.Paused, s.Note = false, ""
+	}
+	return nil
 }

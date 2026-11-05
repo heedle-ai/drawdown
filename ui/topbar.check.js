@@ -36,11 +36,12 @@ const GOOD = {
   "/api/skills": { skills: [skill], pending: [waiting], problems: [] },
   "/api/memory": { memories: [], version: "", file: "/home/me/.heedle/memory.json" },
   [`/api/skills/${waiting.name}/review`]: { skill: waiting, files: [{ path: "SKILL.md", size: 120 }], diff: "", binary: [] },
-  // Paused by a failed run (Temporal's two notes), by heedle, and running:
-  // two need you.
+  // Paused by a failed run (Temporal's two notes), by its budget (roadmap
+  // 10.4), by heedle, and running: three need you.
   "/api/schedules": { schedules: [
     schedule("morning-brief", true, "paused due to workflow failure: sched-morning-brief-2026: activity failed"),
     schedule("weekly-report", true, "paused, workflow timedout: sched-weekly-report-2026"),
+    { ...schedule("news", true, "paused: monthly budget $0.01 reached (est.) in November 2026"), budget: { usd: 0.01 } },
     schedule("digest", true, "paused from heedle"),
     schedule("hourly", false, ""),
   ] },
@@ -52,7 +53,7 @@ const GOOD = {
       { name: "files", url: "https://files.example/mcp", tools: [], writes: [], secrets: [{ name: "FILES_KEY", from: "environment" }] },
     ] },
 };
-const COUNTS = { Skills: "1", Schedules: "2", Connectors: "2" };
+const COUNTS = { Skills: "1", Schedules: "3", Connectors: "2" };
 
 // BROKEN answers each count's request badly: an error, a malformed
 // answer, and no answer at all.
@@ -124,7 +125,7 @@ const bar = (page) => page.evaluate(() => {
 
 const SECTION_OF = { "": "Runs", "#/": "Runs", "#/run/wf/run1": "Runs", "#/step/wf/run1/n0": "Runs", "#/diff/a/b": "Runs", "#/agent/refs%2Floom%2Fmain": "Runs",
   "#/skills": "Skills", "#/skill/summarise": "Skills", [`#/skill/summarise/${HEX("a")}`]: "Skills", [`#/review/${waiting.name}`]: "Skills",
-  "#/schedules": "Schedules", "#/connectors": "Connectors", "#/memory": "Memory", "#/memory/extra": "Runs", "#/system": "System", "#/nowhere": "Runs", "#/constructor": "Runs", "#/skills/extra": "Runs",
+  "#/schedules": "Schedules", "#/costs": "Costs", "#/connectors": "Connectors", "#/memory": "Memory", "#/memory/extra": "Runs", "#/system": "System", "#/nowhere": "Runs", "#/constructor": "Runs", "#/skills/extra": "Runs",
   // Review 37: these blanked the page, or put an agent's header over the
   // home page.
   "#/agent": "Runs", "#/agent/refs%2Floom%2Fmain/extra": "Runs" };
@@ -164,14 +165,14 @@ async function main() {
       await page.waitForFunction(() => document.querySelectorAll("header .need").length === 3, null, { timeout: 15000 });
       if (hash.startsWith("#/review/")) await page.waitForSelector("main .step-hero");
       const b = await bar(page);
-      assert.deepEqual(b.items.map((i) => i.text), ["Runs", "Skills", "Schedules", "Connectors", "Memory", "System", "Temporal"], where);
-      assert.deepEqual(b.items.slice(0, 6).map((i) => i.href), ["#/", "#/skills", "#/schedules", "#/connectors", "#/memory", "#/system"], where);
-      for (const i of b.items.slice(0, 6)) assert.equal(i.need || "", COUNTS[i.text] || "", `${where}: ${i.text}'s count`);
+      assert.deepEqual(b.items.map((i) => i.text), ["Runs", "Skills", "Schedules", "Costs", "Connectors", "Memory", "System", "Temporal"], where);
+      assert.deepEqual(b.items.slice(0, 7).map((i) => i.href), ["#/", "#/skills", "#/schedules", "#/costs", "#/connectors", "#/memory", "#/system"], where);
+      for (const i of b.items.slice(0, 7)) assert.equal(i.need || "", COUNTS[i.text] || "", `${where}: ${i.text}'s count`);
       // Each count is read once, with what it counts (review 37: twice).
-      for (const name of ["Runs", "Skills (1 waiting for review)", "Schedules (2 paused after a failed or timed-out run)", "Connectors (2 keys to set)", "Memory", "System"]) {
+      for (const name of ["Runs", "Skills (1 waiting for review)", "Schedules (3 paused after a failed or timed-out run, or by a budget)", "Costs", "Connectors (2 keys to set)", "Memory", "System"]) {
         assert.equal(await page.getByRole("link", { name, exact: true }).count(), 1, `${where}: no link named "${name}"`);
       }
-      const t = b.items[6];
+      const t = b.items[7];
       assert.ok(b.last && t.href === GOOD["/api/info"].temporalUI && t.target === "_blank" && /noopener/.test(t.rel), `${where}: Temporal is last, in a new tab`);
       assert.ok(!/\d+ commands/.test(b.headerText), `${where}: the commands pill is gone`);
       for (const h of b.hrefs) assert.ok(h.startsWith("#/") || h === GOOD["/api/info"].temporalUI, `${where}: the header links to ${h}`);
@@ -181,7 +182,7 @@ async function main() {
       await page.evaluate(() => document.activeElement && document.activeElement.blur());
       await page.locator("header select, header .brand").first().focus();
       const reached = [];
-      for (let i = 0; i < 16 && reached.length < 7; i++) {
+      for (let i = 0; i < 18 && reached.length < 8; i++) {
         await page.keyboard.press("Tab");
         const f = await page.evaluate(() => {
           const a = document.activeElement;
@@ -191,7 +192,7 @@ async function main() {
         });
         if (f) { assert.ok(f.ring, `${where}: ${f.text} has no visible focus`); reached.push(f.text); }
       }
-      assert.deepEqual(reached, ["Runs", "Skills", "Schedules", "Connectors", "Memory", "System", "Temporal"], `${where}: keyboard order`);
+      assert.deepEqual(reached, ["Runs", "Skills", "Schedules", "Costs", "Connectors", "Memory", "System", "Temporal"], `${where}: keyboard order`);
       assert.deepEqual(errors, [], `${where}: page errors`);
       if (shots) {
         await page.evaluate(() => document.activeElement && document.activeElement.blur());
@@ -217,11 +218,11 @@ async function main() {
     {
       const answers = { ...GOOD, "/api/schedules/morning-brief/resume": {} };
       const { ctx, page, errors, asked } = await open(browser, cdn, { width: 1280, scheme: "light", answers, hash: "#/schedules" });
-      await page.waitForFunction(() => document.querySelector('header a[href="#/schedules"] .need')?.textContent.startsWith("2"));
+      await page.waitForFunction(() => document.querySelector('header a[href="#/schedules"] .need')?.textContent.startsWith("3"));
       answers["/api/schedules"] = { schedules: GOOD["/api/schedules"].schedules.map((s) => s.name === "morning-brief" ? { ...s, paused: false, note: "resumed from heedle" } : s) };
       const before = asked.length;
       await page.locator(".panel.connector", { hasText: "morning-brief" }).getByRole("button", { name: "Resume" }).click();
-      await page.waitForFunction(() => document.querySelector('header a[href="#/schedules"] .need')?.textContent.startsWith("1"), null, { timeout: 5000 });
+      await page.waitForFunction(() => document.querySelector('header a[href="#/schedules"] .need')?.textContent.startsWith("2"), null, { timeout: 5000 });
       assert.deepEqual(errors, []);
       assert.ok(asked.length > before, "resuming asked the API");
       checks++;
@@ -234,7 +235,7 @@ async function main() {
       for (let i = 0; i < 100 && !["/api/skills", "/api/schedules", "/api/connectors"].every((p) => asked.includes(p)); i++) await page.waitForTimeout(100);
       await page.waitForTimeout(500);
       const b = await bar(page);
-      assert.deepEqual(b.items.map((i) => i.need), ["", "", "", "", "", "", ""], "broken answers give no counts");
+      assert.deepEqual(b.items.map((i) => i.need), ["", "", "", "", "", "", "", ""], "broken answers give no counts");
       assert.ok(!/error|locked|couldn't/i.test(b.headerText), "broken answers say nothing in the bar");
       assert.deepEqual(b.current, [["Skills", "page"]]);
       assert.deepEqual(errors, []);

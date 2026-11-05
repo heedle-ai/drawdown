@@ -147,6 +147,9 @@ func execution(info *workflow.WorkflowExecutionInfo) Execution {
 			e.Ref = ref
 		}
 	}
+	if p, ok := info.GetMemo().GetFields()[loom.MemoSkipped]; ok {
+		converter.GetDefaultDataConverter().FromPayload(p, &e.Skipped)
+	}
 	return e
 }
 
