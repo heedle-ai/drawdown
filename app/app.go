@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -63,6 +64,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	agentImage := fs.String("agent-image", "", "content-pinned image ID agent steps run in (needs /bin/sh)")
 	connectorsFile := fs.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by name: an environment variable, or a keychain secret set with `heedle secret set NAME`)")
 	imageRegistry := fs.String("image-registry", "", "OCI repository (such as ghcr.io/acme/heedle-images) that (image … \"push\") pushes to, with the worker's podman login")
+	keepImages := fs.String("keep-images", "", "images the System page never removes, comma-separated (heedle up gives the ones its release pins); the worker's own images are kept too")
 	agentRegistry := fs.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -97,7 +99,10 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	stepKeys := &drawdown.OAuthVault{Keys: vault}
 	if *runWorker {
 		w := worker.New(c, *queue, reed.WorkerOptions(worker.Options{}))
-		if err := reed.Register(reg, w, browser); err != nil {
+		// Every step's containers are labelled with its run and step
+		// (roadmap 9.2, DRAW-505).
+		steps := loom.Labelled(w)
+		if err := reed.Register(reg, steps, browser); err != nil {
 			return err
 		}
 		// The key and the connectors are read again for every step, so a key
@@ -112,10 +117,10 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		})
 		loadConnectors := pirn.LastGood(func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) })
 		claude := pirn.Claude{Model: *askModel, KeyFrom: func(context.Context) (string, error) { return key() }}
-		if err := pirn.Register(reg, w, claude); err != nil {
+		if err := pirn.Register(reg, steps, claude); err != nil {
 			return err
 		}
-		if err := bobbin.RegisterImage(reg, w, bobbin.Runner{}, imageRegistryFor(*imageRegistry)); err != nil {
+		if err := bobbin.RegisterImage(reg, steps, bobbin.Runner{}, imageRegistryFor(*imageRegistry)); err != nil {
 			return err
 		}
 		// A bad file doesn't stop the UI that shows what's wrong with it
@@ -130,17 +135,17 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		}
 		agent := pirn.Agent{Claude: claude, Runner: bobbin.Runner{}, Image: *agentImage, Registry: registryFor(*agentRegistry), Connectors: connectors, Vault: stepKeys,
 			LoadConnectors: loadConnectors}
-		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
+		if err := pirn.RegisterAgent(reg, steps, agent); err != nil {
 			return err
 		}
 		act := pirn.Act{Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage}
-		if err := pirn.RegisterAct(reg, w, act); err != nil {
+		if err := pirn.RegisterAct(reg, steps, act); err != nil {
 			return err
 		}
 		// Skills are the store's, at their newest when drawdown starts; each
 		// run is checked against, and records, the versions it pins.
 		lib := &treadle.Library{Store: s}
-		skipped, err := treadle.Register(ctx, reg, w, agent, lib)
+		skipped, err := treadle.Register(ctx, reg, steps, agent, lib)
 		if err != nil {
 			return err
 		}
@@ -219,6 +224,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		Temporal:       drawdown.TemporalClient{Client: c, Queue: *queue},
 		TemporalUI:     *temporalUI,
 		Namespace:      *namespace,
+		System:         drawdown.PodmanSystem{Temporal: c, Kept: kept(*keepImages, *browserImage, *agentImage, *browserAgentImage), Mac: runtime.GOOS == "darwin"},
 		Examples: map[string]string{
 			"shipment": shipment.Program,
 			"echo":     `(pipe (par (echo "a") (echo "b")) echo)`,
@@ -313,4 +319,16 @@ func creator(a pirn.Agent) func(context.Context, string) (map[string][]byte, err
 		files, _, err := treadle.Create(ctx, a.Run, description)
 		return files, err
 	}
+}
+
+// kept is the images the System page never removes: those listed (heedle
+// up's pins) and the worker's own.
+func kept(list string, worker ...string) []string {
+	var out []string
+	for _, r := range append(strings.Split(list, ","), worker...) {
+		if r = strings.TrimSpace(r); r != "" {
+			out = append(out, r)
+		}
+	}
+	return out
 }

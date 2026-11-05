@@ -768,3 +768,30 @@ test("a proposal discloses the hosts its act steps may submit forms on, and a mi
   assert.deepEqual(lines.map((l) => [l.what, l.ok]), [["Act steps", false], ["Claude", false]]);
   assert.equal(lines[0].fix, "no browser-agent image");
 });
+
+test("the System page reads only well-formed answers, and links only to runs (DRAW-503)", () => {
+  const H = (c) => c.repeat(64);
+  const c = (o) => ({ id: H("a"), name: "s", image: "img", created: "2026-11-05T10:00:00Z", state: "running", labels: { kind: "agent", workflow: "loom-a/plan", run: "p1", step: "n0" },
+    workflow: "loom-a", run: "r1", status: "running", ...o });
+  const im = (o) => ({ id: "1", names: ["ghcr.io/heedle-ai/x@sha256:1"], size: 10, created: "2026-11-05T10:00:00Z", containers: 0, pinned: false, ...o });
+  const frame = (o) => ({ containers: [c()], images: [im()], keep: ["k"], machine: null, notes: [], errors: {}, ...o });
+  const v = DD.asSystem(frame({ containers: [c(), c({ id: "short" }), c({ labels: { kind: "evil" } }), c({ labels: { kind: "act", step: "--privileged" } }), null],
+    images: [im(), im({ names: [] }), im({ size: "9" })] }));
+  assert.equal(v.containers.length, 1);
+  assert.equal(v.images.length, 1);
+  assert.equal(v.unreadable, 6, "each bad entry is counted, never hiding the rest");
+  for (const bad of [null, [], "x", frame({ containers: "x" }), frame({ keep: [1] }), frame({ machine: { name: "m" } }), frame({ errors: { images: 7 } }), frame({ notes: "x" })]) {
+    assert.equal(DD.asSystem(bad), null, JSON.stringify(bad));
+  }
+  assert.ok(DD.asSystem(frame({ machine: { name: "m", running: true, cpus: 4, memory: 1, disk: 2 } })));
+  // A container links to its run only through an ID a link can hold.
+  assert.deepEqual(DD.runOf(c()), { href: "#/run/loom-a/r1", workflow: "loom-a" });
+  for (const o of [{ workflow: "" }, { run: "" }, { workflow: "a/b" }, { workflow: "javascript:alert(1)" }, { run: "x y" }]) assert.equal(DD.runOf(c(o)), null, JSON.stringify(o));
+  // Only a running run's container offers Stop run.
+  assert.ok(DD.stoppable(c()));
+  for (const o of [{ status: "canceled" }, { status: "unknown" }, { workflow: "" }]) assert.ok(!DD.stoppable(c(o)), JSON.stringify(o));
+  // What Remove old images removes: not kept, used by none.
+  const old = DD.oldImages([im({ id: "1", size: 5 }), im({ id: "2", size: 7, pinned: true }), im({ id: "3", size: 11, containers: 1 }), im({ id: "4", size: 13 })]);
+  assert.deepEqual(old.images.map((i) => i.id), ["1", "4"]);
+  assert.equal(old.bytes, 18);
+});

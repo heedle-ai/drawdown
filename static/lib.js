@@ -969,7 +969,7 @@ const DD = (() => {
   // === The top bar ==========================================================
 
   // SECTIONS are the top bar's sections, in its order.
-  const SECTIONS = ["runs", "skills", "schedules", "connectors"];
+  const SECTIONS = ["runs", "skills", "schedules", "connectors", "system"];
 
   // PAGES is every page the app shows other than the home page: the
   // route's first segment, the lengths of route it takes, and the section
@@ -985,6 +985,7 @@ const DD = (() => {
     review: { sizes: [2], section: "skills" },
     schedules: { sizes: [1], section: "schedules" },
     connectors: { sizes: [1], section: "connectors" },
+    system: { sizes: [1], section: "system" },
   };
 
   // page is the page a route (the hash's decoded segments) shows, and its
@@ -1029,6 +1030,46 @@ const DD = (() => {
     return asSchedules(res.data).filter((s) => s.paused && str(s.note) && FAILURE_PAUSE.test(s.note)).length;
   }
 
-  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
+  // === System (roadmap 9.2) ================================================
+
+  const KINDS9 = ["agent", "skill", "container", "connector", "browse", "act"];
+  const LABEL_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,254}$/;
+  const label = (v) => v === undefined || v === "" || (str(v) && LABEL_VALUE.test(v));
+  const isContainer = (c) => c && typeof c === "object" && str(c.id) && /^[0-9a-f]{64}$/.test(c.id) && str(c.name) && str(c.image) &&
+    c.labels && typeof c.labels === "object" && KINDS9.includes(c.labels.kind) && label(c.labels.workflow) && label(c.labels.run) && label(c.labels.step) &&
+    str(c.created) && str(c.state) && opt(c.cpu, str) && opt(c.memory, str) && label(c.workflow) && label(c.run) && opt(c.status, str);
+  const isImage = (im) => im && typeof im === "object" && str(im.id) && strs(im.names) && im.names.length > 0 && num(im.size) && num(im.containers) && bool(im.pinned) && str(im.created);
+  const isMachine = (m) => m && typeof m === "object" && str(m.name) && bool(m.running) && num(m.cpus) && num(m.memory) && num(m.disk);
+
+  // asSystem is /api/system's answer if its frame is well formed: the
+  // containers, images and notes it lists, each kept only if well formed
+  // and the others counted in unreadable, so one bad entry never hides the
+  // rest; else null.
+  function asSystem(v) {
+    if (!v || typeof v !== "object" || !Array.isArray(v.containers) || !Array.isArray(v.images) || !strs(v.keep) || !strs(v.notes) ||
+      !(v.machine === null || isMachine(v.machine)) || !v.errors || typeof v.errors !== "object" || !Object.values(v.errors).every(str)) return null;
+    const containers = v.containers.filter(isContainer), images = v.images.filter(isImage);
+    return { ...v, containers, images, unreadable: v.containers.length - containers.length + v.images.length - images.length };
+  }
+
+  // runOf is a container's run as a link to its page, if it names one a
+  // link can hold; else null.
+  function runOf(c) {
+    return c.workflow && c.run && RUN_ID.test(c.workflow) && RUN_ID.test(c.run)
+      ? { href: "#/run/" + encodeURIComponent(c.workflow) + "/" + encodeURIComponent(c.run), workflow: c.workflow } : null;
+  }
+
+  // stoppable says whether a container's run can be stopped from the page:
+  // its run is known and running.
+  const stoppable = (c) => !!c.workflow && c.status === "running";
+
+  // oldImages are the images a prune would remove: not kept, used by no
+  // container; and their bytes.
+  function oldImages(images) {
+    const old = images.filter((im) => !im.pinned && im.containers === 0);
+    return { images: old, bytes: old.reduce((n, im) => n + im.size, 0) };
+  }
+
+  return { asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
 })();
 if (typeof module !== "undefined") module.exports = DD;

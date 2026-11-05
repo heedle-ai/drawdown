@@ -2194,6 +2194,7 @@ function RunDetail({ workflow, run, history: ref }) {
           color=${css("--record")}><${Pill} cls="k-record" mono>${short(rec.commit)}<//><//>`}
         <a href=${temporalLink} target="_blank" rel="noopener" style=${{ marginLeft: "auto" }}>Open in Temporal Web UI ↗</a>
       </div>
+      ${status === "Running" && html`<${CancelRun} workflow=${workflow} />`}
       ${rec && html`<div style=${{ marginTop: "12px" }}><${Program} text=${rec.program} /></div>`}
       <div class="meta" style=${{ marginTop: "12px" }}>
         <span class="muted">Workflow</span><span class="mono">${workflow}</span>
@@ -2475,6 +2476,119 @@ function Diff({ from, to }) {
     <div class="panel" style=${{ marginTop: "12px", display: state === "ok" ? "block" : "none" }}><div ref=${ref}></div></div>`;
 }
 
+// === System (roadmap 9.2) ===
+// What heedle runs on this machine: its containers, each with its run and
+// a way to stop that run through Temporal; its images, and removing the
+// old ones; Podman's machine on a Mac. Nothing that isn't heedle's is
+// listed or touched, and the API answers only this machine.
+
+const KIND_DYE = { agent: "agent", skill: "skill", container: "container", connector: "other", browse: "browse", act: "browse" };
+const gb = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`;
+// gib is a machine's memory or disk as Podman counts it.
+const gib = (n) => `${(n / 2 ** 30).toFixed(n % 2 ** 30 ? 1 : 0)} GiB`;
+
+// StopRun asks, then stops a run through Temporal: its steps end and Podman
+// removes their containers. onDone gets the answer.
+function StopRun({ workflow, label = "Stop run", onDone }) {
+  const [sure, setSure] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const stop = async () => {
+    setBusy(true);
+    const r = await api("/api/system/stop", { workflow });
+    setBusy(false);
+    setSure(false);
+    onDone(r);
+  };
+  if (!sure) return html`<button type="button" onClick=${() => setSure(true)}>${label}</button>`;
+  return html`<span class="pills"><span>Stop this run? Its steps end, and their containers go.</span>
+    <button type="button" class="danger" disabled=${busy} onClick=${stop}>${busy ? "Stopping…" : label}</button>
+    <button type="button" disabled=${busy} onClick=${() => setSure(false)}>Keep it</button></span>`;
+}
+
+// CancelRun is the Run page's way to stop a running run.
+function CancelRun({ workflow }) {
+  const [msg, setMsg] = useState(null);
+  return html`<div class="row" style=${{ marginTop: "12px" }}>
+    <${StopRun} workflow=${workflow} label="Cancel run" onDone=${(r) => setMsg(r.ok
+      ? { ok: true, text: "Cancelled. Its steps end, and Podman removes their containers; the run shows as canceled in a moment." }
+      : { ok: false, text: (r.data && r.data.error) || String(r.data) })} />
+    ${msg && html`<p class=${msg.ok ? "" : "error"} role=${msg.ok ? "status" : "alert"}>${msg.text}</p>`}</div>`;
+}
+
+function SystemPage() {
+  const [data, setData] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [msg, setMsg] = useState(null);
+  const [pruning, setPruning] = useState(false);
+  useEffect(() => { api("/api/system").then(setData); }, [tick]);
+  const refresh = () => { setTick((t) => t + 1); setTimeout(() => setTick((t) => t + 1), 1500); };
+  if (!data) return html`<p class="muted">Loading…</p>`;
+  if (!data.ok) return html`<h2>System</h2><p class="error" role="alert">${(data.data && data.data.error) || String(data.data)}</p>`;
+  const v = DD.asSystem(data.data);
+  if (!v) return html`<h2>System</h2><p class="error">The server's answer wasn't understood.</p>`;
+  const old = DD.oldImages(v.images);
+  const total = v.images.reduce((n, im) => n + im.size, 0);
+  const done = (r, ok) => { setMsg(r.ok ? { ok: true, text: ok(r.data) } : { ok: false, text: (r.data && r.data.error) || String(r.data) }); refresh(); };
+  const prune = async () => {
+    setPruning(true);
+    const r = await api("/api/system/prune", {});
+    setPruning(false);
+    done(r, (d) => d.removed.length ? `Removed ${d.removed.length} old image name${d.removed.length === 1 ? "" : "s"}.` : "No old images to remove.");
+  };
+  return html`
+    <h2>System</h2>
+    <p class="lede">What heedle runs on this machine. Only heedle's own containers and images are listed here, and only they are ever stopped or removed.</p>
+    ${msg && html`<p class=${msg.ok ? "" : "error"} role=${msg.ok ? "status" : "alert"}>${msg.text}</p>`}
+    ${v.unreadable > 0 && html`<p class="error" role="alert">${v.unreadable} entr${v.unreadable === 1 ? "y" : "ies"} couldn't be shown.</p>`}
+
+    <h3>Containers</h3>
+    ${v.errors.containers ? html`<p class="error">${v.errors.containers}</p>`
+      : v.containers.length === 0 ? html`<div class="panel muted">No heedle containers are running.</div>`
+      : v.containers.map((c) => {
+        const run = DD.runOf(c);
+        return html`<div class="panel connector" key=${c.id}>
+          <div class="pills">
+            <${Pill} cls=${"k-" + KIND_DYE[c.labels.kind]}>${c.labels.kind}<//>
+            ${run ? html`<a class="mono" href=${run.href}>${run.workflow}</a>` : html`<span class="mono muted">${c.workflow || "not in a run"}</span>`}
+            ${c.status && html`<${Pill} cls=${c.status === "running" ? "s-Running" : "k-other"} plain>${c.status}<//>`}
+            ${c.labels.step && html`<${Pill} cls="k-other" plain mono>step ${c.labels.step}<//>`}
+            <${Pill} cls="k-other" plain>${ago(c.created) || "just now"}<//>
+            <span style=${{ marginLeft: "auto" }}>${DD.stoppable(c) && html`<${StopRun} workflow=${c.workflow} onDone=${(r) => done(r, () => `Stopped ${c.workflow}: its steps end, and Podman removes their containers.`)} />`}</span>
+          </div>
+          <p class="mono muted cg-wrap" style=${{ margin: "8px 0 0" }}>${c.image}</p>
+          ${(c.cpu || c.memory) && html`<p class="muted" style=${{ margin: "4px 0 0" }}>CPU ${c.cpu || "?"} · memory ${c.memory || "?"}</p>`}
+        </div>`;
+      })}
+
+    <h3>Images</h3>
+    ${v.errors.images ? html`<p class="error">${v.errors.images}</p>` : html`
+      <div class="panel">
+        ${v.images.length === 0 ? html`<p class="muted" style=${{ margin: 0 }}>No heedle images.</p>` : html`
+          <ul class="sys-images">${v.images.map((im) => html`<li key=${im.id}>
+            <span class="mono cg-wrap">${im.names.join(", ")}</span>
+            <span class="pills"><${Pill} cls="k-other" plain>${gb(im.size)}<//>
+              ${im.pinned ? html`<${Pill} cls="s-Completed">kept<//>` : im.containers > 0 ? html`<${Pill} cls="s-Running" plain>in use<//>` : html`<${Pill} cls="k-other" plain>old<//>`}</span></li>`)}</ul>`}
+        <div class="row">
+          <span class="muted">${gb(total)} in all${old.images.length ? `; ${gb(old.bytes)} is old` : ""}.</span>
+          <button type="button" disabled=${pruning || old.images.length === 0 || v.keep.length === 0} onClick=${prune}>${pruning ? "Removing…" : "Remove old images"}</button>
+        </div>
+        ${v.keep.length === 0 && html`<p class="muted">Old images can be removed only when the worker knows which to keep (heedle up tells it).</p>`}
+      </div>`}
+
+    ${v.machine && html`
+      <h3>Podman's machine</h3>
+      <div class="panel">
+        <div class="pills"><strong>${v.machine.name}</strong>
+          <${Pill} cls=${v.machine.running ? "s-Completed" : "s-Failed"}>${v.machine.running ? "running" : "stopped"}<//>
+          <${Pill} cls="k-other" plain>${v.machine.cpus} CPU${v.machine.cpus === 1 ? "" : "s"}<//>
+          <${Pill} cls="k-other" plain>${gib(v.machine.memory)} memory<//>
+          <${Pill} cls="k-other" plain>${gib(v.machine.disk)} disk<//></div>
+        ${v.notes.map((n, i) => html`<p class="note" key=${i}>${n}</p>`)}
+      </div>`}
+    ${v.errors.machine && html`<p class="error">Podman's machine: ${v.errors.machine}</p>`}
+    <p><button type="button" class="link-btn" onClick=${() => setTick((t) => t + 1)}>Refresh</button></p>`;
+}
+
 // === App ===================================================================
 
 // ErrorBoundary keeps one broken view from blanking the page: it says what
@@ -2531,6 +2645,7 @@ const SECTION_LINKS = [
   { section: "skills", href: "#/skills", label: "Skills", dye: "skill", need: (n) => `${n} waiting for review` },
   { section: "schedules", href: "#/schedules", label: "Schedules", dye: "record", need: (n) => `${n} paused after a failed or timed-out run` },
   { section: "connectors", href: "#/connectors", label: "Connectors", dye: "agent", need: (n) => `${n} key${n === 1 ? "" : "s"} to set` },
+  { section: "system", href: "#/system", label: "System", dye: "container" },
 ];
 
 const COUNT = { skills: DD.skillsWaiting, schedules: DD.schedulesStopped, connectors: DD.keysToSet };
@@ -2642,6 +2757,7 @@ function App() {
     case "schedules": body = html`<${SchedulesPage} />`; break;
     case "review": body = html`<${ReviewPage} key=${route[1]} name=${route[1]} />`; break;
     case "skill": body = html`<${SkillPage} key=${route.join("/")} name=${route[1]} version=${route[2]} />`; break;
+    case "system": body = html`<${SystemPage} />`; break;
     default: body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;
   }
 

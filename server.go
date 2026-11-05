@@ -171,6 +171,9 @@ type Server struct {
 	// OAuthClient, if set, reaches MCP and authorization servers when a
 	// connector is added by signing in.
 	OAuthClient *http.Client
+	// System, if set, is what the System page sees and does, from this
+	// machine only (roadmap 9.2).
+	System System
 
 	programs sync.Map // tree ID -> program text; trees never change
 
@@ -225,6 +228,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/connectors/remove", s.addConnector)
 	mux.HandleFunc("POST /api/connectors/connect", s.connectConnector)
 	mux.HandleFunc("GET /oauth/callback", s.oauthCallback)
+	mux.HandleFunc("GET /api/system", s.system)
+	mux.HandleFunc("POST /api/system/stop", s.systemStop)
+	mux.HandleFunc("POST /api/system/prune", s.systemPrune)
 	return s.guard(mux)
 }
 
