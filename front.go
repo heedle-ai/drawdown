@@ -28,6 +28,9 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	if !readJSONUpTo(w, r, &req, maxAskBody) {
 		return
 	}
+	// What heedle remembers is yours: shown and changed only from this
+	// machine, and sent only with requests from it (review 47).
+	req.NoMemory = req.NoMemory || !fromThisMachine(r, s.Hosts)
 	ctx, cancel := context.WithTimeout(r.Context(), loom.AskTimeout+90*time.Second)
 	defer cancel()
 	out, err := s.Temporal.Ask(ctx, req)

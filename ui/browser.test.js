@@ -427,11 +427,17 @@ test("Remember saves only on Remember, the memory page shows it as written, and 
   assert.equal(await p.locator("main img").count(), 0);
   assert.equal(await p.evaluate(() => window.pwned), undefined);
   assert.equal(await p.locator('header a[aria-current="page"]').textContent(), "Memory");
-  // Edit in place.
+  // Edit in place: new words are a new memory, so the tab's turns made
+  // with the old ones go too (review 47).
+  const before = (await memory()).memories[0].id;
+  await p.evaluate((id) => sessionStorage.setItem("drawdown.ask", JSON.stringify([
+    { request: "Plan Porto", proposal: { summary: "Porto, vegetarian.", program: '(echo "x")', plan: { nodes: [] }, memory: [id] } }])), before);
   await p.getByRole("button", { name: "Edit" }).click();
   await p.getByLabel("Change what heedle remembers").fill("Vegan.");
   await p.getByRole("button", { name: "Save" }).click();
   await p.locator(".memory-text", { hasText: "Vegan." }).waitFor();
+  assert.notEqual((await memory()).memories[0].id, before);
+  assert.deepEqual(await p.evaluate(() => JSON.parse(sessionStorage.getItem("drawdown.ask"))), []);
   // Edited by hand while the page is open: Forget is refused, the page
   // shows what the file holds now, and the hand edit stays.
   fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("Vegan.", "Vegan, but eats eggs."));
