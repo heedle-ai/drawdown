@@ -622,7 +622,8 @@ function PendingForm({ workflow, form, onDone }) {
     setBusy(send ? "send" : "cancel"); setError("");
     const r = await api(`/api/forms/${encodeURIComponent(workflow)}`, { id: form.id, send });
     setBusy("");
-    if (r.ok) onDone(r.data); else setError((r.data && r.data.error) || String(r.data));
+    if (r.ok || r.status === 409) onDone(); // 409: decided already, or no longer waiting
+    if (!r.ok) setError((r.data && r.data.error) || String(r.data));
   };
   return html`
     <div class="pending-form" role="group" aria-label="A form waiting to be sent">
@@ -638,14 +639,15 @@ function PendingForm({ workflow, form, onDone }) {
 
 // Live view: the latest frame of each browsing step a running run has.
 function LiveView({ workflow }) {
-  const polled = usePoll(`/api/live/${encodeURIComponent(workflow)}`, 2000, [workflow]);
-  const [decided, setDecided] = useState(null);
-  useEffect(() => setDecided(null), [polled]);
-  const data = decided || polled;
+  const data = usePoll(`/api/live/${encodeURIComponent(workflow)}`, 2000, [workflow]);
+  // Forms decided here stay decided: a heartbeat can show one as waiting
+  // for up to a minute after (review 41).
+  const [decided, setDecided] = useState(() => new Set());
+  const waiting = (f) => { const p = DD.pendingForm(f); return p && !decided.has(p.id) ? p : null; };
   if (!data || !data.frames || data.frames.length === 0) return null;
   return html`${data.frames.map((f) => html`
     <div class="panel live" key=${f.activity} style=${{ marginTop: "12px" }}>
-      ${DD.pendingForm(f) && html`<${PendingForm} workflow=${workflow} form=${DD.pendingForm(f)} onDone=${setDecided} />`}
+      ${waiting(f) && html`<${PendingForm} workflow=${workflow} form=${waiting(f)} onDone=${() => setDecided((d) => new Set(d).add(waiting(f).id))} />`}
       <div class="pills"><${StatusPill} status="Running" /> <${KindPill} kind=${f.kind === "act" ? "act" : "browse"}>${f.kind === "act" ? "Claude in a browser" : "live browser"}<//>
         <span class="mono">${f.url}</span>
         <${Pill} cls="k-other" plain>attempt ${f.attempt}<//><span class="muted">view only, updates every few seconds</span></div>
