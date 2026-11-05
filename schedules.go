@@ -51,7 +51,8 @@ type scheduleRequest struct {
 	TimeZone string `json:"timeZone,omitempty"`
 	// ActHosts are the hosts the page showed its act steps may act on
 	// (programRequest's; review 39).
-	ActHosts []string `json:"actHosts,omitempty"`
+	ActHosts       []string `json:"actHosts,omitempty"`
+	ActSendsFreely []string `json:"actSendsFreely,omitempty"`
 }
 
 // createSchedule compiles the program as a run would be, and has Temporal
@@ -75,7 +76,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
 		return
 	}
-	if !actShown(w, p, req.ActHosts) {
+	if !actShown(w, p, req.ActHosts, req.ActSendsFreely) {
 		return
 	}
 	ref, err := s.ref(r.Context(), req.Ref)

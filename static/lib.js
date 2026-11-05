@@ -44,12 +44,15 @@ const DD = (() => {
   // roadmap 9.5), with every field the page reads of the right type and
   // every screenshot a JPEG data URL; else null.
   const JPEG_DATA = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
-  const ENDED = ["finished", "stopped", "max_calls", "max_turns", "timeout", "error"];
+  const ENDED = ["finished", "stopped", "max_calls", "max_turns", "timeout", "error", "cancelled"];
   function asAct(v) {
     if (!asAnswer(v) || v.act !== 1 || !str(v.image) || !num(v.turns) || !str(v.url) || !ENDED.includes(v.ended)) return null;
     if (!objs(v.calls, (c) => str(c.tool) && str(c.input) && opt(c.output, str) && opt(c.isError, bool) && opt(c.truncated, bool) &&
       opt(c.url, str) && opt(c.screenshot, (x) => str(x) && JPEG_DATA.test(x)))) return null;
     if (!strs(v.allowed) || !strs(v.blocked) || !num(v.blockedTotal) || !strs(v.inputs) || !opt(v.blockedUnknown, bool)) return null;
+    // Roadmap 9.7: the sends it held for a person, and whether its program
+    // let it send without asking (records from 9.5 have neither).
+    if (!opt(v.held, strs) || !opt(v.heldTotal, num) || !opt(v.sendWithoutAsking, bool)) return null;
     return v;
   }
 
@@ -63,6 +66,7 @@ const DD = (() => {
       max_calls: "stopped at the limit on actions",
       max_turns: "stopped at the turn limit",
       timeout: "stopped when its time ran out",
+      cancelled: "cancelled: nothing was sent",
     }[ended] || ended;
   }
 
@@ -136,6 +140,8 @@ const DD = (() => {
       const a = o.act;
       const rows = [["Model", a.model], ["Turns", String(a.turns)], ["Actions", String(a.calls.length)], ["Ended", actEnding(a.ended)],
         ["Last page", a.url || "none"], ["Could reach", a.allowed.join(", ")], ["Blocked", a.blockedUnknown ? "unknown: the browser couldn't say" : `${a.blockedTotal} request${a.blockedTotal === 1 ? "" : "s"}`]];
+      if (a.sendWithoutAsking) rows.push(["Sending", "without asking: its program said so"]);
+      else if (num(a.heldTotal)) rows.push(["Held", `${a.heldTotal} send${a.heldTotal === 1 ? "" : "s"} until a person said so`]);
       if (num(a.inputTokens) && num(a.outputTokens)) rows.push(["Tokens", `${a.inputTokens} in, ${a.outputTokens} out`]);
       return rows;
     }
@@ -824,6 +830,13 @@ const DD = (() => {
   // An act step's host, as reed's allowlist writes it: a lower-case name
   // or address.
   const ACT_HOST = /^[a-z0-9.:\[\]-]{1,253}$/;
+  // pendingForm is a live frame's form waiting to be sent (roadmap 9.7),
+  // or null.
+  function pendingForm(f) {
+    const p = f && f.kind === "act" && f.pending;
+    return p && typeof p === "object" && str(p.id) && /^[0-9a-f]{1,64}$/.test(p.id) && str(p.summary) && opt(p.node, str) && str(p.url) ? p : null;
+  }
+
   // strsOf is v if it's a list of hosts as act writes them, else [].
   function strsOf(v) { return strs(v) && v.every((x) => ACT_HOST.test(x)) ? v : []; }
 
@@ -846,8 +859,11 @@ const DD = (() => {
     // The hosts its act steps may submit forms on, disclosed before Run
     // (roadmap 9.5): only with a program.
     if (!opt(v.actHosts, (h) => strs(h) && h.every((x) => ACT_HOST.test(x))) || (v.actHosts && v.actHosts.length && !program)) return null;
+    // Roadmap 9.7: the hosts whose act steps send without asking, each one
+    // of actHosts.
+    if (!opt(v.actSendsFreely, (h) => strs(h) && h.every((x) => (v.actHosts || []).includes(x)))) return null;
     return { summary: v.summary, program, plan: program ? v.plan : null, schedule: sp || null, name: sp ? v.name : "", skill, ready: v.ready ? { ...v.ready, needs: v.ready.needs || [] } : null,
-      actHosts: v.actHosts || [], remember, memory: v.memory || [], usage: asStepUsages(v.usage) };
+      actHosts: v.actHosts || [], actSendsFreely: v.actSendsFreely || [], remember, memory: v.memory || [], usage: asStepUsages(v.usage) };
   }
 
   // === Memory (roadmap 10.1) ===============================================
@@ -1208,6 +1224,6 @@ const DD = (() => {
     return `https://github.com/${m[1]}/${m[2]}/tree/${b}/skills/${name}`;
   }
 
-  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
+  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, pendingForm, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
 })();
 if (typeof module !== "undefined") module.exports = DD;
