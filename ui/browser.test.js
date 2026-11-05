@@ -387,6 +387,64 @@ test("an act step's page shows its actions in order, each with its screenshot", 
   await ctx.close();
 });
 
+// Roadmap 9.9: an act step that replayed an earlier run's script says so
+// on its page, marks each replayed action, says where it handed over to
+// Claude and why, and lists the script it kept by Playwright locator.
+test("a replayed act step says what it replayed and where Claude took over", async () => {
+  const sub = await (await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program: '(echo "replay")' }) })).json();
+  const detailURL = `/api/runs/${encodeURIComponent(sub.workflowId)}/${encodeURIComponent(sub.runId)}`;
+  for (let i = 0; ; i++) {
+    const d = await (await fetch(BASE + detailURL)).json();
+    if (d.record) break;
+    if (i > 100) throw new Error("the run wasn't recorded");
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const sha = "a".repeat(64);
+  const act = {
+    pirn: 1, model: "claude-sonnet-5-5", text: "Sent the contact form for Ada Lovelace.\nResult: finished", stopReason: "end_turn", inputTokens: 310, outputTokens: 40,
+    act: 1, image: "sha256:" + "b".repeat(64), turns: 3,
+    calls: [
+      { tool: "browser_navigate", input: '{"url":"http://forms-srv:8080/contact/"}', output: "ok", url: "http://forms-srv:8080/contact/", replayed: true },
+      { tool: "browser_snapshot", input: "{}", output: '- textbox "Email address" [ref=e7]', url: "http://forms-srv:8080/contact/" },
+      { tool: "browser_fill_form", input: '{"fields":[{"name":"Email address","target":"e7","value":"⟨email⟩"}]}', output: "ok", url: "http://forms-srv:8080/contact/" },
+    ],
+    url: "http://forms-srv:8080/contact/", allowed: ["forms-srv"], blocked: [], blockedTotal: 0, inputs: [], ended: "finished", held: [], heldTotal: 0,
+    script: [
+      { tool: "browser_navigate", input: '{"url":"http://forms-srv:8080/contact/"}', outline: "", outlineSha256: sha, replayed: true },
+      { tool: "browser_fill_form", input: '{"fields":[{"name":"Email address","target":"@0","value":"⟨email⟩"}]}', targets: [{ role: "textbox", name: "Email address" }], outline: "", outlineSha256: sha },
+    ],
+    scriptInputs: sha,
+    replay: { from: "0b5c2d7e-run-one", record: "c".repeat(40), steps: 4, replayed: 1, handedOver: true, at: 2,
+      why: 'the page differs from the one recorded: it has no getByRole("textbox", { name: "Email", exact: true })' },
+  };
+  for (const scheme of ["light", "dark"]) {
+    const { p, ctx, errors } = await page({ scheme });
+    await ctx.route("**" + detailURL + "*", async (r) => {
+      const res = await r.fetch(), d = await res.json();
+      d.record.plan.nodes = [{ id: "n0", activity: "Act", args: ["Send the contact form as me", "http://forms-srv:8080/contact/"] }];
+      d.record.outputs = { n0: JSON.stringify(act) };
+      d.usage = { steps: [{ node: "n0", kind: "act", model: "claude-sonnet-5-5", tokens: { input: 310, output: 40 }, requests: 3, replayed: "part" }], total: { input: 310, output: 40 },
+        cost: { usd: 0.0015, complete: true, unpriced: [], asOf: "2026-11-05", source: "https://platform.claude.com/docs/en/about-claude/pricing", byModel: {} } };
+      r.fulfill({ response: res, json: d });
+    });
+    // The run's usage says the step was partly replayed (its tokens are Claude's part).
+    await p.goto(BASE + "/#/run/" + [sub.workflowId, sub.runId].map(encodeURIComponent).join("/"));
+    await p.locator("table.costs").waitFor();
+    assert.equal(await p.locator("table.costs tbody tr .pill").textContent(), "partly replayed");
+    await p.goto(BASE + "/#/step/" + [sub.workflowId, sub.runId, "n0"].map(encodeURIComponent).join("/"));
+    const steps = p.getByRole("list", { name: "Actions" });
+    await steps.waitFor();
+    assert.deepEqual(await steps.locator(".act-head .pill").allTextContents(), ["replayed"]);
+    assert.equal(await p.locator(".replay-note").first().textContent(),
+      'replayed 1 of 4 from run 0b5c2d7e-run, then Claude from action 2: the page differs from the one recorded: it has no getByRole("textbox", { name: "Email", exact: true })');
+    await p.locator(".act-script summary").first().click();
+    assert.equal(await p.locator(".act-script .mono").first().textContent(), 'getByRole("textbox", { name: "Email address", exact: true })');
+    if (process.env.DRAWDOWN_SHOTS) await p.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `act-replay-${scheme}.png`), fullPage: true });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
 // Review 39: the editor's Run says where act steps may act, and sends
 // those hosts; the server starts nothing it wasn't shown.
 test("the editor shows where act steps may act, and Run sends those hosts", async () => {
