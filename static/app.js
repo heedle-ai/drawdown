@@ -603,13 +603,14 @@ function AgentTree({ refs, heads, current }) {
 // ActNote says, above Run, what a program's act steps may do (roadmap
 // 9.5, 9.7): click and type on their hosts, and stop before sending and
 // ask; any that send without asking, in red.
-function ActNote({ hosts, freely }) {
+function ActNote({ hosts, freely, uses }) {
   if (!hosts || hosts.length === 0) return null;
   const list = (hs) => hs.map((h, i) => html`${i ? ", " : ""}<span class="mono" key=${h}>${h}</span>`);
   const asking = hosts.filter((h) => !(freely || []).includes(h));
   return html`
     ${asking.length > 0 && html`<p class="acts asks" role="note">Its act steps can click and type on ${list(asking)}, and stop before sending and ask you.</p>`}
-    ${freely && freely.length > 0 && html`<p class="acts" role="note"><strong>Its act steps can click, type and submit forms on ${list(freely)} without asking again.</strong></p>`}`;
+    ${freely && freely.length > 0 && html`<p class="acts" role="note"><strong>Its act steps can click, type and submit forms on ${list(freely)} without asking again.</strong></p>`}
+    ${DD.usesOf(uses) && uses.length > 0 && html`<p class="acts asks" role="note">They may use your ${DD.usesWords(uses)}, from <a href="#/connectors">You</a>. Claude never sees them.</p>`}`;
 }
 
 // PendingForm is a form an act step filled and waits to send: Claude's
@@ -1113,7 +1114,7 @@ function nodeCard(n, step, output) {
 const localZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } };
 const EVERY = [["1h", "every hour"], ["6h", "every 6 hours"], ["24h", "every day"], ["168h", "every week"]];
 
-function ScheduleForm({ program, history, actHosts, actSendsFreely, onDone }) {
+function ScheduleForm({ program, history, actHosts, actSendsFreely, actUses, onDone }) {
   const [name, setName] = useState("");
   const [how, setHow] = useState("every");
   const [every, setEvery] = useState("24h");
@@ -1124,7 +1125,7 @@ function ScheduleForm({ program, history, actHosts, actSendsFreely, onDone }) {
   const [made, setMade] = useState("");
   const make = async () => {
     setBusy(true); setErr("");
-    const body = { name, program, ref: history, actHosts, actSendsFreely, ...(how === "every" ? { every } : { cron, timeZone: zone }) };
+    const body = { name, program, ref: history, actHosts, actSendsFreely, actUses, ...(how === "every" ? { every } : { cron, timeZone: zone }) };
     const r = await api("/api/schedules", body);
     setBusy(false);
     if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
@@ -1235,6 +1236,50 @@ function KeyRow({ k, onDone, note }) {
           ${k.from === "keychain" && html`<button type="button" disabled=${busy} onClick=${() => send("/api/secrets/delete", { name: k.name })}>Remove</button>`}
         </form>`}
       ${note && html`<p class="muted">${note}</p>`}
+      ${err && html`<p class="error" role="alert">${err}</p>`}
+    </div>`;
+}
+
+// You is the person's details act steps may use (roadmap 9.8): kept in
+// this machine's keychain, shown and changed only here, each used only by
+// a step whose program names it, and never shown to Claude.
+function You() {
+  const [data, setData] = useState(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => { api("/api/profile").then(setData); }, [tick]);
+  if (!data) return null;
+  if (!data.ok) return html`<div class="panel connector" id="you"><div class="pills"><strong>You</strong></div><p class="muted">${(data.data && data.data.error) || "Your details can't be shown here."}</p></div>`;
+  const fields = (data.data.fields || []).filter((f) => f && Object.hasOwn(DD.PROFILE, f.field));
+  return html`
+    <div class="panel connector" id="you">
+      <div class="pills"><strong>You</strong><${Pill} cls="k-act" plain>act steps that name them<//></div>
+      <p class="muted">Kept in this machine's keychain and shown only here. A step uses only the details its program names, such as <span class="mono">:uses "name email"</span>; Claude types a placeholder and never sees them, and frames hide them.</p>
+      ${fields.map((f) => html`<${DetailRow} key=${f.field} f=${f} onDone=${() => setTick((t) => t + 1)} />`)}
+    </div>`;
+}
+
+function DetailRow({ f, onDone }) {
+  const [value, setValue] = useState(f.value || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => setValue(f.value || ""), [f.value]);
+  const send = async (path, body) => {
+    setBusy(true); setErr("");
+    const r = await api(path, body);
+    setBusy(false);
+    if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
+    onDone();
+  };
+  const id = "you-" + f.field;
+  return html`
+    <div class="key-row">
+      <form class="row" onSubmit=${(e) => { e.preventDefault(); if (value.trim()) send("/api/profile", { field: f.field, value }); }}>
+        <label for=${id} class="detail-label">Your ${DD.PROFILE[f.field]}</label>
+        <input id=${id} class="detail" autocomplete="off" spellcheck="false" value=${value} onInput=${(e) => setValue(e.target.value)} placeholder="not set" />
+        <button class="primary" type="submit" disabled=${busy || !value.trim() || value === f.value}>${busy ? "Saving…" : "Save"}</button>
+        ${f.set && html`<button type="button" disabled=${busy} onClick=${() => send("/api/profile/delete", { field: f.field })}>Forget</button>`}
+      </form>
+      ${f.error && html`<p class="error mono">${f.error}</p>`}
       ${err && html`<p class="error" role="alert">${err}</p>`}
     </div>`;
 }
@@ -1401,6 +1446,7 @@ function ConnectorsPage() {
       <div class="pills"><strong>Claude</strong><${Pill} cls="k-agent" plain>ask and agent steps<//></div>
       <${KeyRow} k=${v.anthropic} onDone=${refresh} />
     </div>
+    <${You} />
     ${v.error && html`<p class="error mono" role="alert">${v.file}: ${v.error}. No connector is used until it's fixed.</p>`}
     ${v.unreadable > 0 && html`<p class="error" role="alert">${v.unreadable} connector${v.unreadable === 1 ? "" : "s"} couldn't be shown.</p>`}
     ${v.connectors.length === 0 && !v.error && html`<div class="panel muted" style=${{ marginTop: "12px" }}>
@@ -1993,7 +2039,7 @@ function ProposalCard({ p, history, latest }) {
   }, [p.name, latest]);
   const run = async () => {
     setBusy("run"); setNote(null);
-    const r = await api("/api/runs", { program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely });
+    const r = await api("/api/runs", { program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely, actUses: p.actUses });
     setBusy("");
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setNote({ error: (r.data && r.data.error) || String(r.data) });
@@ -2001,7 +2047,7 @@ function ProposalCard({ p, history, latest }) {
   const schedule = async () => {
     setBusy("schedule"); setNote(null);
     const sp = p.schedule;
-    const body = { name, program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
+    const body = { name, program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely, actUses: p.actUses, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
     const r = await api("/api/schedules", body);
     setBusy("");
     setNote(r.ok ? { ok: html`Scheduled <a href="#/schedules" class="mono">${name}</a>, ${DD.when(sp)}. Each run is recorded like any other.` }
@@ -2047,7 +2093,7 @@ function ProposalCard({ p, history, latest }) {
             ${!l.ok && l.href && html`<a class="btn" href=${l.href}>Connect</a>`}
           </li>`)}
         </ul>`}
-        <${ActNote} hosts=${p.actHosts} freely=${p.actSendsFreely} />
+        <${ActNote} hosts=${p.actHosts} freely=${p.actSendsFreely} uses=${p.actUses} />
         ${!ready ? html`<p><button class="link-btn" onClick=${check}>Check whether it can run</button></p>`
           : !ready.ready && html`<p><button class="link-btn" onClick=${check}>Check again</button></p>`}
         ${shape && html`<${CompositionGraph} plan=${shape.plan} shape=${shape.shape} />`}
@@ -2138,7 +2184,7 @@ function NewRun({ info, history: ref }) {
 
   const run = async () => {
     setBusy(true); setSubmitError("");
-    const r = await api("/api/runs", { program, ref, actHosts, actSendsFreely });
+    const r = await api("/api/runs", { program, ref, actHosts, actSendsFreely, actUses });
     setBusy(false);
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setSubmitError(r.data.error || String(r.data));
@@ -2158,18 +2204,19 @@ function NewRun({ info, history: ref }) {
   // server starts nothing it wasn't (review 39).
   const actHosts = plan && DD.strsOf(result.data.actHosts);
   const actSendsFreely = plan && DD.strsOf(result.data.actSendsFreely);
+  const actUses = plan && DD.usesOf(result.data.actUses) ? result.data.actUses : [];
   return html`
     <${Describe} program=${program} onProgram=${setProgram} />
     <div class="panel">
       <${ProgramEditor} value=${program} onChange=${setProgram} handle=${editor} placeholder='(pipe (par (echo "a") (echo "b")) echo)' />
-      <${ActNote} hosts=${actHosts} freely=${actSendsFreely} />
+      <${ActNote} hosts=${actHosts} freely=${actSendsFreely} uses=${actUses} />
       <div class="row">
         <button class="primary" disabled=${!plan || busy} onClick=${run}>${busy ? "Starting…" : "Run"}</button>
         <button disabled=${!plan || busy} onClick=${() => setScheduling((x) => !x)} aria-expanded=${scheduling}>Schedule…</button>
         ${Object.entries(info.examples || {}).map(([name, src]) => html`
           <button key=${name} onClick=${() => setProgram(src)}>Example: ${name}</button>`)}
       </div>
-      ${scheduling && plan && html`<${ScheduleForm} program=${program} history=${ref} actHosts=${actHosts} actSendsFreely=${actSendsFreely} onDone=${() => setScheduling(false)} />`}
+      ${scheduling && plan && html`<${ScheduleForm} program=${program} history=${ref} actHosts=${actHosts} actSendsFreely=${actSendsFreely} actUses=${actUses} onDone=${() => setScheduling(false)} />`}
       <div class="row">
         <span class="muted">Insert a command:</span>
         ${(info.commands || []).map((c) => {

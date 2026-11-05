@@ -34,9 +34,9 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), loom.AskTimeout+90*time.Second)
 	defer cancel()
 	out, err := s.Temporal.Ask(ctx, req)
-	var hosts, freely []string
+	var hosts, freely, uses []string
 	if out.Plan != nil {
-		hosts, freely = loom.ActHosts(*out.Plan), loom.ActSendsFreely(*out.Plan)
+		hosts, freely, uses = loom.ActHosts(*out.Plan), loom.ActSendsFreely(*out.Plan), loom.ActUses(*out.Plan)
 	}
 	switch {
 	case errors.Is(err, warp.ErrInvalid) || errors.Is(err, pirn.ErrInvalid) || errors.Is(err, loom.ErrNoProgram):
@@ -44,7 +44,7 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
 	default:
-		writeJSON(w, http.StatusOK, proposal{Proposal: out, ActHosts: hosts, ActSendsFreely: freely})
+		writeJSON(w, http.StatusOK, proposal{Proposal: out, ActHosts: hosts, ActSendsFreely: freely, ActUses: uses})
 	}
 }
 
@@ -56,6 +56,7 @@ type proposal struct {
 	loom.Proposal
 	ActHosts       []string `json:"actHosts,omitempty"`
 	ActSendsFreely []string `json:"actSendsFreely,omitempty"`
+	ActUses        []string `json:"actUses,omitempty"` // the person's details they may use (roadmap 9.8)
 }
 
 // ready says whether a program can run now, as loom.CheckReady does on a

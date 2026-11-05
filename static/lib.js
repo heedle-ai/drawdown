@@ -837,6 +837,16 @@ const DD = (() => {
     return p && typeof p === "object" && str(p.id) && /^[0-9a-f]{1,64}$/.test(p.id) && str(p.summary) && opt(p.node, str) && str(p.url) ? p : null;
   }
 
+  // PROFILE are the person's details act steps may use (roadmap 9.8), in
+  // words; usesOf says whether v names some of them, each once.
+  const PROFILE = { name: "name", email: "email", phone: "phone number", address: "address", birthdate: "date of birth" };
+  const usesOf = (v) => strs(v) && v.every((f) => Object.hasOwn(PROFILE, f)) && new Set(v).size === v.length;
+  // usesWords is a list of details in words: "your name, email and date of birth".
+  function usesWords(v) {
+    const w = (usesOf(v) ? v : []).map((f) => PROFILE[f]);
+    return w.length < 2 ? w.join("") : w.slice(0, -1).join(", ") + " and " + w[w.length - 1];
+  }
+
   // strsOf is v if it's a list of hosts as act writes them, else [].
   function strsOf(v) { return strs(v) && v.every((x) => ACT_HOST.test(x)) ? v : []; }
 
@@ -862,8 +872,10 @@ const DD = (() => {
     // Roadmap 9.7: the hosts whose act steps send without asking, each one
     // of actHosts.
     if (!opt(v.actSendsFreely, (h) => strs(h) && h.every((x) => (v.actHosts || []).includes(x)))) return null;
+    // Roadmap 9.8: the person's details they may use, by name.
+    if (!opt(v.actUses, usesOf) || (v.actUses && v.actUses.length && !program)) return null;
     return { summary: v.summary, program, plan: program ? v.plan : null, schedule: sp || null, name: sp ? v.name : "", skill, ready: v.ready ? { ...v.ready, needs: v.ready.needs || [] } : null,
-      actHosts: v.actHosts || [], actSendsFreely: v.actSendsFreely || [], remember, memory: v.memory || [], usage: asStepUsages(v.usage) };
+      actHosts: v.actHosts || [], actSendsFreely: v.actSendsFreely || [], actUses: v.actUses || [], remember, memory: v.memory || [], usage: asStepUsages(v.usage) };
   }
 
   // === Memory (roadmap 10.1) ===============================================
@@ -1224,6 +1236,6 @@ const DD = (() => {
     return `https://github.com/${m[1]}/${m[2]}/tree/${b}/skills/${name}`;
   }
 
-  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, pendingForm, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
+  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
 })();
 if (typeof module !== "undefined") module.exports = DD;
