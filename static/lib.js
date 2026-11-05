@@ -1171,7 +1171,8 @@ const DD = (() => {
   // estimate.
   function estimate(v) {
     if (v.usd !== null) return `${usd(v.usd)} est.`;
-    if (num(v.atMost)) return `at most ${usd(v.atMost)} est.`;
+    // A bound rounds up, never under (review 48 round 3).
+    if (num(v.atMost)) return `at most ${usd(Math.ceil(v.atMost * 100 - 1e-9) / 100)} est.`;
     const n = v.unpriced.length;
     return v.priced > 0 ? `${usd(v.priced)} est. + ${n} step${n === 1 ? "" : "s"} with no estimate` : "no estimate";
   }

@@ -855,7 +855,8 @@ test("costs show a dollar figure only where every step had a price", () => {
   assert.equal(DD.estimate(sp(null, 0, [none, none])), "no estimate");
   assert.equal(DD.count(1234567), "1,234,567");
   // A step that can only be bounded, as a budget counts it (review 48).
-  assert.equal(DD.estimate({ ...sp(null, 0.03, [none]), atMost: 0.114 }), "at most $0.11 est.");
+  assert.equal(DD.estimate({ ...sp(null, 0.03, [none]), atMost: 0.114 }), "at most $0.12 est.");
+  assert.equal(DD.estimate({ ...sp(null, 0.03, [none]), atMost: 0.11 }), "at most $0.11 est.");
 
   const costs = { zone: "Europe/Lisbon", asOf: "2026-11-05", source: "https://platform.claude.com/docs/en/about-claude/pricing",
     months: [{ month: "2026-11", ...sp(null, 0.12, [none]), byModel: [{ model: "claude-sonnet-5-5", ...sp(0.12, 0.12) }, { model: "claude-mythos-5-1", ...sp(null, 0, [none]) }] }],
