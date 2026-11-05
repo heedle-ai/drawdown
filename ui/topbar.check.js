@@ -171,7 +171,7 @@ async function main() {
       for (const name of ["Runs", "Skills (1 waiting for review)", "Schedules (2 paused after a failed or timed-out run)", "Connectors (2 keys to set)", "Memory", "System"]) {
         assert.equal(await page.getByRole("link", { name, exact: true }).count(), 1, `${where}: no link named "${name}"`);
       }
-      const t = b.items[5];
+      const t = b.items[6];
       assert.ok(b.last && t.href === GOOD["/api/info"].temporalUI && t.target === "_blank" && /noopener/.test(t.rel), `${where}: Temporal is last, in a new tab`);
       assert.ok(!/\d+ commands/.test(b.headerText), `${where}: the commands pill is gone`);
       for (const h of b.hrefs) assert.ok(h.startsWith("#/") || h === GOOD["/api/info"].temporalUI, `${where}: the header links to ${h}`);
@@ -181,7 +181,7 @@ async function main() {
       await page.evaluate(() => document.activeElement && document.activeElement.blur());
       await page.locator("header select, header .brand").first().focus();
       const reached = [];
-      for (let i = 0; i < 14 && reached.length < 6; i++) {
+      for (let i = 0; i < 16 && reached.length < 7; i++) {
         await page.keyboard.press("Tab");
         const f = await page.evaluate(() => {
           const a = document.activeElement;
@@ -234,7 +234,7 @@ async function main() {
       for (let i = 0; i < 100 && !["/api/skills", "/api/schedules", "/api/connectors"].every((p) => asked.includes(p)); i++) await page.waitForTimeout(100);
       await page.waitForTimeout(500);
       const b = await bar(page);
-      assert.deepEqual(b.items.map((i) => i.need), ["", "", "", "", "", ""], "broken answers give no counts");
+      assert.deepEqual(b.items.map((i) => i.need), ["", "", "", "", "", "", ""], "broken answers give no counts");
       assert.ok(!/error|locked|couldn't/i.test(b.headerText), "broken answers say nothing in the bar");
       assert.deepEqual(b.current, [["Skills", "page"]]);
       assert.deepEqual(errors, []);
