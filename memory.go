@@ -22,19 +22,30 @@ type memoryView struct {
 	Memories loom.Memories `json:"memories"`
 	Version  string        `json:"version"`
 	File     string        `json:"file"`
+	// Problems: why a memory edited by hand can't go to Claude, by ID (and
+	// a bound the whole list is over, under ""), so it can be seen and
+	// forgotten (review 47).
+	Problems map[string]string `json:"problems,omitempty"`
 }
 
+// memory is GET /api/memory: what heedle remembers about you, from this
+// machine only, like every change to it (review 47: with -hosts, anyone
+// who could reach the page could read it).
 func (s *Server) memory(w http.ResponseWriter, r *http.Request) {
+	if !fromThisMachine(r, s.Hosts) {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "what heedle remembers can be seen only from the machine heedle runs on, at localhost, not through a proxy"})
+		return
+	}
 	if s.MemoryFile == "" {
 		writeJSON(w, http.StatusOK, memoryView{Memories: loom.Memories{}})
 		return
 	}
-	ms, err := loom.ReadMemory(s.MemoryFile)
+	ms, err := loom.ReadMemoryAsIs(s.MemoryFile)
 	if err != nil {
-		writeJSON(w, http.StatusConflict, apiError{Error: "the memory file has a problem to fix first: " + err.Error()})
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "unreadable": true, "file": s.MemoryFile})
 		return
 	}
-	writeJSON(w, http.StatusOK, memoryView{Memories: ms, Version: ms.Version(), File: s.MemoryFile})
+	writeJSON(w, http.StatusOK, memoryView{Memories: ms, Version: ms.Version(), File: s.MemoryFile, Problems: ms.Problems()})
 }
 
 // changeMemory is POST /api/memory/{add,edit,forget,forget-all}: add
@@ -65,7 +76,11 @@ func (s *Server) changeMemory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, apiError{Error: "no such change: " + op})
 		return
 	}
-	if (req.ID != "") != shape[0] || (req.Text != "") != shape[1] || (op != "add" && req.Version == "") {
+	// Forget everything takes no version only for a file heedle can't read
+	// at all, which has none: it must still be possible (review 47).
+	_, unreadable := loom.ReadMemoryAsIs(s.MemoryFile)
+	anyway := op == "forget-all" && req.Version == "" && unreadable != nil
+	if (req.ID != "") != shape[0] || (req.Text != "") != shape[1] || (op != "add" && req.Version == "" && !anyway) {
 		writeJSON(w, http.StatusBadRequest, apiError{Error: "a memory " + op + " takes " + map[string]string{
 			"add": "the text", "edit": "the ID, the new text and the version", "forget": "the ID and the version", "forget-all": "the version"}[op]})
 		return
@@ -85,7 +100,7 @@ func (s *Server) changeMemory(w http.ResponseWriter, r *http.Request) {
 		_, err = loom.ForgetAllMemory(s.MemoryFile, req.Version)
 	}
 	switch {
-	case errors.Is(err, loom.ErrMemoryInvalid):
+	case errors.Is(err, loom.ErrMemoryInvalid), errors.Is(err, loom.ErrMemoryFile):
 		writeJSON(w, http.StatusBadRequest, apiError{Error: err.Error()})
 		return
 	case errors.Is(err, loom.ErrMemoryChanged):
@@ -98,12 +113,12 @@ func (s *Server) changeMemory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
 		return
 	}
-	ms, err := loom.ReadMemory(s.MemoryFile)
+	ms, err := loom.ReadMemoryAsIs(s.MemoryFile)
 	if err != nil {
 		writeJSON(w, http.StatusConflict, apiError{Error: err.Error()})
 		return
 	}
-	resp := map[string]any{"memories": ms, "version": ms.Version(), "file": s.MemoryFile}
+	resp := map[string]any{"memories": ms, "version": ms.Version(), "file": s.MemoryFile, "problems": ms.Problems()}
 	if op == "add" {
 		resp["memory"] = added
 	}
