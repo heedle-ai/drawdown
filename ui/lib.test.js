@@ -954,3 +954,23 @@ test("a proposal names the details its act steps may use, only real ones", () =>
     assert.equal(DD.asProposal({ ...base, ...bad }), null, JSON.stringify(bad));
   }
 });
+
+// Roadmap 9.9: an act step's script and replay are read strictly, and
+// said in words; a usage step says whether it replayed.
+test("act replays are read strictly and said in words", () => {
+  const sha = "a".repeat(64);
+  const script = [{ tool: "browser_fill_form", input: '{"fields":[{"target":"@0"}]}', targets: [{ role: "textbox", name: "Email" }], outline: "", outlineSha256: sha }];
+  const a = DD.parse(actJSON({ script, scriptInputs: sha, replay: { from: "r1", steps: 4, replayed: 4 } })).act;
+  assert.ok(a);
+  assert.equal(DD.replayWords(a.replay), "replayed all 4 actions from run r1, without Claude");
+  assert.equal(DD.replayWords({ steps: 4, replayed: 0, handedOver: true, at: 1, why: "this step's inputs differ from that run's" }), "didn't replay: this step's inputs differ from that run's");
+  assert.equal(DD.replayWords({ steps: 4, replayed: 1, handedOver: true, at: 2, why: "x" }), "replayed 1 of 4, then Claude from action 2: x");
+  assert.equal(DD.replayWords(undefined), "");
+  assert.deepEqual(DD.decisions("act", actJSON({ replay: { steps: 2, replayed: 2 } })).find((r) => r[0] === "Replay"), ["Replay", "replayed all 2 actions, without Claude"]);
+  assert.equal(DD.locatorText({ role: "button", name: 'Say "hi"', nth: 1 }), 'getByRole("button", { name: "Say \\"hi\\"", exact: true }).nth(1)');
+  for (const bad of [actJSON({ replay: { steps: "4", replayed: 1 } }), actJSON({ script: [{ tool: 1 }] }), actJSON({ script: [{ ...script[0], targets: [{ role: 1, name: "x" }] }] }),
+    actJSON({ scriptInputs: 7 }), actJSON({ calls: [{ tool: "browser_click", input: "{}", replayed: "yes" }] })]) assert.deepEqual(DD.parse(bad), { text: bad }, bad);
+  const u = { node: "n0", kind: "act", model: "m", tokens: { input: 0, output: 0 } };
+  assert.deepEqual(DD.asStepUsages({ steps: [{ ...u, replayed: "all" }] }).length, 1);
+  assert.deepEqual(DD.asStepUsages({ steps: [{ ...u, replayed: "most" }] }), []);
+});
