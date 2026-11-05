@@ -913,3 +913,31 @@ test("a skill's Share panel gives a command that pastes safely, and only a GitHu
   }
   assert.equal(DD.shareLink("https://github.com/ada/x", "main", "Bad Name"), "");
 });
+
+// Roadmap 9.7: an act step stops before sending and asks.
+test("act records say what was held for a person, and when nothing was sent", () => {
+  const a = DD.parse(actJSON({ ended: "cancelled", held: ["POST https://forms.example.org/volunteer/submit"], heldTotal: 1 })).act;
+  assert.ok(a);
+  assert.equal(DD.actEnding("cancelled"), "cancelled: nothing was sent");
+  assert.deepEqual(DD.decisions("act", actJSON({ held: [], heldTotal: 2 })).find((r) => r[0] === "Held"), ["Held", "2 sends until a person said so"]);
+  assert.deepEqual(DD.decisions("act", actJSON({ held: [], heldTotal: 0, sendWithoutAsking: true })).find((r) => r[0] === "Sending"), ["Sending", "without asking: its program said so"]);
+  assert.ok(DD.parse(actJSON({})).act, "a record from before 9.7");
+  for (const bad of [actJSON({ held: "x" }), actJSON({ heldTotal: "1" }), actJSON({ sendWithoutAsking: "yes" })]) assert.deepEqual(DD.parse(bad), { text: bad }, bad);
+});
+
+test("a live frame's waiting form is read only from an act step, and only well-formed", () => {
+  const form = { id: "f00d", node: "n0", summary: "Name Ada.", url: "https://forms.example.org/x" };
+  assert.deepEqual(DD.pendingForm({ kind: "act", pending: form }), form);
+  for (const bad of [{ kind: "browse", pending: form }, { kind: "act" }, { kind: "act", pending: { ...form, id: "../x" } }, { kind: "act", pending: { ...form, summary: 1 } },
+    { kind: "act", pending: { ...form, url: undefined } }, null]) {
+    assert.equal(DD.pendingForm(bad), null, JSON.stringify(bad));
+  }
+});
+
+test("a proposal names apart the hosts its act steps send forms on without asking", () => {
+  const plan = { nodes: [{ id: "n0", activity: "Act", args: ["sign up", "https://forms.example.org/", ":send-without-asking"] }] };
+  const base = { summary: "I'll sign you up.", program: "(act \"sign up\" \"https://forms.example.org/\" :send-without-asking)", plan, actHosts: ["forms.example.org"], attempts: 1 };
+  assert.deepEqual(DD.asProposal({ ...base, actSendsFreely: ["forms.example.org"] }).actSendsFreely, ["forms.example.org"]);
+  assert.deepEqual(DD.asProposal(base).actSendsFreely, []);
+  for (const bad of [{ actSendsFreely: "forms.example.org" }, { actSendsFreely: ["other.example.org"] }]) assert.equal(DD.asProposal({ ...base, ...bad }), null, JSON.stringify(bad));
+});

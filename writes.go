@@ -2,10 +2,12 @@ package drawdown
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"regexp"
 
 	"github.com/heedle-ai/loom"
+	"github.com/heedle-ai/pirn"
 )
 
 // loomWorkflow is a run's workflow ID as loom names it, or a merge's
@@ -58,4 +60,34 @@ func (s *Server) decideWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writes(w, r)
+}
+
+// decideForm sends or cancels a form an act step waits to send, by
+// signalling the run (roadmap 9.7): only one waiting now, so a person
+// decides on the form they saw. It answers the run's live frames.
+func (s *Server) decideForm(w http.ResponseWriter, r *http.Request) {
+	wf := r.PathValue("workflow")
+	if !loomWorkflow.MatchString(wf) {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "not a run's workflow ID"})
+		return
+	}
+	var d loom.FormDecision
+	if !readJSON(w, r, &d) {
+		return
+	}
+	if d.ID == "" {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "a decision names the form's ID"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
+	defer cancel()
+	switch err := s.Temporal.DecideForm(ctx, wf, d); {
+	case errors.Is(err, pirn.ErrInvalid):
+		writeJSON(w, http.StatusConflict, apiError{Error: "That form isn't waiting to be sent any more."})
+		return
+	case err != nil:
+		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
+		return
+	}
+	s.live(w, r)
 }

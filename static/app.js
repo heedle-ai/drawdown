@@ -519,6 +519,8 @@ function ActWork({ act: a, part = "all" }) {
         <${Pill} cls="k-other" plain>${a.turns} turn${a.turns === 1 ? "" : "s"}<//>
         ${a.allowed.map((h) => html`<${Pill} key=${h} cls="s-Completed" mono>${h}<//>`)}
         <${Pill} cls=${a.blockedTotal || a.blockedUnknown ? "s-Failed" : "k-other"}>${a.blockedUnknown ? "blocked requests unknown" : `${a.blockedTotal} blocked`}<//>
+        ${a.sendWithoutAsking ? html`<${Pill} cls="s-Failed">sent without asking<//>`
+          : a.heldTotal > 0 && html`<${Pill} cls="k-other" plain>${a.heldTotal} send${a.heldTotal === 1 ? "" : "s"} held for you<//>`}
         <${Pill} cls="k-container" mono>image ${a.image.replace(/^sha256:/, "").slice(0, 12)}<//>
       </div>
       <div class="mono muted">ended on ${a.url || "no page"}</div>`}
@@ -531,6 +533,7 @@ function ActWork({ act: a, part = "all" }) {
           ${c.output && html`<details><summary>${c.isError ? "What went wrong" : "What it saw"}</summary><pre class="cmd-out">${DD.visible(c.output)}${c.truncated ? "\n[cut]" : ""}</pre></details>`}
           ${c.screenshot && html`<img class="act-shot" src=${c.screenshot} alt=${`After action ${i + 1}, ${c.tool.replace(/^browser_/, "")}${c.url ? ", on " + c.url : ""}`} loading="lazy" />`}
         </li>`)}</ol>`}
+      ${work && (a.held || []).length > 0 && html`<details><summary>Sends held until a person said so (${a.heldTotal})</summary><pre>${a.held.join("\n")}</pre></details>`}
       ${work && a.blocked.length > 0 && html`<details><summary>Blocked requests (${a.blockedTotal})</summary><pre>${a.blocked.join("\n")}</pre></details>`}
     </div>`;
 }
@@ -597,12 +600,52 @@ function AgentTree({ refs, heads, current }) {
     })}</ul>`;
 }
 
+// ActNote says, above Run, what a program's act steps may do (roadmap
+// 9.5, 9.7): click and type on their hosts, and stop before sending and
+// ask; any that send without asking, in red.
+function ActNote({ hosts, freely }) {
+  if (!hosts || hosts.length === 0) return null;
+  const list = (hs) => hs.map((h, i) => html`${i ? ", " : ""}<span class="mono" key=${h}>${h}</span>`);
+  const asking = hosts.filter((h) => !(freely || []).includes(h));
+  return html`
+    ${asking.length > 0 && html`<p class="acts asks" role="note">Its act steps can click and type on ${list(asking)}, and stop before sending and ask you.</p>`}
+    ${freely && freely.length > 0 && html`<p class="acts" role="note"><strong>Its act steps can click, type and submit forms on ${list(freely)} without asking again.</strong></p>`}`;
+}
+
+// PendingForm is a form an act step filled and waits to send: Claude's
+// summary of it, with Send and Cancel as a write's Approve and Decline
+// (roadmap 9.7). Deciding signals the run; the page never sends it.
+function PendingForm({ workflow, form, onDone }) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const decide = async (send) => {
+    setBusy(send ? "send" : "cancel"); setError("");
+    const r = await api(`/api/forms/${encodeURIComponent(workflow)}`, { id: form.id, send });
+    setBusy("");
+    if (r.ok) onDone(r.data); else setError((r.data && r.data.error) || String(r.data));
+  };
+  return html`
+    <div class="pending-form" role="group" aria-label="A form waiting to be sent">
+      <p><strong>This form is filled and waits for you.</strong> Nothing is sent until you press Send. Cancel, or 30 minutes without an answer, sends nothing.</p>
+      <pre class="cmd-out">${DD.visible(form.summary)}</pre>
+      <div class="cmd-line"><span class="mono muted">${form.url}</span>
+        <span style=${{ marginLeft: "auto" }} class="pills">
+          <button class="primary" disabled=${!!busy} onClick=${() => decide(true)}>${busy === "send" ? "Sending…" : "Send"}</button>
+          <button class="reject" disabled=${!!busy} onClick=${() => decide(false)}>Cancel</button></span></div>
+      ${error && html`<p class="error">${error}</p>`}
+    </div>`;
+}
+
 // Live view: the latest frame of each browsing step a running run has.
 function LiveView({ workflow }) {
-  const data = usePoll(`/api/live/${encodeURIComponent(workflow)}`, 2000, [workflow]);
+  const polled = usePoll(`/api/live/${encodeURIComponent(workflow)}`, 2000, [workflow]);
+  const [decided, setDecided] = useState(null);
+  useEffect(() => setDecided(null), [polled]);
+  const data = decided || polled;
   if (!data || !data.frames || data.frames.length === 0) return null;
   return html`${data.frames.map((f) => html`
     <div class="panel live" key=${f.activity} style=${{ marginTop: "12px" }}>
+      ${DD.pendingForm(f) && html`<${PendingForm} workflow=${workflow} form=${DD.pendingForm(f)} onDone=${setDecided} />`}
       <div class="pills"><${StatusPill} status="Running" /> <${KindPill} kind=${f.kind === "act" ? "act" : "browse"}>${f.kind === "act" ? "Claude in a browser" : "live browser"}<//>
         <span class="mono">${f.url}</span>
         <${Pill} cls="k-other" plain>attempt ${f.attempt}<//><span class="muted">view only, updates every few seconds</span></div>
@@ -1068,7 +1111,7 @@ function nodeCard(n, step, output) {
 const localZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } };
 const EVERY = [["1h", "every hour"], ["6h", "every 6 hours"], ["24h", "every day"], ["168h", "every week"]];
 
-function ScheduleForm({ program, history, actHosts, onDone }) {
+function ScheduleForm({ program, history, actHosts, actSendsFreely, onDone }) {
   const [name, setName] = useState("");
   const [how, setHow] = useState("every");
   const [every, setEvery] = useState("24h");
@@ -1079,7 +1122,7 @@ function ScheduleForm({ program, history, actHosts, onDone }) {
   const [made, setMade] = useState("");
   const make = async () => {
     setBusy(true); setErr("");
-    const body = { name, program, ref: history, actHosts, ...(how === "every" ? { every } : { cron, timeZone: zone }) };
+    const body = { name, program, ref: history, actHosts, actSendsFreely, ...(how === "every" ? { every } : { cron, timeZone: zone }) };
     const r = await api("/api/schedules", body);
     setBusy(false);
     if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
@@ -1948,7 +1991,7 @@ function ProposalCard({ p, history, latest }) {
   }, [p.name, latest]);
   const run = async () => {
     setBusy("run"); setNote(null);
-    const r = await api("/api/runs", { program: p.program, ref: history, actHosts: p.actHosts });
+    const r = await api("/api/runs", { program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely });
     setBusy("");
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setNote({ error: (r.data && r.data.error) || String(r.data) });
@@ -1956,7 +1999,7 @@ function ProposalCard({ p, history, latest }) {
   const schedule = async () => {
     setBusy("schedule"); setNote(null);
     const sp = p.schedule;
-    const body = { name, program: p.program, ref: history, actHosts: p.actHosts, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
+    const body = { name, program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
     const r = await api("/api/schedules", body);
     setBusy("");
     setNote(r.ok ? { ok: html`Scheduled <a href="#/schedules" class="mono">${name}</a>, ${DD.when(sp)}. Each run is recorded like any other.` }
@@ -2002,7 +2045,7 @@ function ProposalCard({ p, history, latest }) {
             ${!l.ok && l.href && html`<a class="btn" href=${l.href}>Connect</a>`}
           </li>`)}
         </ul>`}
-        ${p.actHosts.length > 0 && html`<p class="acts" role="note"><strong>Its act steps can click, type and submit forms on ${p.actHosts.map((h, i) => html`${i ? ", " : ""}<span class="mono" key=${h}>${h}</span>`)} without asking again.</strong></p>`}
+        <${ActNote} hosts=${p.actHosts} freely=${p.actSendsFreely} />
         ${!ready ? html`<p><button class="link-btn" onClick=${check}>Check whether it can run</button></p>`
           : !ready.ready && html`<p><button class="link-btn" onClick=${check}>Check again</button></p>`}
         ${shape && html`<${CompositionGraph} plan=${shape.plan} shape=${shape.shape} />`}
@@ -2093,7 +2136,7 @@ function NewRun({ info, history: ref }) {
 
   const run = async () => {
     setBusy(true); setSubmitError("");
-    const r = await api("/api/runs", { program, ref, actHosts });
+    const r = await api("/api/runs", { program, ref, actHosts, actSendsFreely });
     setBusy(false);
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setSubmitError(r.data.error || String(r.data));
@@ -2112,18 +2155,19 @@ function NewRun({ info, history: ref }) {
   // Where its act steps may act, shown above Run and sent with it: the
   // server starts nothing it wasn't (review 39).
   const actHosts = plan && DD.strsOf(result.data.actHosts);
+  const actSendsFreely = plan && DD.strsOf(result.data.actSendsFreely);
   return html`
     <${Describe} program=${program} onProgram=${setProgram} />
     <div class="panel">
       <${ProgramEditor} value=${program} onChange=${setProgram} handle=${editor} placeholder='(pipe (par (echo "a") (echo "b")) echo)' />
-      ${actHosts && actHosts.length > 0 && html`<p class="acts" role="note"><strong>Its act steps can click, type and submit forms on ${actHosts.map((h, i) => html`${i ? ", " : ""}<span class="mono" key=${h}>${h}</span>`)} without asking again.</strong></p>`}
+      <${ActNote} hosts=${actHosts} freely=${actSendsFreely} />
       <div class="row">
         <button class="primary" disabled=${!plan || busy} onClick=${run}>${busy ? "Starting…" : "Run"}</button>
         <button disabled=${!plan || busy} onClick=${() => setScheduling((x) => !x)} aria-expanded=${scheduling}>Schedule…</button>
         ${Object.entries(info.examples || {}).map(([name, src]) => html`
           <button key=${name} onClick=${() => setProgram(src)}>Example: ${name}</button>`)}
       </div>
-      ${scheduling && plan && html`<${ScheduleForm} program=${program} history=${ref} actHosts=${actHosts} onDone=${() => setScheduling(false)} />`}
+      ${scheduling && plan && html`<${ScheduleForm} program=${program} history=${ref} actHosts=${actHosts} actSendsFreely=${actSendsFreely} onDone=${() => setScheduling(false)} />`}
       <div class="row">
         <span class="muted">Insert a command:</span>
         ${(info.commands || []).map((c) => {

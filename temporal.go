@@ -55,6 +55,11 @@ func (t TemporalClient) DecideWrite(ctx context.Context, workflowID string, d lo
 	return loom.DecideWrite(ctx, t.Client, workflowID, d)
 }
 
+// DecideForm sends or cancels a form an act step waits to send.
+func (t TemporalClient) DecideForm(ctx context.Context, workflowID string, d loom.FormDecision) error {
+	return loom.DecideForm(ctx, t.Client, workflowID, d)
+}
+
 // Ask has a worker propose what heedle would do for a request.
 func (t TemporalClient) Ask(ctx context.Context, in loom.AskRequest) (loom.Proposal, error) {
 	return loom.Ask(ctx, t.Client, t.Queue, in)
@@ -96,8 +101,9 @@ func (t TemporalClient) Describe(ctx context.Context, workflowID, runID string) 
 
 // Live reads the heartbeat of each browsing step running in the run's plan
 // (its child workflow, "<workflow ID>/plan"): browse (reed) and act (pirn,
-// roadmap 9.5) heartbeat a reed.Frame. A frame with no picture yet (an
-// act step before its first action) isn't shown.
+// roadmap 9.5) heartbeat a reed.Frame, act's with the form it waits to
+// send, if any (pirn.ActBeat, roadmap 9.7). A frame with no picture yet
+// (an act step before its first action) isn't shown.
 func (t TemporalClient) Live(ctx context.Context, workflowID string) ([]LiveFrame, error) {
 	d, err := t.Client.DescribeWorkflowExecution(ctx, workflowID+"/plan", "")
 	if err != nil {
@@ -109,12 +115,15 @@ func (t TemporalClient) Live(ctx context.Context, workflowID string) ([]LiveFram
 		if !ok || a.GetHeartbeatDetails() == nil {
 			continue
 		}
-		var f reed.Frame
+		var f pirn.ActBeat // a browse step's reed.Frame, or an act step's beat
 		if converter.GetDefaultDataConverter().FromPayloads(a.GetHeartbeatDetails(), &f) != nil || len(f.JPEG) == 0 {
 			continue
 		}
-		lf := liveFrame(a.GetActivityId(), a.GetAttempt(), f)
+		lf := liveFrame(a.GetActivityId(), a.GetAttempt(), f.Frame)
 		lf.Kind = kind
+		if kind == "act" {
+			lf.Pending = f.Pending
+		}
 		out = append(out, lf)
 	}
 	return out, nil
