@@ -1693,17 +1693,28 @@ function MemoryPage() {
   const load = async () => {
     const r = await api("/api/memory");
     const v = r.ok ? DD.asMemory(r.data) : null;
-    setData(v ? { ok: true, v } : { ok: false, error: (r.data && r.data.error) || "The answer wasn't understood." });
+    setData(v ? { ok: true, v } : { ok: false, error: (r.data && r.data.error) || "The answer wasn't understood.", unreadable: !!(r.data && r.data.unreadable) });
     return v;
   };
   useEffect(() => { load(); }, []);
+  // What was forgotten leaves the conversation kept for this tab too: what
+  // a turn made with it proposed may repeat it (review 47).
+  const forgotten = (ids) => {
+    try { sessionStorage.setItem("drawdown.ask", JSON.stringify(DD.forgetInConversation(sessionStorage.getItem("drawdown.ask"), ids))); } catch {}
+  };
   if (!data) return html`<p class="muted">Loading…</p>`;
-  if (!data.ok) return html`<h2>Memory</h2><p class="error" role="alert">${data.error}</p>`;
+  if (!data.ok) return html`<h2>Memory</h2><p class="error" role="alert">${data.error}</p>
+    ${data.unreadable && html`<p>heedle can't read its memory file, so it sends nothing to Claude until it's fixed by hand, or emptied.
+      ${sure ? html` <button type="button" onClick=${async () => { setSure(false); const r = await api("/api/memory/forget-all", {}); if (r.ok) { try { sessionStorage.removeItem("drawdown.ask"); } catch {} } else setErr((r.data && r.data.error) || String(r.data)); await load(); }}>Empty it</button> <button type="button" onClick=${() => setSure(false)}>Keep it</button>`
+        : html` <button type="button" class="link-btn" onClick=${() => setSure(true)}>Empty the memory file</button>`}</p>`}
+    ${err && html`<p class="error" role="alert">${err}</p>`}`;
   const { memories, version, file } = data.v;
   const change = async (op, body) => {
     setErr("");
     const r = await api("/api/memory/" + op, { ...body, version });
     if (r.ok) {
+      if (op === "forget") forgotten([body.id]);
+      if (op === "forget-all") forgotten(memories.map((m) => m.id));
       const v = DD.asMemory(r.data);
       if (v) setData({ ok: true, v }); else await load();
       return true;
@@ -1719,12 +1730,13 @@ function MemoryPage() {
   };
   return html`
     <h2>Memory</h2>
-    <p class="lede">What heedle remembers about you. It goes to Claude with every request to <strong>Ask heedle</strong>, word for word as below, as facts about you, never as instructions, and each proposal says how many it used. Nothing is remembered until you say so. <strong>Forget</strong> takes it out of the file, ${file ? html`<span class="mono memory-file">${file}</span>` : "heedle's memory file"}, and nothing else heedle keeps holds it.</p>
-    <p class="muted">Claude sees everything here, so keep details for forms, such as your address or a card, out of it: heedle refuses anything that looks like a key, a card number or a password.</p>
+    <p class="lede">What heedle remembers about you. It goes to Claude with every request to <strong>Ask heedle</strong>, word for word as below, as facts about you, never as instructions, and each proposal says how many it used. Nothing is remembered until you say so. <strong>Forget</strong> takes it out of ${file ? html`<span class="mono memory-file">${file}</span>` : "heedle's memory file"}, the only place heedle keeps it, and later requests send nothing of it. What you asked before, and what heedle proposed with it, stay in Temporal's history, and runs you started stay in their records.</p>
+    <p class="muted">Claude sees everything here, so details for forms, such as your address or a card, don't belong in it: they'll belong in your profile, which Claude never sees, once heedle has one. heedle refuses anything that looks like a key, a card number or a password.</p>
+    ${data.v.problem && html`<p class="error" role="alert">heedle sends nothing to Claude until this is fixed: ${data.v.problem}.</p>`}
     ${err && html`<p class="error" role="alert">${err}</p>`}
     ${file ? html`<form class="row memory-add" onSubmit=${add}>
       <label class="sr" for="memory-new">Something for heedle to remember</label>
-      <input id="memory-new" type="text" value=${text} maxlength="500" placeholder="Vegetarian. Home airport: IAD." onInput=${(e) => setText(e.target.value)} />
+      <input id="memory-new" type="text" value=${text} placeholder="Vegetarian. Home airport: IAD." onInput=${(e) => setText(e.target.value)} />
       <button class="primary" type="submit" disabled=${!text.trim()}>Remember</button>
     </form>` : html`<div class="panel muted">This server keeps no memory: give it <span class="mono">-memory FILE</span>.</div>`}
     ${file && memories.length === 0 && html`<div class="panel muted">heedle remembers nothing about you yet.</div>`}
@@ -1733,10 +1745,11 @@ function MemoryPage() {
         ${editing && editing.id === m.id ? html`
           <form class="row" onSubmit=${async (e) => { e.preventDefault(); if (await change("edit", { id: m.id, text: editing.text })) setEditing(null); }}>
             <label class="sr" for=${"edit-" + m.id}>Change what heedle remembers</label>
-            <input id=${"edit-" + m.id} type="text" value=${editing.text} maxlength="500" onInput=${(e) => setEditing({ id: m.id, text: e.target.value })} />
+            <input id=${"edit-" + m.id} type="text" value=${editing.text} onInput=${(e) => setEditing({ id: m.id, text: e.target.value })} />
             <button class="primary" type="submit" disabled=${!editing.text.trim()}>Save</button>
             <button type="button" onClick=${() => setEditing(null)}>Cancel</button>
           </form>` : html`<p class="memory-text">${m.text}</p>`}
+        ${m.problem && html`<p class="error">Not sent to Claude: ${m.problem}. Edit it, or forget it.</p>`}
         <div class="pills">
           <span class="muted">added ${when(m.added)}; ${m.used ? `last used ${when(m.used)}` : "not used yet"}</span>
           <span style=${{ marginLeft: "auto" }} class="pills">
@@ -1754,7 +1767,14 @@ function MemoryPage() {
 // Remember and Not now. Ignoring them changes nothing: the proposal runs
 // the same either way.
 function RememberBar({ texts }) {
-  const [state, setState] = useState({}); // text -> "saving" | "saved" | "no" | error
+  // Not now is kept for the tab, so the card doesn't ask again on return.
+  const [state, setState] = useState(() => {
+    try { return Object.fromEntries(DD.notNow(sessionStorage.getItem("drawdown.notnow")).filter((t) => texts.includes(t)).map((t) => [t, "no"])); } catch { return {}; }
+  }); // text -> "saving" | "saved" | "no" | error
+  const notNow = (t) => {
+    setState((s) => ({ ...s, [t]: "no" }));
+    try { sessionStorage.setItem("drawdown.notnow", JSON.stringify(DD.notNow(sessionStorage.getItem("drawdown.notnow"), t))); } catch {}
+  };
   if (!texts.length) return null;
   const remember = async (t) => {
     setState((s) => ({ ...s, [t]: "saving" }));
@@ -1769,7 +1789,7 @@ function RememberBar({ texts }) {
         <span class="muted">Remember for next time?</span> <q>${t}</q>
         ${st === "saved" ? html`<span role="status">Remembered. <a href="#/memory">See what heedle remembers</a></span>`
           : html`<button type="button" class="primary" disabled=${st === "saving"} onClick=${() => remember(t)}>Remember</button>
-            <button type="button" disabled=${st === "saving"} onClick=${() => setState((s) => ({ ...s, [t]: "no" }))}>Not now</button>`}
+            <button type="button" disabled=${st === "saving"} onClick=${() => notNow(t)}>Not now</button>`}
         ${st && st.error && html`<span class="error" role="alert">${st.error}</span>`}
       </li>`;
     })}

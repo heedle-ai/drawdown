@@ -411,6 +411,10 @@ test("Remember saves only on Remember, the memory page shows it as written, and 
   await p.locator(".remember li", { hasText: "IAD" }).getByRole("button", { name: "Not now" }).click();
   assert.equal(await p.locator(".remember li", { hasText: "IAD" }).count(), 0);
   assert.equal(await p.getByRole("button", { name: "Run it now" }).isDisabled(), false);
+  // Not now holds after a reload (review 47).
+  await p.reload();
+  await p.locator(".remember li").first().waitFor();
+  assert.equal(await p.locator(".remember li", { hasText: "IAD" }).count(), 0);
   await p.locator(".remember li").getByRole("button", { name: "Remember" }).click();
   await p.locator(".remember [role=status]").waitFor();
   let m = await memory();
@@ -435,7 +439,21 @@ test("Remember saves only on Remember, the memory page shows it as written, and 
   await p.locator("main .error[role=alert]").waitFor();
   await p.locator(".memory-text", { hasText: "Vegan, but eats eggs." }).waitFor();
   assert.match(fs.readFileSync(file, "utf8"), /eats eggs/);
-  // Now Forget, then add two and forget everything.
+  // Now Forget: the turn made with it leaves the tab's conversation too
+  // (review 47), and a hand edit into a secret says why it isn't sent.
+  const id = (await memory()).memories[0].id;
+  await p.evaluate((id) => sessionStorage.setItem("drawdown.ask", JSON.stringify([
+    { request: "Plan Lisbon", proposal: { summary: "Lisbon, eggs but no meat.", program: '(echo "x")', plan: { nodes: [] }, memory: [id] } },
+    { request: "hi", proposal: { summary: "Hello.", program: '(echo "hi")', plan: { nodes: [] } } }])), id);
+  await p.getByRole("button", { name: "Forget", exact: true }).click();
+  await p.getByText("heedle remembers nothing about you yet.").waitFor();
+  assert.deepEqual(await p.evaluate(() => JSON.parse(sessionStorage.getItem("drawdown.ask")).map((t) => t.request)), ["hi"]);
+  await p.getByLabel("Something for heedle to remember").fill("Window seat.");
+  await p.locator(".memory-add").getByRole("button", { name: "Remember" }).click();
+  await p.locator(".memory-text", { hasText: "Window seat." }).waitFor();
+  fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("Window seat.", "pw: hunter2"));
+  await p.reload();
+  await p.getByText(/Not sent to Claude: that looks like a password/).waitFor();
   await p.getByRole("button", { name: "Forget", exact: true }).click();
   await p.getByText("heedle remembers nothing about you yet.").waitFor();
   assert.ok(!fs.readFileSync(file, "utf8").includes("eggs"));
