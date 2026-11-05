@@ -1697,10 +1697,15 @@ function MemoryPage() {
     return v;
   };
   useEffect(() => { load(); }, []);
+  const memories = data && data.ok ? data.v.memories : [];
   // What was forgotten leaves the conversation kept for this tab too: what
   // a turn made with it proposed may repeat it (review 47).
   const forgotten = (ids) => {
-    try { sessionStorage.setItem("drawdown.ask", JSON.stringify(DD.forgetInConversation(sessionStorage.getItem("drawdown.ask"), ids))); } catch {}
+    const texts = memories.filter((m) => ids.includes(m.id)).map((m) => m.text);
+    try {
+      sessionStorage.setItem("drawdown.ask", JSON.stringify(DD.forgetInConversation(sessionStorage.getItem("drawdown.ask"), ids, texts)));
+      sessionStorage.setItem("drawdown.notnow", JSON.stringify(DD.notNow(sessionStorage.getItem("drawdown.notnow")).filter((t) => !texts.some((x) => x.toLowerCase() === t.toLowerCase()))));
+    } catch {}
   };
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<h2>Memory</h2><p class="error" role="alert">${data.error}</p>
@@ -1708,12 +1713,13 @@ function MemoryPage() {
       ${sure ? html` <button type="button" onClick=${async () => { setSure(false); const r = await api("/api/memory/forget-all", {}); if (r.ok) { try { sessionStorage.removeItem("drawdown.ask"); } catch {} } else setErr((r.data && r.data.error) || String(r.data)); await load(); }}>Empty it</button> <button type="button" onClick=${() => setSure(false)}>Keep it</button>`
         : html` <button type="button" class="link-btn" onClick=${() => setSure(true)}>Empty the memory file</button>`}</p>`}
     ${err && html`<p class="error" role="alert">${err}</p>`}`;
-  const { memories, version, file } = data.v;
+  const { version, file } = data.v;
   const change = async (op, body) => {
     setErr("");
     const r = await api("/api/memory/" + op, { ...body, version });
     if (r.ok) {
-      if (op === "forget") forgotten([body.id]);
+      // An edit is a new memory: the old words are forgotten (review 47).
+      if (op === "forget" || op === "edit") forgotten([body.id]);
       if (op === "forget-all") forgotten(memories.map((m) => m.id));
       const v = DD.asMemory(r.data);
       if (v) setData({ ok: true, v }); else await load();
