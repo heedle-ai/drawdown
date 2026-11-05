@@ -1131,12 +1131,12 @@ const DD = (() => {
   // shown only when every step it covers had a price.
 
   // loom's note for a schedule its budget paused (loom.BudgetPaused).
-  const BUDGET_PAUSE = /^paused: monthly budget \$[0-9]+\.[0-9]{2} (reached \(est\.\)|can't be checked) in [A-Z][a-z]+ [0-9]{4}/;
+  const BUDGET_PAUSE = /^paused: monthly budget \$[0-9]+\.[0-9]{2} (reached \((at most \$[0-9]+\.[0-9]{2}, )?est\.\)|can't be checked) in [A-Z][a-z]+ [0-9]{4}/;
   const isTokens = (t) => t && typeof t === "object" && num(t.input) && num(t.output) && t.input >= 0 && t.output >= 0;
   const isStepUsage = (s) => str(s.node) && str(s.kind) && opt(s.model, str) && isTokens(s.tokens) && opt(s.requests, num) && opt(s.missing, str);
   const isUnpriced = (u) => str(u.node) && opt(u.model, str) && isTokens(u.tokens) && str(u.why) && opt(u.atMost, num);
   // isSpent is drawdown's spent: tokens, and usd only if all was priced.
-  const isSpent = (v) => v && typeof v === "object" && num(v.runs) && isTokens(v.tokens) && (v.usd === null || num(v.usd)) && num(v.priced) && objs(v.unpriced, isUnpriced);
+  const isSpent = (v) => v && typeof v === "object" && num(v.runs) && isTokens(v.tokens) && (v.usd === null || num(v.usd)) && num(v.priced) && opt(v.atMost, num) && objs(v.unpriced, isUnpriced);
   // asStepUsages is a usage's steps, if well formed; else [].
   function asStepUsages(v) { return v && objs(v.steps, isStepUsage) ? v.steps : []; }
   // asBudget is a schedule's budget, if it has one and it's well formed.
@@ -1166,11 +1166,14 @@ const DD = (() => {
   // usd is dollars to the cent, or "<$0.01" for less than half a cent.
   const usd = (x) => (x > 0 && x < 0.005 ? "<$0.01" : `$${x.toFixed(2)}`);
   // estimate says what a spent costs: a figure only if every step had a
-  // price; otherwise the priced part, saying how many steps have none.
+  // price; a bound if every step could be bounded, as a budget counts it
+  // ("at most"); otherwise the priced part, saying how many steps have no
+  // estimate.
   function estimate(v) {
     if (v.usd !== null) return `${usd(v.usd)} est.`;
+    if (num(v.atMost)) return `at most ${usd(v.atMost)} est.`;
     const n = v.unpriced.length;
-    return v.priced > 0 ? `${usd(v.priced)} est. + ${n} step${n === 1 ? "" : "s"} with no price` : "no estimate (no price)";
+    return v.priced > 0 ? `${usd(v.priced)} est. + ${n} step${n === 1 ? "" : "s"} with no estimate` : "no estimate";
   }
   // count is n with thousands separated.
   const count = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
