@@ -80,7 +80,10 @@ func (s *Server) setProfile(w http.ResponseWriter, r *http.Request) {
 // profileHere refuses, with 403, a request that isn't straight from this
 // machine, and, with 501, a server without a keychain.
 func (s *Server) profileHere(w http.ResponseWriter, r *http.Request) bool {
-	if !fromThisMachine(r, s.Hosts) {
+	// A page on another site can't read or change them, even if a browser
+	// would send the request (review 42); the Host and Origin checks every
+	// request gets stop DNS rebinding and cross-site posts.
+	if !fromThisMachine(r, s.Hosts) || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		writeJSON(w, http.StatusForbidden, apiError{Error: "your details are shown and changed only on the machine heedle runs on, at localhost, not through a proxy"})
 		return false
 	}

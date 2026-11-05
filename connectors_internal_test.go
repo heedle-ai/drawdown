@@ -182,6 +182,35 @@ func TestInv_DetailsAreHereOnly(t *testing.T) {
 	if code, raw, _ := call("GET", "/api/profile", "", here, "X-Forwarded-For", "192.0.2.7"); code != 403 || strings.Contains(raw, "Ada") {
 		t.Errorf("through a proxy: %d %s", code, raw)
 	}
+	// Review 42: a page elsewhere can't read them through this browser,
+	// by DNS rebinding (a foreign Host), a cross-site request, or a post
+	// that isn't JSON.
+	for name, c := range map[string]struct {
+		method, body string
+		hdr          []string
+		want         int
+	}{
+		"rebinding":         {"GET", "", []string{"Host", "evil.example:8090"}, 403},
+		"cross-site read":   {"GET", "", []string{"Sec-Fetch-Site", "cross-site"}, 403},
+		"cross-origin post": {"POST", `{"field":"email","value":"eve@example.org"}`, []string{"Origin", "https://evil.example"}, 403},
+		"not JSON":          {"POST", `{"field":"email","value":"eve@example.org"}`, []string{"Content-Type", "text/plain"}, 415},
+	} {
+		r := httptest.NewRequest(c.method, "http://127.0.0.1:8090/api/profile", strings.NewReader(c.body))
+		r.RemoteAddr = here
+		r.Header.Set("Content-Type", "application/json")
+		for i := 0; i+1 < len(c.hdr); i += 2 {
+			if c.hdr[i] == "Host" {
+				r.Host = c.hdr[i+1]
+			} else {
+				r.Header.Set(c.hdr[i], c.hdr[i+1])
+			}
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != c.want || strings.Contains(w.Body.String(), "Ada") || keys[pirn.ProfileKey("email")] != "" {
+			t.Errorf("%s: %d %s", name, w.Code, w.Body.String())
+		}
+	}
 	for _, body := range []string{`{"field":"ssn","value":"1"}`, `{"field":"name","value":"Ada\nLovelace"}`, `{"field":"name","value":""}`} {
 		if code, _, _ := call("POST", "/api/profile", body, here); code != 400 {
 			t.Errorf("%s: %d", body, code)
