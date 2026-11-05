@@ -356,7 +356,7 @@ test("an act step's page shows its actions in order, each with its screenshot", 
   assert.deepEqual(await steps.locator(".act-head code").allTextContents(), ["navigate", "snapshot", "type", "click"]);
   assert.equal(await steps.locator("img.act-shot").count(), 3);
   await p.waitForFunction(() => [...document.querySelectorAll("img.act-shot")].every((i) => i.complete && i.naturalWidth === 320));
-  await p.getByText("Claude finished").first().waitFor();
+  await p.getByText("Claude said it finished").first().waitFor();
   // act's own dye, on the timeline and the step's pill.
   const dye = await p.evaluate(() => {
     const act = getComputedStyle(document.documentElement).getPropertyValue("--act").trim();
@@ -367,6 +367,26 @@ test("an act step's page shows its actions in order, each with its screenshot", 
   assert.equal(dye.line, dye.want);
   assert.equal(dye.pill, dye.act);
   if (process.env.DRAWDOWN_SHOTS) await p.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, "act-run.png"), fullPage: true });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// Review 39: the editor's Run says where act steps may act, and sends
+// those hosts; the server starts nothing it wasn't shown.
+test("the editor shows where act steps may act, and Run sends those hosts", async () => {
+  const program = '(act "Join the volunteer list as Ada" "https://forms.example.org/volunteer" "cdn.example.org")';
+  const { p, ctx, errors } = await page({ program });
+  const note = p.locator(".panel > .acts");
+  await note.waitFor();
+  assert.equal(await note.textContent(), "Its act steps can click, type and submit forms on cdn.example.org, forms.example.org without asking again.");
+  let sent = null;
+  await ctx.route("**/api/runs", (r) => { sent = r.request().postDataJSON(); r.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: "not here" }) }); });
+  await p.getByRole("button", { name: "Run", exact: true }).click();
+  await p.getByText("not here").waitFor();
+  assert.deepEqual(sent.actHosts, ["cdn.example.org", "forms.example.org"]);
+  // Without the hosts shown, the real server refuses it.
+  const res = await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program }) });
+  assert.equal(res.status, 422);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

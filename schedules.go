@@ -40,6 +40,9 @@ type scheduleRequest struct {
 	Every    string `json:"every,omitempty"` // a Go duration, such as 1h
 	Cron     string `json:"cron,omitempty"`
 	TimeZone string `json:"timeZone,omitempty"`
+	// ActHosts are the hosts the page showed its act steps may act on
+	// (programRequest's; review 39).
+	ActHosts []string `json:"actHosts,omitempty"`
 }
 
 // createSchedule compiles the program as a run would be, and has Temporal
@@ -61,6 +64,9 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 	p, ce := s.compileProgram(r.Context(), req.Program)
 	if ce != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
+		return
+	}
+	if !actShown(w, p, req.ActHosts) {
 		return
 	}
 	ref, err := s.ref(r.Context(), req.Ref)

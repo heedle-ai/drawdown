@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -312,6 +313,26 @@ func (s *Server) namespace() string {
 type programRequest struct {
 	Program string `json:"program"`
 	Ref     string `json:"ref,omitempty"` // submit only; default Server.Ref
+	// ActHosts (submit only) are the hosts the page showed, in red, that
+	// the program's act steps may act on: a run with act steps starts only
+	// if they are exactly loom.ActHosts of its plan (review 39).
+	ActHosts []string `json:"actHosts,omitempty"`
+}
+
+// actShown says whether the person was shown where p's act steps may
+// act (loom.ActHosts, exactly), answering 422 with those hosts if not:
+// every way to run or schedule a program goes through it, not only the
+// front door's card (review 39).
+func actShown(w http.ResponseWriter, p plan.Plan, shown []string) bool {
+	hosts := loom.ActHosts(p)
+	if len(hosts) == 0 || slices.Equal(hosts, shown) {
+		return true
+	}
+	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+		"error":    "This program's act steps can click, type and submit forms on " + strings.Join(hosts, ", ") + " without asking again. Run it where the page says so.",
+		"actHosts": hosts,
+	})
+	return false
 }
 
 // RefPrefix is where the refs the UI offers live: loom's default ref and
@@ -412,7 +433,7 @@ func (s *Server) compile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ce)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p)})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p), "actHosts": loom.ActHosts(p)})
 }
 
 // shapeOf is a program's composition (draft.Composition), for drawing its
@@ -509,6 +530,9 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	p, ce := s.compileProgram(r.Context(), req.Program)
 	if ce != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
+		return
+	}
+	if !actShown(w, p, req.ActHosts) {
 		return
 	}
 	ref, err := s.ref(r.Context(), req.Ref)
