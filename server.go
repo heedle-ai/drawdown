@@ -92,6 +92,7 @@ type Temporal interface {
 // LiveFrame is what a browsing step last showed.
 type LiveFrame struct {
 	Activity string `json:"activity"` // Temporal activity ID
+	Kind     string `json:"kind"`     // the step's command: browse or act
 	Attempt  int32  `json:"attempt"`
 	URL      string `json:"url"`
 	Image    string `json:"image"` // data:image/jpeg;base64,…
@@ -160,6 +161,8 @@ type Server struct {
 	StepKeys pirn.Vault
 	Agents   bool
 	Browsers bool // has a browser image for browse steps
+	// BrowserAgents: has a browser-agent image for act steps (roadmap 9.5).
+	BrowserAgents bool
 	// MCPRegistry is the MCP Registry the page adds connectors from
 	// (DefaultMCPRegistry if empty); RegistryClient, if set, reaches it.
 	MCPRegistry    string

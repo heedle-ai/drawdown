@@ -41,10 +41,13 @@ func TestInv_ReadyChecksAsARunWould(t *testing.T) {
 	cs := pirn.Connectors{{Name: "search", URL: "https://search.example/mcp", TokenEnv: "SEARCH_KEY"}}
 	var csErr error
 	keys := memSecrets{"SEARCH_KEY": "s"}
-	// The shipment's commands, and browse.
+	// The shipment's commands, browse and act.
 	commands := func() *registry.Registry {
 		reg := shipment.Registry()
 		if err := reg.Register(reed.BuiltinSpec()); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.Register(pirn.ActBuiltinSpec()); err != nil {
 			t.Fatal(err)
 		}
 		return reg
@@ -96,6 +99,14 @@ func TestInv_ReadyChecksAsARunWould(t *testing.T) {
 	s.Browsers = true
 	if _, r := call(`(browse "example.org")`); !r.Ready {
 		t.Errorf("browse with a browser image: %+v", r)
+	}
+	// Roadmap 9.5: an act step needs Claude and a browser-agent image.
+	if _, r := call(`(act "sign up" "https://forms.example.org/")`); r.Ready || r.BrowserAgent == "" || r.Browser != "" {
+		t.Errorf("act with no browser-agent image: %+v", r)
+	}
+	s.BrowserAgents = true
+	if _, r := call(`(act "sign up" "https://forms.example.org/")`); r.Ready != (r.Claude == "") || r.BrowserAgent != "" {
+		t.Errorf("act with a browser-agent image: %+v", r)
 	}
 	if code, _ := call(`(nope)`); code != 422 {
 		t.Errorf("doesn't compile: %d", code)

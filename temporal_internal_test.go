@@ -13,6 +13,7 @@ import (
 	"go.temporal.io/sdk/converter"
 
 	"github.com/heedle-ai/loom"
+	"github.com/heedle-ai/pirn"
 	"github.com/heedle-ai/reed"
 )
 
@@ -54,6 +55,28 @@ func TestLiveReadsBrowseHeartbeats(t *testing.T) {
 	}, nil)
 	frames, err := TemporalClient{Client: c}.Live(context.Background(), "wf-1")
 	if err != nil || len(frames) != 1 || frames[0].URL != "https://a.example/" || frames[0].Attempt != 2 ||
+		frames[0].Image != "data:image/jpeg;base64,/9j/" {
+		t.Fatalf("frames = %+v, %v", frames, err)
+	}
+}
+
+// TestInv_LiveReadsActHeartbeats: act steps heartbeat a reed.Frame too,
+// and Live shows each as an act frame; a frame with no picture yet isn't
+// shown. (Roadmap 9.5.)
+func TestInv_LiveReadsActHeartbeats(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+	beat, _ := dc.ToPayloads(reed.Frame{URL: "https://forms.example.org/", JPEG: []byte{0xff, 0xd8, 0xff}})
+	empty, _ := dc.ToPayloads(reed.Frame{URL: "https://forms.example.org/"})
+	c := &mocks.Client{}
+	c.On("DescribeWorkflowExecution", mock.Anything, "wf-1/plan", "").Return(&workflowservice.DescribeWorkflowExecutionResponse{
+		PendingActivities: []*workflow.PendingActivityInfo{
+			{ActivityId: "3", ActivityType: &common.ActivityType{Name: pirn.ActActivityName}, Attempt: 1, HeartbeatDetails: beat},
+			{ActivityId: "4", ActivityType: &common.ActivityType{Name: pirn.ActActivityName}, HeartbeatDetails: empty},
+			{ActivityId: "5", ActivityType: &common.ActivityType{Name: reed.ActivityName}, Attempt: 2, HeartbeatDetails: beat},
+		},
+	}, nil)
+	frames, err := TemporalClient{Client: c}.Live(context.Background(), "wf-1")
+	if err != nil || len(frames) != 2 || frames[0].Activity != "3" || frames[0].Kind != "act" || frames[1].Kind != "browse" ||
 		frames[0].Image != "data:image/jpeg;base64,/9j/" {
 		t.Fatalf("frames = %+v, %v", frames, err)
 	}

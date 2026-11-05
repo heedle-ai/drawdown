@@ -7,7 +7,8 @@
 // then open http://127.0.0.1:8090. By default it also runs a loom worker
 // in the same process, with draft's echo command, the hello world's source
 // and assess commands, reed's browse (give -browser-image to use it) and
-// pirn's ask and agent (set ANTHROPIC_API_KEY, and -agent-image for agent),
+// pirn's ask, agent and act (set ANTHROPIC_API_KEY, and -agent-image for
+// agent, -browser-agent-image for act),
 // so one command is enough to try things out.
 package app
 
@@ -56,7 +57,8 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	runWorker := fs.Bool("worker", true, "also run a loom worker in this process")
 	sources := fs.String("sources", shipment.SourcesDir(), "directory for the source command's files")
 	browserImage := fs.String("browser-image", "", "reed browser image ID for the browse command (scripts/build-image.sh in heedle-ai/reed)")
-	browserNetwork := fs.String("browser-network", "", "Podman network browse containers join (default: Podman's)")
+	browserAgentImage := fs.String("browser-agent-image", "", "reed browser-agent image ID for the act command (Playwright MCP and Chromium; roadmap 9.5)")
+	browserNetwork := fs.String("browser-network", "", "Podman network browse and act containers join (default: Podman's)")
 	askModel := fs.String("ask-model", pirn.DefaultModel, "Claude model ask and agent use (key from ANTHROPIC_API_KEY, or the keychain: heedle secret set ANTHROPIC_API_KEY)")
 	agentImage := fs.String("agent-image", "", "content-pinned image ID agent steps run in (needs /bin/sh)")
 	connectorsFile := fs.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by name: an environment variable, or a keychain secret set with `heedle secret set NAME`)")
@@ -131,6 +133,10 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
 			return err
 		}
+		act := pirn.Act{Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage}
+		if err := pirn.RegisterAct(reg, w, act); err != nil {
+			return err
+		}
 		// Skills are the store's, at their newest when drawdown starts; each
 		// run is checked against, and records, the versions it pins.
 		lib := &treadle.Library{Store: s}
@@ -173,7 +179,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 			if err != nil {
 				return loom.Readiness{}, err
 			}
-			return loom.CheckReady(ctx, p, lib, loom.Worker{Connectors: cs, Keys: agent.Vault, Agents: agent.Image != "", Browsers: *browserImage != ""})
+			return loom.CheckReady(ctx, p, lib, loom.Worker{Connectors: cs, Keys: agent.Vault, Agents: agent.Image != "", Browsers: *browserImage != "", BrowserAgents: *browserAgentImage != ""})
 		}}
 		loom.RegisterWriter(w, writer)
 		loom.RegisterAsk(w, writer)
@@ -204,6 +210,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		StepKeys:       stepKeys,
 		Agents:         *agentImage != "",
 		Browsers:       *browserImage != "",
+		BrowserAgents:  *browserAgentImage != "",
 		Skills:         &treadle.Library{Store: s},
 		Commands:       commands,
 		Store:          s,
@@ -275,6 +282,7 @@ func commands() *registry.Registry {
 	reg.MustRegister(reed.BuiltinSpec())
 	reg.MustRegister(pirn.BuiltinSpec())
 	reg.MustRegister(pirn.AgentBuiltinSpec())
+	reg.MustRegister(pirn.ActBuiltinSpec())
 	reg.MustRegister(bobbin.ImageBuiltinSpec())
 	return reg
 }

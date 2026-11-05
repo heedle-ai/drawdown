@@ -38,9 +38,9 @@ const bytes = (s) => { const n = new Blob([s || ""]).size; return n < 1024 ? `${
 
 // === Kinds of step: one dye each ===========================================
 
-const KIND_OF_ACTIVITY = { Echo: "echo", Source: "source", Assess: "assess", Browse: "browse", Ask: "ask", Agent: "agent", Container: "container", Image: "image", Skill: "skill", LoomRecord: "record" };
-const KIND_OF_COMMAND = { echo: "echo", source: "source", assess: "assess", browse: "browse", ask: "ask", agent: "agent", container: "container", image: "image" };
-const KIND_LABEL = { echo: "echo", source: "source", assess: "assess", browse: "browse", ask: "ask Claude", agent: "Claude agent", container: "container", image: "image build", skill: "skill", record: "Git record", other: "step" };
+const KIND_OF_ACTIVITY = { Echo: "echo", Source: "source", Assess: "assess", Browse: "browse", Ask: "ask", Agent: "agent", Container: "container", Image: "image", Skill: "skill", LoomRecord: "record", Act: "act" };
+const KIND_OF_COMMAND = { echo: "echo", source: "source", assess: "assess", browse: "browse", ask: "ask", agent: "agent", container: "container", image: "image", act: "act" };
+const KIND_LABEL = { echo: "echo", source: "source", assess: "assess", browse: "browse", ask: "ask Claude", agent: "Claude agent", container: "container", image: "image build", act: "Claude fills a form", skill: "skill", record: "Git record", other: "step" };
 const kindOf = (activity) => KIND_OF_ACTIVITY[activity] || "other";
 const kindColor = (kind) => css("--" + kind) || css("--other");
 
@@ -501,9 +501,44 @@ function AgentWork({ agent: a, part = "all" }) {
     </div>`;
 }
 
+// ActWork shows what an act step did (roadmap 9.5): Claude's reply, how
+// it ended, the hosts it could reach and what was blocked, then every
+// action in order, each with the page it left and a screenshot of it.
+function ActWork({ act: a, part = "all" }) {
+  const failed = a.calls.filter((c) => c.isError).length;
+  const summary = part !== "work", work = part !== "summary";
+  const finished = a.ended === "finished";
+  return html`
+    <div class="answer act-work">
+      ${summary && html`<pre class="answer-text">${a.text}</pre>`}
+      ${summary && html`
+      <div class="pills muted">
+        <${Pill} cls="k-act">${a.model}<//>
+        <${Pill} cls=${finished ? "s-Completed" : "s-Failed"}>${DD.actEnding(a.ended)}<//>
+        <${Pill} cls="k-other" plain>${a.calls.length} action${a.calls.length === 1 ? "" : "s"}${failed ? `, ${failed} refused or failed` : ""}<//>
+        <${Pill} cls="k-other" plain>${a.turns} turn${a.turns === 1 ? "" : "s"}<//>
+        ${a.allowed.map((h) => html`<${Pill} key=${h} cls="s-Completed" mono>${h}<//>`)}
+        <${Pill} cls=${a.blockedTotal ? "s-Failed" : "k-other"}>${a.blockedTotal} blocked<//>
+        <${Pill} cls="k-container" mono>image ${a.image.replace(/^sha256:/, "").slice(0, 12)}<//>
+      </div>
+      <div class="mono muted">ended on ${a.url || "no page"}</div>`}
+      ${work && html`<ol class="act-steps" aria-label="Actions">${a.calls.map((c, i) => html`
+        <li key=${i} class=${c.isError ? "bad" : ""}>
+          <div class="act-head"><span class="act-n">${i + 1}</span>
+            <code>${c.tool.replace(/^browser_/, "")}</code>
+            ${c.url && html`<span class="mono muted act-url">${c.url}</span>`}</div>
+          <pre class="cmd-out">${DD.visible(c.input)}</pre>
+          ${c.output && html`<details><summary>${c.isError ? "What went wrong" : "What it saw"}</summary><pre class="cmd-out">${DD.visible(c.output)}${c.truncated ? "\n[cut]" : ""}</pre></details>`}
+          ${c.screenshot && html`<img class="act-shot" src=${c.screenshot} alt=${`After action ${i + 1}, ${c.tool.replace(/^browser_/, "")}${c.url ? ", on " + c.url : ""}`} loading="lazy" />`}
+        </li>`)}</ol>`}
+      ${work && a.blocked.length > 0 && html`<details><summary>Blocked requests (${a.blockedTotal})</summary><pre>${a.blocked.join("\n")}</pre></details>`}
+    </div>`;
+}
+
 function Output({ text }) {
-  const { agent, answer, page } = DD.parse(text);
+  const { agent, act, answer, page } = DD.parse(text);
   if (agent) return html`<${AgentWork} agent=${agent} />`;
+  if (act) return html`<${ActWork} act=${act} />`;
   if (answer) return html`
     <div class="answer">
       <pre class="answer-text">${answer.text}</pre>
@@ -568,7 +603,7 @@ function LiveView({ workflow }) {
   if (!data || !data.frames || data.frames.length === 0) return null;
   return html`${data.frames.map((f) => html`
     <div class="panel live" key=${f.activity} style=${{ marginTop: "12px" }}>
-      <div class="pills"><${StatusPill} status="Running" /> <${KindPill} kind="browse">live browser<//>
+      <div class="pills"><${StatusPill} status="Running" /> <${KindPill} kind=${f.kind === "act" ? "act" : "browse"}>${f.kind === "act" ? "Claude in a browser" : "live browser"}<//>
         <span class="mono">${f.url}</span>
         <${Pill} cls="k-other" plain>attempt ${f.attempt}<//><span class="muted">view only, updates every few seconds</span></div>
       ${f.image.startsWith("data:image/jpeg;base64,") && html`<img src=${f.image} alt=${"Live view of " + f.url} />`}
@@ -1790,6 +1825,7 @@ function ProposalCard({ p, history, latest }) {
             ${!l.ok && l.href && html`<a class="btn" href=${l.href}>Connect</a>`}
           </li>`)}
         </ul>`}
+        ${p.actHosts.length > 0 && html`<p class="acts" role="note"><strong>Its act steps can click, type and submit forms on ${p.actHosts.map((h, i) => html`${i ? ", " : ""}<span class="mono" key=${h}>${h}</span>`)} without asking again.</strong></p>`}
         ${!ready ? html`<p><button class="link-btn" onClick=${check}>Check whether it can run</button></p>`
           : !ready.ready && html`<p><button class="link-btn" onClick=${check}>Check again</button></p>`}
         ${shape && html`<${CompositionGraph} plan=${shape.plan} shape=${shape.shape} />`}
@@ -2229,6 +2265,7 @@ const SANDBOX = {
   image: { where: "podman build on the worker, from base images pinned to content and already on it: nothing is pulled", fs: "A fresh build context holding only the Containerfile and in/<node>.txt for each input, removed afterwards. The built image stays in the worker's Podman storage", net: "None for RUN steps (--network=none). With \"push\", the worker pushes the image with its own login", gets: "Its Containerfile, and its inputs as files in in/", leaves: "The image ID, and where it was pushed if asked" },
   browse: { where: "A fresh Podman container running a fresh Chromium profile, removed when the step ends", fs: "A brand-new browser profile, deleted with the container. Nothing is mounted from the machine", net: "Chromium is set to reach only the hosts the program names, refusing and recording every other request. The container itself is on Podman's network, so this rests on Chromium's own settings", gets: "Its URL and allowed hosts, from the program", leaves: "What the browser saw: URL, title, text, screenshot, blocked requests" },
   agent: { where: "A fresh Podman container (a bobbin session) for this step alone, from the worker's content-pinned agent image, removed when the step ends; Claude, through Anthropic's SDK, decides each command", fs: "A brand-new, empty writable layer over the image, where its inputs are written to /work/in. Deleted with the container: no other step ever sees it, and nothing is mounted from the machine", net: "None for its commands (--network=none). Only the worker talks to the Claude API, and to the MCP servers the step is granted: remote ones through Anthropic's MCP connector, local ones each in its own container with no network", gets: "Its instruction, its inputs as files in /work/in, and the connector tools its arguments grant (as far as the worker allows); no environment variables from the machine or the worker", leaves: "Claude's reply, every command it ran with its output, every connector call it made and every write it queued (run once after the run's steps, never in the step), the files it left in /work/out, and the list of changed paths" },
+  act: { where: "A fresh Podman container from the worker's browser-agent image, running Playwright MCP and a fresh Chromium profile, removed when the step ends; Claude, through Anthropic's SDK, decides each action", fs: "A brand-new browser profile, deleted with the container. Nothing is mounted from the machine, and it can't upload or download files", net: "Chromium is set to reach only the hosts the program names, refusing and recording every other request. Only the worker talks to the Claude API", gets: "Its instruction, start page and allowed hosts, from the program, and its inputs as cited sources. Claude may only read pages and work forms: no scripts, uploads or shell", leaves: "Claude's reply, every action with the page it left and a screenshot, the final page, the hosts it could reach, the requests blocked, and how it ended" },
   ask: { where: "One request to Claude through Anthropic's SDK; no container", fs: "None", net: "Only the Claude API, signed with the worker's key (never recorded)", gets: "Its instruction, and its inputs as cited sources", leaves: "Claude's answer, with the model, stop reason and token counts" },
   record: { where: "loom's worker, writing to the Git store outside every container", fs: "The warp store only", net: "None", gets: "Every step's output", leaves: "One commit" },
   other: { where: "The loom worker", fs: "Whatever this command's implementation allows", net: "Whatever this command's implementation allows", gets: "Its arguments and inputs", leaves: "Its output" },
@@ -2264,7 +2301,7 @@ function StepPage({ workflow, run, node, history: ref }) {
   const out = rec.outputs[node];
   const link = (id) => "#/step/" + [workflow, run, id].map(encodeURIComponent).join("/");
   const dec = decisions(kind, out);
-  const agentOut = DD.parse(out).agent;
+  const { agent: agentOut, act: actOut } = DD.parse(out);
   return html`
     <p><a href=${"#/run/" + encodeURIComponent(workflow) + "/" + encodeURIComponent(run)}>← the whole run</a></p>
     <div class="panel step-hero" style=${{ "--c": kindColor(kind) }}>
@@ -2319,7 +2356,7 @@ function StepPage({ workflow, run, node, history: ref }) {
         <h3>Produced</h3>
         <p class="lede">Recorded in Git, and passed on to the steps that wait for it.</p>
         <div class="out" style=${{ "--c": kindColor(kind) }}><div class="body">${out == null ? html`<span class="muted">No output recorded.</span>`
-          : agentOut ? html`<${AgentWork} agent=${agentOut} part="summary" />` : html`<${Output} text=${out} />`}</div></div>
+          : agentOut ? html`<${AgentWork} agent=${agentOut} part="summary" />` : actOut ? html`<${ActWork} act=${actOut} part="summary" />` : html`<${Output} text=${out} />`}</div></div>
         <div class="pills" style=${{ marginTop: "10px" }}>
           <span class="muted">Passed to</span>
           ${nodes.filter((x) => (x.requires || []).includes(node)).map((x) => html`<a key=${x.id} href=${link(x.id)}><${KindPill} kind=${kindOf(x.activity)}>${x.id} ${x.activity}<//></a>`)}
@@ -2332,6 +2369,11 @@ function StepPage({ workflow, run, node, history: ref }) {
       <h3>Work</h3>
       <p class="lede">Every command Claude ran in the container, in order, then the files it kept and everything that changed.</p>
       <div class="panel"><${AgentWork} agent=${agentOut} part="work" /></div>`}
+
+    ${actOut && html`
+      <h3>Actions</h3>
+      <p class="lede">Every action Claude took in the browser, in order, each with the page it left and what that page looked like.</p>
+      <div class="panel"><${ActWork} act=${actOut} part="work" /></div>`}
 
     ${DD.asFiles((rec.files || {})[node]).length > 0 && html`<${StepFiles} files=${DD.asFiles(rec.files[node])} node=${node}
       previous=${rec.previous} commit=${rec.commit} more=${rec.moreFiles} agent=${agentOut} />`}

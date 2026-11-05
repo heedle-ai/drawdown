@@ -40,6 +40,30 @@ const DD = (() => {
     return v;
   }
 
+  // asAct is v if it's an act step's result (pirn's JSON, act format 1;
+  // roadmap 9.5), with every field the page reads of the right type and
+  // every screenshot a JPEG data URL; else null.
+  const JPEG_DATA = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
+  const ENDED = ["finished", "stopped", "max_calls", "max_turns", "timeout"];
+  function asAct(v) {
+    if (!asAnswer(v) || v.act !== 1 || !str(v.image) || !num(v.turns) || !str(v.url) || !ENDED.includes(v.ended)) return null;
+    if (!objs(v.calls, (c) => str(c.tool) && str(c.input) && opt(c.output, str) && opt(c.isError, bool) && opt(c.truncated, bool) &&
+      opt(c.url, str) && opt(c.screenshot, (x) => str(x) && JPEG_DATA.test(x)))) return null;
+    if (!strs(v.allowed) || !strs(v.blocked) || !num(v.blockedTotal) || !strs(v.inputs)) return null;
+    return v;
+  }
+
+  // actEnding says, in words, how an act step ended.
+  function actEnding(ended) {
+    return {
+      finished: "Claude finished",
+      stopped: "Claude stopped and said why",
+      max_calls: "stopped at the limit on actions",
+      max_turns: "stopped at the turn limit",
+      timeout: "stopped when its time ran out",
+    }[ended] || ended;
+  }
+
   const bool = (v) => typeof v === "boolean";
   const isWrite = (w) => str(w.id) && str(w.connector) && str(w.tool) && w.input !== undefined && opt(w.approve, bool);
   const WRITE_STATUS = ["waiting", "approved", "declined", "expired", "done", "failed", "refused"];
@@ -60,7 +84,7 @@ const DD = (() => {
     return v;
   }
 
-  // parse reads a step's output: {agent}, {answer}, {page}, or {text} for
+  // parse reads a step's output: {agent}, {act}, {answer}, {page}, or {text} for
   // anything else, including JSON that only looks like one of them.
   function parse(text) {
     if (!str(text)) return { text: "" };
@@ -69,6 +93,10 @@ const DD = (() => {
     if (v && v.agent !== undefined) {
       const agent = asAgent(v);
       return agent ? { agent } : { text };
+    }
+    if (v && v.act !== undefined) {
+      const act = asAct(v);
+      return act ? { act } : { text };
     }
     const answer = asAnswer(v);
     if (answer) return { answer };
@@ -81,6 +109,7 @@ const DD = (() => {
   function preview(text) {
     const o = parse(text);
     if (o.agent) return o.agent.text;
+    if (o.act) return o.act.text;
     if (o.answer) return o.answer.text;
     if (o.page) return `${o.page.title || o.page.url}\n${(o.page.text || "").slice(0, 300)}`;
     return o.text;
@@ -99,6 +128,13 @@ const DD = (() => {
         ["Changed", `${a.changes.length}${a.moreChanges ? `+${a.moreChanges}` : ""} paths in the container`]];
       if (num(a.inputTokens) && num(a.outputTokens)) rows.push(["Tokens", `${a.inputTokens} in, ${a.outputTokens} out`]);
       if (a.stopReason) rows.push(["Stopped", a.stopReason === "max_turns" ? "at the turn limit, without a final reply" : `on its own (${a.stopReason})`]);
+      return rows;
+    }
+    if (o.act) {
+      const a = o.act;
+      const rows = [["Model", a.model], ["Turns", String(a.turns)], ["Actions", String(a.calls.length)], ["Ended", actEnding(a.ended)],
+        ["Last page", a.url || "none"], ["Could reach", a.allowed.join(", ")], ["Blocked", `${a.blockedTotal} request${a.blockedTotal === 1 ? "" : "s"}`]];
+      if (num(a.inputTokens) && num(a.outputTokens)) rows.push(["Tokens", `${a.inputTokens} in, ${a.outputTokens} out`]);
       return rows;
     }
     if (o.answer) {
@@ -782,7 +818,10 @@ const DD = (() => {
   const isNeed = (n) => n && typeof n === "object" && str(n.connector) && /^[a-z0-9-]{1,24}$/.test(n.connector) && opt(n.tools, strs) &&
     (n.problem === undefined || NEED.test(n.problem)) && opt(n.key, str) && opt(n.detail, str) && opt(n.writes, strs) && opt(n.approve, bool);
   const isReady = (r) => r && typeof r === "object" && objs(r.needs || [], isNeed) && (r.claude === undefined || /^(|key|unreadable)$/.test(r.claude)) &&
-    opt(r.claudeDetail, str) && opt(r.agent, str) && opt(r.browser, str) && opt(r.error, str) && bool(r.ready);
+    opt(r.claudeDetail, str) && opt(r.agent, str) && opt(r.browser, str) && opt(r.browserAgent, str) && opt(r.error, str) && bool(r.ready);
+  // An act step's host, as reed's allowlist writes it: a lower-case name
+  // or address.
+  const ACT_HOST = /^[a-z0-9.:\[\]-]{1,253}$/;
 
   // asProposal is a proposal as the API sends it, if well formed: a
   // summary, and a program with its plan (perhaps a schedule with a name,
@@ -796,7 +835,11 @@ const DD = (() => {
     if (sp !== undefined && sp !== null && (!program || typeof sp !== "object" || !opt(sp.every, num) || !opt(sp.cron, str) || !opt(sp.timeZone, str) ||
       !sp.every === !sp.cron || !/^[a-z0-9-]{1,40}$/.test(v.name || ""))) return null;
     if (v.ready !== undefined && v.ready !== null && !isReady(v.ready)) return null;
-    return { summary: v.summary, program, plan: program ? v.plan : null, schedule: sp || null, name: sp ? v.name : "", skill, ready: v.ready ? { ...v.ready, needs: v.ready.needs || [] } : null };
+    // The hosts its act steps may submit forms on, disclosed before Run
+    // (roadmap 9.5): only with a program.
+    if (!opt(v.actHosts, (h) => strs(h) && h.every((x) => ACT_HOST.test(x))) || (v.actHosts && v.actHosts.length && !program)) return null;
+    return { summary: v.summary, program, plan: program ? v.plan : null, schedule: sp || null, name: sp ? v.name : "", skill, ready: v.ready ? { ...v.ready, needs: v.ready.needs || [] } : null,
+      actHosts: v.actHosts || [] };
   }
 
   // asReadiness is /api/ready's answer, if well formed; else null.
@@ -811,6 +854,7 @@ const DD = (() => {
     const out = [];
     if (r.agent) out.push({ what: "Agent steps", ok: false, fix: r.agent, href: "" });
     if (r.browser) out.push({ what: "Browse steps", ok: false, fix: r.browser, href: "" });
+    if (r.browserAgent) out.push({ what: "Act steps", ok: false, fix: r.browserAgent, href: "" });
     if (r.claude === "key") out.push({ what: "Claude", ok: false, fix: "No Anthropic API key yet. Paste one on the connectors page.", href: "#/connectors" });
     else if (r.claude === "unreadable") out.push({ what: "Claude", ok: false, fix: `Can't read the Anthropic API key now: ${r.claudeDetail || "the keychain didn't answer"}.`, href: "#/connectors" });
     for (const n of r.needs) {
@@ -981,6 +1025,6 @@ const DD = (() => {
     return asSchedules(res.data).filter((s) => s.paused && str(s.note) && FAILURE_PAUSE.test(s.note)).length;
   }
 
-  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
+  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
 })();
 if (typeof module !== "undefined") module.exports = DD;

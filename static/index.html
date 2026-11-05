@@ -21,7 +21,7 @@
     --paper:#eef1f6; --surface:#ffffff; --sunk:#f6f8fb; --ink:#1d2333; --muted:#5d6680; --line:#dbe0ea;
     --focus:#3b5bdb;
     /* Dyes: one per kind of step. */
-    --echo:#8a8778; --source:#3b5bdb; --assess:#c2185b; --browse:#c98f00; --ask:#7a3fe0; --agent:#d4561f;
+    --echo:#8a8778; --source:#3b5bdb; --assess:#c2185b; --browse:#c98f00; --ask:#7a3fe0; --agent:#d4561f; --act:#1f6fb2;
     --container:#8d5a2b; --image:#5c8a12; --skill:#a1368f; --record:#0f8a6c; --other:#5d6680;
     /* Statuses. */
     --ok:#178a55; --run:#c98f00; --bad:#d23a2b; --rec:#64708a; --merge:#0f8fa8;
@@ -32,7 +32,7 @@
     :root {
       --paper:#141824; --surface:#1b2130; --sunk:#171c29; --ink:#e6e9f2; --muted:#98a1b8; --line:#2b3346;
       --focus:#8ea6ff;
-      --echo:#b3b0a2; --source:#7d95ff; --assess:#f0628f; --browse:#f2c44b; --ask:#b28bff; --agent:#ff8a5c;
+      --echo:#b3b0a2; --source:#7d95ff; --assess:#f0628f; --browse:#f2c44b; --ask:#b28bff; --agent:#ff8a5c; --act:#64b5f6;
       --container:#c9925d; --image:#a9d94b; --skill:#e57ad0; --record:#3fcf9f; --other:#98a1b8;
       --ok:#3fcf8a; --run:#f2c44b; --bad:#ff7a6b; --rec:#98a1b8; --merge:#47c6dc;
     }
@@ -103,7 +103,7 @@
   .s-Completed { --c:var(--ok); } .s-Running { --c:var(--run); } .s-Recorded { --c:var(--rec); } .s-Merged { --c:var(--merge); }
   .s-Failed, .s-Terminated, .s-TimedOut, .s-Canceled { --c:var(--bad); } .s-Abandoned { --c:var(--muted); } .s-Scheduled { --c:var(--muted); } .s-Unknown { --c:var(--muted); }
   .k-echo { --c:var(--echo); } .k-source { --c:var(--source); } .k-assess { --c:var(--assess); } .k-browse { --c:var(--browse); }
-  .k-ask { --c:var(--ask); } .k-agent { --c:var(--agent); } .k-container { --c:var(--container); } .k-image { --c:var(--image); } .k-skill { --c:var(--skill); } .k-record { --c:var(--record); } .k-other { --c:var(--other); }
+  .k-ask { --c:var(--ask); } .k-agent { --c:var(--agent); } .k-act { --c:var(--act); } .k-container { --c:var(--container); } .k-image { --c:var(--image); } .k-skill { --c:var(--skill); } .k-record { --c:var(--record); } .k-other { --c:var(--other); }
   .f-added { --c:var(--ok); } .f-changed { --c:var(--run); } .f-deleted { --c:var(--bad); } .f-same { --c:var(--muted); }
   .files { padding:4px 0; } .file-row { border-bottom:1px solid var(--line); } .file-row:last-child { border-bottom:0; }
   .file-head { display:flex; gap:10px; align-items:center; width:100%; text-align:left; background:none; border:0; border-radius:0; padding:8px 14px; }
@@ -326,6 +326,15 @@
   .teach p { margin:6px 0; }
   .needs .writes { font-weight:600; color:var(--run); }
   .needs .writes.unasked { color:var(--bad); }
+  /* Roadmap 9.5: what act steps may do without asking, said before Run. */
+  .proposal .acts { margin:0 0 12px; padding:8px 12px; border-radius:8px; color:var(--bad); background:color-mix(in srgb, var(--bad) 9%, var(--surface)); border-left:3px solid var(--bad); }
+  .act-steps { list-style:none; padding:0; margin:0; display:grid; gap:14px; }
+  .act-steps li { border-left:3px solid var(--act); padding:2px 0 2px 12px; }
+  .act-steps li.bad { border-left-color:var(--bad); }
+  .act-head { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+  .act-n { font-family:var(--mono); font-size:12px; color:var(--muted); min-width:1.5em; }
+  .act-url { overflow-wrap:anywhere; }
+  .act-shot { display:block; max-width:min(100%, 640px); height:auto; margin-top:6px; border:1px solid var(--line); border-radius:6px; }
   .sched-name { display:inline-flex; gap:6px; align-items:center; color:var(--muted); }
   .sched-name input { width:14em; }
   .went-wrong { margin-bottom:12px; } .went-wrong p.mono { margin:8px 0; }
