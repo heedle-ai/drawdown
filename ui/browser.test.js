@@ -53,8 +53,8 @@ test.after(async () => {
   fs.rmSync(work, { recursive: true, force: true });
 });
 
-async function page({ program, ask, info, width = 1280 } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+async function page({ program, ask, info, width = 1280, scheme = "light", hash = "#/" } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme, deviceScaleFactor: process.env.DRAWDOWN_SHOTS ? 2 : 1 });
   await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
   await ctx.route(/^https:\/\/cdn\.jsdelivr\.net\/npm\//, (r) => {
     const m = /\/npm\/((?:@[^/]+\/)?[^@/]+@[^/]+)\/(.*)$/.exec(r.request().url());
@@ -67,7 +67,7 @@ async function page({ program, ask, info, width = 1280 } = {}) {
   const p = await ctx.newPage();
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e)));
-  await p.goto(BASE + "/#/");
+  await p.goto(BASE + "/" + hash);
   await p.locator("h2, h3").first().waitFor();
   return { p, ctx, errors };
 }
@@ -387,6 +387,67 @@ test("the editor shows where act steps may act, and Run sends those hosts", asyn
   // Without the hosts shown, the real server refuses it.
   const res = await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program }) });
   assert.equal(res.status, 422);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// === Share a skill (roadmap 10.6) ===========================================
+
+const b64 = (s) => Buffer.from(s).toString("base64");
+const postJSON = async (url, body) => (await fetch(BASE + url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+
+// Roadmap 10.6: a skill's page has Share, which shows the command that
+// publishes it, filled in, and, given your repository's link, the link a
+// friend imports it with; the page runs nothing.
+test("a skill's Share shows the publish command and the import link", async () => {
+  const add = await postJSON("/api/skills/add", { files: { "SKILL.md": b64("---\nname: trip-planner\ndescription: Plans a trip day by day.\n---\nPlan it.\n") } });
+  assert.ok(add.skill || add.name || add.version, JSON.stringify(add));
+  const info = await (await fetch(BASE + "/api/skills/trip-planner")).json();
+  for (const scheme of ["light", "dark"]) {
+    const { p, ctx, errors } = await page({ scheme, hash: "#/skill/trip-planner" });
+    const posts = [];
+    p.on("request", (r) => { if (r.method() === "POST") posts.push(r.url()); });
+    await p.getByRole("button", { name: "Share…" }).click();
+    const cmd = p.locator("code.share-cmd");
+    assert.equal(await cmd.textContent(), `heedle skills publish trip-planner -repo ~/src/my-skills -store ${info.store}`);
+    await p.getByLabel("Your clone").fill("~/src/friends skills");
+    assert.equal(await cmd.textContent(), `heedle skills publish trip-planner -repo ~/'src/friends skills' -store ${info.store}`);
+    await p.getByLabel("Your repository's link").fill("https://github.com/ada/my-skills");
+    assert.equal(await p.locator("code.share-link").textContent(), "https://github.com/ada/my-skills/tree/main/skills/trip-planner");
+    await p.getByLabel("Your repository's link").fill("https://evil.example/x");
+    assert.equal(await p.locator("code.share-link").count(), 0);
+    await p.getByLabel("Your repository's link").fill("https://github.com/ada/my-skills");
+    assert.deepEqual(posts, [], "Share sent nothing");
+    assert.deepEqual(errors, []);
+    if (process.env.DRAWDOWN_SHOTS) await p.locator(".panel.share").screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `share-${scheme}.png`) });
+    await ctx.close();
+  }
+});
+
+// Roadmap 10.6: browsing a friend's repository, you pick several of its
+// skills and each is imported pinned to the commit the catalog was read at.
+test("picking several skills from a repository's catalog imports each at the commit listed", async () => {
+  const commit = "a".repeat(40);
+  const entry = (name) => ({ source: { repo: "https://github.com/ada/my-skills", path: "skills/" + name, commit }, name, description: "Does " + name + "." });
+  const { p, ctx, errors } = await page({ hash: "#/skills" });
+  const asked = [];
+  await ctx.route("**/api/skills/catalog", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ entries: [entry("trip-planner"), entry("tile-hunt"), entry("tram-times")], omitted: 0 }) }));
+  await ctx.route("**/api/skills/import", (r) => {
+    const body = JSON.parse(r.request().postData());
+    asked.push(body);
+    const name = body.path.split("/").pop();
+    r.fulfill({ contentType: "application/json", body: JSON.stringify({ skill: { name, description: "Does " + name + ".", version: "b".repeat(40), commit: "c".repeat(40), pending: true,
+      source: { repo: body.link, path: body.path, commit: body.commit } } }) });
+  });
+  await p.getByRole("tab", { name: "Browse a repository" }).click();
+  await p.getByLabel("A GitHub link or https:// repository of skills").fill("https://github.com/ada/my-skills");
+  await p.getByRole("button", { name: "List its skills" }).click();
+  await p.locator(".catalog-list li").first().waitFor();
+  await p.locator(".catalog-list li", { hasText: "trip-planner" }).getByRole("checkbox").check();
+  await p.locator(".catalog-list li", { hasText: "tram-times" }).getByRole("checkbox").check();
+  await p.getByRole("button", { name: "Import 2 skills" }).click();
+  await p.locator(".catalog-list li", { hasText: "tram-times" }).locator(".catalog-state").filter({ hasText: /review/i }).waitFor();
+  assert.deepEqual(asked.map((b) => [b.path, b.commit]), [["skills/trip-planner", commit], ["skills/tram-times", commit]]);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

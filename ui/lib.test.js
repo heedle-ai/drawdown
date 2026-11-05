@@ -768,3 +768,19 @@ test("a proposal discloses the hosts its act steps may submit forms on, and a mi
   assert.deepEqual(lines.map((l) => [l.what, l.ok]), [["Act steps", false], ["Claude", false]]);
   assert.equal(lines[0].fix, "no browser-agent image");
 });
+
+// Roadmap 10.6: the Share panel's command and link.
+test("a skill's Share panel gives a command that pastes safely, and only a GitHub folder link", () => {
+  assert.equal(DD.publishCommand("trip-planner", "~/src/my-skills", "/home/ada/.heedle/store.git"),
+    "heedle skills publish trip-planner -repo ~/src/my-skills -store /home/ada/.heedle/store.git");
+  assert.equal(DD.publishCommand("trip-planner", "~/my skills; rm -rf ~", "/s"), "heedle skills publish trip-planner -repo ~/'my skills; rm -rf ~' -store /s");
+  assert.equal(DD.shellWord("it's $(here)"), "'it'\\''s $(here)'");
+  assert.equal(DD.shellWord(""), "''");
+  assert.equal(DD.shareLink("https://github.com/ada/my-skills", "main", "trip-planner"), "https://github.com/ada/my-skills/tree/main/skills/trip-planner");
+  assert.equal(DD.shareLink("github.com/ada/my-skills.git/", "", "trip-planner"), "https://github.com/ada/my-skills/tree/main/skills/trip-planner");
+  for (const [repo, branch] of [["https://evil.example/ada/x", "main"], ["https://github.com/ada/x/tree/main", "main"], ["javascript:alert(1)", "main"],
+    ["https://github.com/ada/x", "../x"], ["https://github.com/ada/x", "a b"], ["https://github.com/a/b?x=1", "main"]]) {
+    assert.equal(DD.shareLink(repo, branch, "trip-planner"), "", repo + " " + branch);
+  }
+  assert.equal(DD.shareLink("https://github.com/ada/x", "main", "Bad Name"), "");
+});

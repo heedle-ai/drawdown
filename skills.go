@@ -104,7 +104,13 @@ func (s *Server) skill(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, apiError{Error: "no skill " + r.PathValue("name")})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
+	resp := map[string]any{"versions": versions}
+	// The store's folder, for the Share panel's command (roadmap 10.6):
+	// only to this machine, which it names.
+	if s.StoreDir != "" && fromThisMachine(r, s.Hosts) {
+		resp["store"] = s.StoreDir
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // skillVersion is one version of a skill: its files with their sizes, and
@@ -215,6 +221,9 @@ func (s *Server) importSkill(w http.ResponseWriter, r *http.Request) {
 		Link   string `json:"link"`
 		Path   string `json:"path,omitempty"`
 		Branch string `json:"branch,omitempty"`
+		// Commit, if given, is the commit a catalog listed the skill at:
+		// it's imported from that commit or not at all (roadmap 10.6).
+		Commit string `json:"commit,omitempty"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -224,6 +233,7 @@ func (s *Server) importSkill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	src.Commit = strings.TrimSpace(req.Commit)
 	// Only from the network: a file:// source would read the worker's
 	// own disk for whoever can reach the page (review 18).
 	if !strings.HasPrefix(src.Repo, "https://") {
