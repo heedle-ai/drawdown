@@ -53,8 +53,8 @@ test.after(async () => {
   fs.rmSync(work, { recursive: true, force: true });
 });
 
-async function page({ program, ask, info, width = 1280 } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+async function page({ program, ask, info, width = 1280, scheme = "light", hash = "#/" } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme, deviceScaleFactor: process.env.DRAWDOWN_SHOTS ? 2 : 1 });
   await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
   await ctx.route(/^https:\/\/cdn\.jsdelivr\.net\/npm\//, (r) => {
     const m = /\/npm\/((?:@[^/]+\/)?[^@/]+@[^/]+)\/(.*)$/.exec(r.request().url());
@@ -67,7 +67,7 @@ async function page({ program, ask, info, width = 1280 } = {}) {
   const p = await ctx.newPage();
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e)));
-  await p.goto(BASE + "/#/");
+  await p.goto(BASE + "/" + hash);
   await p.locator("h2, h3").first().waitFor();
   return { p, ctx, errors };
 }
@@ -388,5 +388,97 @@ test("the editor shows where act steps may act, and Run sends those hosts", asyn
   const res = await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program }) });
   assert.equal(res.status, 422);
   assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// === Costs (roadmap 10.4) ===================================================
+
+const post = async (url, body) => (await fetch(BASE + url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+async function recorded(sub) {
+  const url = `/api/runs/${encodeURIComponent(sub.workflowId)}/${encodeURIComponent(sub.runId)}`;
+  for (let i = 0; ; i++) {
+    const d = await (await fetch(BASE + url)).json();
+    if (d.record) return d;
+    if (i > 100) throw new Error("the run wasn't recorded");
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+const LISBON = '(pipe (ask "Plan three days in Lisbon from 12 December; I like food and tiles.") (agent "Find the tile museums and their opening hours."))';
+
+// Roadmap 10.4: a run of the Lisbon trip shows its tokens per step and an
+// estimated total, with the price table's date.
+test("a run's page shows each Claude step's tokens and an estimated total", async () => {
+  const sub = await post("/api/runs", { program: LISBON });
+  const d = await recorded(sub);
+  const hash = `#/run/${encodeURIComponent(sub.workflowId)}/${encodeURIComponent(sub.runId)}`;
+  for (const scheme of ["light", "dark"]) {
+    const { p, ctx, errors } = await page({ scheme, hash });
+    const panel = p.locator(".panel.costs");
+    await panel.waitFor();
+    const rows = await panel.locator("tbody tr").evaluateAll((trs) => trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+    const steps = d.usage.steps;
+    assert.deepEqual(rows, steps.map((s) => [`${s.node} ${s.kind}`, s.model, DDcount(s.tokens.input), DDcount(s.tokens.output), String(s.requests)]));
+    assert.equal(await panel.locator(".cost-total").textContent(), `$${d.usage.cost.usd.toFixed(2)} est.`);
+    assert.match(await p.locator("h2:has-text('Claude usage') + .lede").textContent(), /prices as of 2026-11-05/);
+    assert.deepEqual(errors, []);
+    if (process.env.DRAWDOWN_SHOTS) {
+      await p.locator("h2", { hasText: "Claude usage" }).scrollIntoViewIfNeeded();
+      const box = await p.locator("h2", { hasText: "Claude usage" }).boundingBox(), end = await panel.boundingBox();
+      await p.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `run-costs-${scheme}.png`), fullPage: true, clip: { x: 0, y: box.y - 16, width: 1280, height: end.y + end.height - box.y + 32 } });
+    }
+    await ctx.close();
+  }
+});
+const DDcount = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+// Roadmap 10.4: the Costs page shows the month by model, with the price
+// table's date; it fits a phone.
+test("the Costs page shows this month by model, with the price table's date", async () => {
+  await recorded(await post("/api/runs", { program: '(ask "What should I pack for Lisbon in December?")' }));
+  for (const [width, scheme] of [[1280, "light"], [1280, "dark"], [375, "light"], [375, "dark"]]) {
+    const { p, ctx, errors } = await page({ width, scheme, hash: "#/costs" });
+    await p.locator("h2", { hasText: "Costs" }).waitFor();
+    const month = new Date().toLocaleString(undefined, { month: "long", year: "numeric" });
+    const h3 = await p.locator(".panel.costs h3").first().textContent();
+    assert.match(h3, new RegExp(`^${month}: \\$\\d+\\.\\d\\d est\\.$`), h3);
+    const models = await p.locator(".panel.costs").first().locator("tbody td:first-child").allTextContents();
+    assert.deepEqual(models, ["claude-sonnet-5-5"]);
+    assert.match(await p.locator("h2 + .lede").textContent(), /prices as of 2026-11-05/);
+    assert.equal(await p.locator("a[aria-current=page]").first().textContent(), "Costs");
+    const over = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.equal(over, 0, `${width}px scrolls sideways`);
+    assert.deepEqual(errors, []);
+    if (process.env.DRAWDOWN_SHOTS) await p.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `costs-${width}-${scheme}.png`), fullPage: true });
+    await ctx.close();
+  }
+});
+
+// Roadmap 10.4: a budget set on the Schedules page pauses the schedule
+// before its second run, and the page and the top bar say so.
+test("a schedule's budget is set on its page, and pauses it before its second run", async () => {
+  const made = await post("/api/schedules", { name: "lisbon-news", program: '(ask "What is new in Lisbon this week? Food, tiles and trams, please.")', every: "24h" });
+  assert.equal(made.name, "lisbon-news");
+  const { p, ctx, errors } = await page({ hash: "#/schedules" });
+  const card = p.locator(".panel.connector", { hasText: "lisbon-news" });
+  await card.getByLabel("Monthly budget, $").fill("0.01");
+  await card.getByRole("button", { name: "Save" }).click();
+  await card.locator("text=budget $0.01 a month").waitFor();
+  for (let i = 0; i < 2; i++) {
+    await card.getByRole("button", { name: "Run now" }).click();
+    await p.waitForTimeout(400);
+  }
+  await card.locator("p.muted", { hasText: "paused: monthly budget $0.01 reached (est.)" }).waitFor({ timeout: 10000 });
+  await p.waitForFunction(() => /^1/.test(document.querySelector('header a[href="#/schedules"] .need')?.textContent || ""), null, { timeout: 10000 });
+  // The run it stopped says why, and isn't waited on.
+  const s = (await (await fetch(BASE + "/api/schedules")).json()).schedules.find((x) => x.name === "lisbon-news");
+  const last = s.recent[s.recent.length - 1];
+  await p.goto(`${BASE}/#/run/${encodeURIComponent(last.workflowId)}/${encodeURIComponent(last.runId)}`);
+  await p.locator("text=Not run: paused: monthly budget $0.01 reached (est.)").waitFor();
+  assert.deepEqual(errors, []);
+  if (process.env.DRAWDOWN_SHOTS) {
+    await p.goto(BASE + "/#/schedules");
+    await card.locator("p.muted", { hasText: "paused: monthly budget" }).waitFor();
+    await card.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, "schedule-budget-light.png") });
+  }
   await ctx.close();
 });

@@ -9,6 +9,7 @@ import (
 	"go.temporal.io/sdk/mocks"
 
 	"go.temporal.io/api/common/v1"
+	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/workflow/v1"
 	"go.temporal.io/sdk/converter"
 
@@ -79,5 +80,21 @@ func TestInv_LiveReadsActHeartbeats(t *testing.T) {
 	if err != nil || len(frames) != 2 || frames[0].Activity != "3" || frames[0].Kind != "act" || frames[1].Kind != "browse" ||
 		frames[0].Image != "data:image/jpeg;base64,/9j/" {
 		t.Fatalf("frames = %+v, %v", frames, err)
+	}
+}
+
+// TestInv_SkippedRunsSayWhy: a run its schedule's budget stopped carries
+// the note (loom.MemoSkipped) in what the page reads, so the page says
+// why it has no record instead of waiting for one. (Roadmap 10.4.)
+func TestInv_SkippedRunsSayWhy(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+	note, _ := dc.ToPayload("paused: monthly budget $0.01 reached (est.) in November 2026")
+	e := execution(&workflow.WorkflowExecutionInfo{Execution: &common.WorkflowExecution{WorkflowId: "wf", RunId: "r"}, Status: enums.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+		Memo: &common.Memo{Fields: map[string]*common.Payload{loom.MemoSkipped: note}}})
+	if e.Skipped != "paused: monthly budget $0.01 reached (est.) in November 2026" || e.Status != "Completed" {
+		t.Errorf("%+v", e)
+	}
+	if e := execution(&workflow.WorkflowExecutionInfo{}); e.Skipped != "" {
+		t.Errorf("%+v", e)
 	}
 }
