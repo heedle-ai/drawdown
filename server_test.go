@@ -268,6 +268,7 @@ type world struct {
 	fake    *fakeTemporal
 	sources string
 	store   *warp.Store
+	memory  string // the server's memory file
 }
 
 func newWorld(t *testing.T) *world {
@@ -285,10 +286,10 @@ func newWorld(t *testing.T) *world {
 	}
 	fake := &fakeTemporal{store: store, sources: dir}
 	s := &drawdown.Server{Skills: &treadle.Library{Store: store}, Commands: shipment.Registry, Store: store, Ref: loom.DefaultRef, Registry: shipment.Registry(), Temporal: fake,
-		TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}}
+		TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}, MemoryFile: filepath.Join(dir, "memory.json")}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	return &world{t: t, srv: srv, fake: fake, sources: dir, store: store}
+	return &world{t: t, srv: srv, fake: fake, sources: dir, store: store, memory: s.MemoryFile}
 }
 
 func (w *world) call(method, path string, body any) (int, map[string]any, string) {
@@ -552,7 +553,7 @@ func TestServeForBrowser(t *testing.T) {
 		return reg
 	}
 	ui := &drawdown.Server{Skills: &treadle.Library{Store: w.store}, Commands: commands, Store: w.store, Ref: loom.DefaultRef, Registry: commands(),
-		Temporal: w.fake, TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}}
+		Temporal: w.fake, TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}, MemoryFile: w.memory}
 	s := &http.Server{Addr: addr, Handler: ui.Handler()}
 	go s.ListenAndServe()
 	defer s.Close()

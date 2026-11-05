@@ -34,6 +34,7 @@ const GOOD = {
   "/api/runs": { runs: [] },
   "/api/beliefs": { beliefs: [] },
   "/api/skills": { skills: [skill], pending: [waiting], problems: [] },
+  "/api/memory": { memories: [], version: "", file: "/home/me/.heedle/memory.json" },
   [`/api/skills/${waiting.name}/review`]: { skill: waiting, files: [{ path: "SKILL.md", size: 120 }], diff: "", binary: [] },
   // Paused by a failed run (Temporal's two notes), by heedle, and running:
   // two need you.
@@ -123,11 +124,11 @@ const bar = (page) => page.evaluate(() => {
 
 const SECTION_OF = { "": "Runs", "#/": "Runs", "#/run/wf/run1": "Runs", "#/step/wf/run1/n0": "Runs", "#/diff/a/b": "Runs", "#/agent/refs%2Floom%2Fmain": "Runs",
   "#/skills": "Skills", "#/skill/summarise": "Skills", [`#/skill/summarise/${HEX("a")}`]: "Skills", [`#/review/${waiting.name}`]: "Skills",
-  "#/schedules": "Schedules", "#/connectors": "Connectors", "#/nowhere": "Runs", "#/constructor": "Runs", "#/skills/extra": "Runs",
+  "#/schedules": "Schedules", "#/connectors": "Connectors", "#/memory": "Memory", "#/memory/extra": "Runs", "#/nowhere": "Runs", "#/constructor": "Runs", "#/skills/extra": "Runs",
   // Review 37: these blanked the page, or put an agent's header over the
   // home page.
   "#/agent": "Runs", "#/agent/refs%2Floom%2Fmain/extra": "Runs" };
-const HOME_ROUTES = ["", "#/", "#/nowhere", "#/constructor", "#/skills/extra", "#/agent", "#/agent/refs%2Floom%2Fmain/extra"];
+const HOME_ROUTES = ["", "#/", "#/nowhere", "#/constructor", "#/skills/extra", "#/memory/extra", "#/agent", "#/agent/refs%2Floom%2Fmain/extra"];
 const LONG_AGENT = "#/agent/refs%2Floom%2Fa-very-long-agent-branch-name-for-the-quarterly-report";
 
 async function main() {
@@ -163,14 +164,14 @@ async function main() {
       await page.waitForFunction(() => document.querySelectorAll("header .need").length === 3, null, { timeout: 15000 });
       if (hash.startsWith("#/review/")) await page.waitForSelector("main .step-hero");
       const b = await bar(page);
-      assert.deepEqual(b.items.map((i) => i.text), ["Runs", "Skills", "Schedules", "Connectors", "Temporal"], where);
-      assert.deepEqual(b.items.slice(0, 4).map((i) => i.href), ["#/", "#/skills", "#/schedules", "#/connectors"], where);
-      for (const i of b.items.slice(0, 4)) assert.equal(i.need || "", COUNTS[i.text] || "", `${where}: ${i.text}'s count`);
+      assert.deepEqual(b.items.map((i) => i.text), ["Runs", "Skills", "Schedules", "Connectors", "Memory", "Temporal"], where);
+      assert.deepEqual(b.items.slice(0, 5).map((i) => i.href), ["#/", "#/skills", "#/schedules", "#/connectors", "#/memory"], where);
+      for (const i of b.items.slice(0, 5)) assert.equal(i.need || "", COUNTS[i.text] || "", `${where}: ${i.text}'s count`);
       // Each count is read once, with what it counts (review 37: twice).
-      for (const name of ["Runs", "Skills (1 waiting for review)", "Schedules (2 paused after a failed or timed-out run)", "Connectors (2 keys to set)"]) {
+      for (const name of ["Runs", "Skills (1 waiting for review)", "Schedules (2 paused after a failed or timed-out run)", "Connectors (2 keys to set)", "Memory"]) {
         assert.equal(await page.getByRole("link", { name, exact: true }).count(), 1, `${where}: no link named "${name}"`);
       }
-      const t = b.items[4];
+      const t = b.items[5];
       assert.ok(b.last && t.href === GOOD["/api/info"].temporalUI && t.target === "_blank" && /noopener/.test(t.rel), `${where}: Temporal is last, in a new tab`);
       assert.ok(!/\d+ commands/.test(b.headerText), `${where}: the commands pill is gone`);
       for (const h of b.hrefs) assert.ok(h.startsWith("#/") || h === GOOD["/api/info"].temporalUI, `${where}: the header links to ${h}`);
@@ -180,7 +181,7 @@ async function main() {
       await page.evaluate(() => document.activeElement && document.activeElement.blur());
       await page.locator("header select, header .brand").first().focus();
       const reached = [];
-      for (let i = 0; i < 12 && reached.length < 5; i++) {
+      for (let i = 0; i < 14 && reached.length < 6; i++) {
         await page.keyboard.press("Tab");
         const f = await page.evaluate(() => {
           const a = document.activeElement;
@@ -190,7 +191,7 @@ async function main() {
         });
         if (f) { assert.ok(f.ring, `${where}: ${f.text} has no visible focus`); reached.push(f.text); }
       }
-      assert.deepEqual(reached, ["Runs", "Skills", "Schedules", "Connectors", "Temporal"], `${where}: keyboard order`);
+      assert.deepEqual(reached, ["Runs", "Skills", "Schedules", "Connectors", "Memory", "Temporal"], `${where}: keyboard order`);
       assert.deepEqual(errors, [], `${where}: page errors`);
       if (shots) {
         await page.evaluate(() => document.activeElement && document.activeElement.blur());
@@ -233,7 +234,7 @@ async function main() {
       for (let i = 0; i < 100 && !["/api/skills", "/api/schedules", "/api/connectors"].every((p) => asked.includes(p)); i++) await page.waitForTimeout(100);
       await page.waitForTimeout(500);
       const b = await bar(page);
-      assert.deepEqual(b.items.map((i) => i.need), ["", "", "", "", ""], "broken answers give no counts");
+      assert.deepEqual(b.items.map((i) => i.need), ["", "", "", "", "", ""], "broken answers give no counts");
       assert.ok(!/error|locked|couldn't/i.test(b.headerText), "broken answers say nothing in the bar");
       assert.deepEqual(b.current, [["Skills", "page"]]);
       assert.deepEqual(errors, []);

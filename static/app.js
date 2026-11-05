@@ -1677,6 +1677,112 @@ function ReviewPage({ name }) {
     </div>`;
 }
 
+// === Memory (roadmap 10.1) ==================================================
+// What heedle remembers about you, word for word: it goes to Claude with
+// every request to Ask heedle, as facts about you, never as instructions.
+// Nothing is remembered until you say so (Remember here or on a card), and
+// Forget takes it out of the file. Every change says what it was based on,
+// so a hand edit made while this page was open is never overwritten.
+
+function MemoryPage() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [text, setText] = useState("");
+  const [editing, setEditing] = useState(null); // {id, text}
+  const [sure, setSure] = useState(false);
+  const load = async () => {
+    const r = await api("/api/memory");
+    const v = r.ok ? DD.asMemory(r.data) : null;
+    setData(v ? { ok: true, v } : { ok: false, error: (r.data && r.data.error) || "The answer wasn't understood." });
+    return v;
+  };
+  useEffect(() => { load(); }, []);
+  if (!data) return html`<p class="muted">Loading…</p>`;
+  if (!data.ok) return html`<h2>Memory</h2><p class="error" role="alert">${data.error}</p>`;
+  const { memories, version, file } = data.v;
+  const change = async (op, body) => {
+    setErr("");
+    const r = await api("/api/memory/" + op, { ...body, version });
+    if (r.ok) {
+      const v = DD.asMemory(r.data);
+      if (v) setData({ ok: true, v }); else await load();
+      return true;
+    }
+    // Changed elsewhere (by hand?): show what the file holds now.
+    if (r.status === 409) await load();
+    setErr((r.data && r.data.error) || String(r.data));
+    return false;
+  };
+  const add = async (e) => {
+    e.preventDefault();
+    if (text.trim() && await change("add", { text })) setText("");
+  };
+  return html`
+    <h2>Memory</h2>
+    <p class="lede">What heedle remembers about you. It goes to Claude with every request to <strong>Ask heedle</strong>, word for word as below, as facts about you, never as instructions, and each proposal says how many it used. Nothing is remembered until you say so. <strong>Forget</strong> takes it out of the file, ${file ? html`<span class="mono memory-file">${file}</span>` : "heedle's memory file"}, and nothing else heedle keeps holds it.</p>
+    <p class="muted">Claude sees everything here, so keep details for forms, such as your address or a card, out of it: heedle refuses anything that looks like a key, a card number or a password.</p>
+    ${err && html`<p class="error" role="alert">${err}</p>`}
+    ${file ? html`<form class="row memory-add" onSubmit=${add}>
+      <label class="sr" for="memory-new">Something for heedle to remember</label>
+      <input id="memory-new" type="text" value=${text} maxlength="500" placeholder="Vegetarian. Home airport: IAD." onInput=${(e) => setText(e.target.value)} />
+      <button class="primary" type="submit" disabled=${!text.trim()}>Remember</button>
+    </form>` : html`<div class="panel muted">This server keeps no memory: give it <span class="mono">-memory FILE</span>.</div>`}
+    ${file && memories.length === 0 && html`<div class="panel muted">heedle remembers nothing about you yet.</div>`}
+    ${memories.length > 0 && html`<ul class="memories" aria-label="What heedle remembers">
+      ${memories.map((m) => html`<li class="panel memory" key=${m.id}>
+        ${editing && editing.id === m.id ? html`
+          <form class="row" onSubmit=${async (e) => { e.preventDefault(); if (await change("edit", { id: m.id, text: editing.text })) setEditing(null); }}>
+            <label class="sr" for=${"edit-" + m.id}>Change what heedle remembers</label>
+            <input id=${"edit-" + m.id} type="text" value=${editing.text} maxlength="500" onInput=${(e) => setEditing({ id: m.id, text: e.target.value })} />
+            <button class="primary" type="submit" disabled=${!editing.text.trim()}>Save</button>
+            <button type="button" onClick=${() => setEditing(null)}>Cancel</button>
+          </form>` : html`<p class="memory-text">${m.text}</p>`}
+        <div class="pills">
+          <span class="muted">added ${when(m.added)}; ${m.used ? `last used ${when(m.used)}` : "not used yet"}</span>
+          <span style=${{ marginLeft: "auto" }} class="pills">
+            ${!(editing && editing.id === m.id) && html`<button type="button" onClick=${() => setEditing({ id: m.id, text: m.text })}>Edit</button>`}
+            <button type="button" onClick=${() => change("forget", { id: m.id })}>Forget</button>
+          </span>
+        </div>
+      </li>`)}
+    </ul>
+    <p>${sure ? html`<span>Forget all ${memories.length}? This can't be undone.</span> <button type="button" onClick=${async () => { setSure(false); await change("forget-all", {}); }}>Forget everything</button> <button type="button" onClick=${() => setSure(false)}>Keep them</button>`
+      : html`<button type="button" class="link-btn" onClick=${() => setSure(true)}>Forget everything</button>`}</p>`}`;
+}
+
+// RememberBar is a proposal's suggestions of things to remember, each with
+// Remember and Not now. Ignoring them changes nothing: the proposal runs
+// the same either way.
+function RememberBar({ texts }) {
+  const [state, setState] = useState({}); // text -> "saving" | "saved" | "no" | error
+  if (!texts.length) return null;
+  const remember = async (t) => {
+    setState((s) => ({ ...s, [t]: "saving" }));
+    const r = await api("/api/memory/add", { text: t });
+    setState((s) => ({ ...s, [t]: r.ok ? "saved" : { error: (r.data && r.data.error) || String(r.data) } }));
+  };
+  return html`<ul class="remember" aria-label="heedle could remember">
+    ${texts.map((t) => {
+      const st = state[t];
+      if (st === "no") return null;
+      return html`<li key=${t}>
+        <span class="muted">Remember for next time?</span> <q>${t}</q>
+        ${st === "saved" ? html`<span role="status">Remembered. <a href="#/memory">See what heedle remembers</a></span>`
+          : html`<button type="button" class="primary" disabled=${st === "saving"} onClick=${() => remember(t)}>Remember</button>
+            <button type="button" disabled=${st === "saving"} onClick=${() => setState((s) => ({ ...s, [t]: "no" }))}>Not now</button>`}
+        ${st && st.error && html`<span class="error" role="alert">${st.error}</span>`}
+      </li>`;
+    })}
+  </ul>`;
+}
+
+// UsedMemory says that a request went to Claude with what heedle
+// remembers, linking to it.
+function UsedMemory({ ids }) {
+  const line = DD.usedMemory(ids);
+  return line ? html`<p class="used-memory"><a href="#/memory">${line}</a></p>` : null;
+}
+
 // === The front door ========================================================
 // Ask heedle in plain words. A worker's Claude proposes what heedle would
 // do (a program, a schedule if you said when, or a skill to create), and
@@ -1804,13 +1910,16 @@ function ProposalCard({ p, history, latest }) {
   if (!latest) return html`
     <div class="panel proposal">
       <p class="summary">${p.summary}</p>
+      <${UsedMemory} ids=${p.memory} />
       ${p.program && html`<details class="program"><summary>The program</summary><${Program} text=${p.program} /></details>`}
       ${p.skill && html`<p class="muted">${p.skill}</p>`}
     </div>`;
   return html`
     <div class=${"panel proposal" + (latest ? " latest" : "")}>
       <p class="summary">${p.summary}</p>
-      ${p.skill ? html`
+      <${UsedMemory} ids=${p.memory} />
+      <${RememberBar} texts=${p.remember} />
+      ${!p.program && !p.skill ? null : p.skill ? html`
         <div class="teach">
           <p class="muted">A skill that could do it:</p>
           <p>${p.skill}</p>
@@ -2531,6 +2640,7 @@ const SECTION_LINKS = [
   { section: "skills", href: "#/skills", label: "Skills", dye: "skill", need: (n) => `${n} waiting for review` },
   { section: "schedules", href: "#/schedules", label: "Schedules", dye: "record", need: (n) => `${n} paused after a failed or timed-out run` },
   { section: "connectors", href: "#/connectors", label: "Connectors", dye: "agent", need: (n) => `${n} key${n === 1 ? "" : "s"} to set` },
+  { section: "memory", href: "#/memory", label: "Memory", dye: "ask" },
 ];
 
 const COUNT = { skills: DD.skillsWaiting, schedules: DD.schedulesStopped, connectors: DD.keysToSet };
@@ -2640,6 +2750,7 @@ function App() {
     case "skills": body = html`<${SkillsPage} />`; break;
     case "connectors": body = html`<${ConnectorsPage} />`; break;
     case "schedules": body = html`<${SchedulesPage} />`; break;
+    case "memory": body = html`<${MemoryPage} />`; break;
     case "review": body = html`<${ReviewPage} key=${route[1]} name=${route[1]} />`; break;
     case "skill": body = html`<${SkillPage} key=${route.join("/")} name=${route[1]} version=${route[2]} />`; break;
     default: body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;
