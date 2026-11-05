@@ -1039,7 +1039,7 @@ const DD = (() => {
   const BUDGET_PAUSE = /^paused: monthly budget \$[0-9]+\.[0-9]{2} (reached \(est\.\)|can't be checked) in [A-Z][a-z]+ [0-9]{4}/;
   const isTokens = (t) => t && typeof t === "object" && num(t.input) && num(t.output) && t.input >= 0 && t.output >= 0;
   const isStepUsage = (s) => str(s.node) && str(s.kind) && opt(s.model, str) && isTokens(s.tokens) && opt(s.requests, num) && opt(s.missing, str);
-  const isUnpriced = (u) => str(u.node) && opt(u.model, str) && isTokens(u.tokens) && str(u.why);
+  const isUnpriced = (u) => str(u.node) && opt(u.model, str) && isTokens(u.tokens) && str(u.why) && opt(u.atMost, num);
   // isSpent is drawdown's spent: tokens, and usd only if all was priced.
   const isSpent = (v) => v && typeof v === "object" && num(v.runs) && isTokens(v.tokens) && (v.usd === null || num(v.usd)) && num(v.priced) && objs(v.unpriced, isUnpriced);
   // asStepUsages is a usage's steps, if well formed; else [].
