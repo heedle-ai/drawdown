@@ -241,3 +241,17 @@ func TestInv_NoPruneWithoutTheReleasesPins(t *testing.T) {
 		t.Errorf("Prune with pins and no podman: %v", err)
 	}
 }
+
+// TestInv_TheUIsWorkerSaysItsHome: the UI's worker, the only one app.go
+// makes, starts every activity from loom.WorkerContext of its store, so
+// every container its steps start says this home (DRAW-520, roadmap
+// 9.2.1).
+func TestInv_TheUIsWorkerSaysItsHome(t *testing.T) {
+	src, err := os.ReadFile("app/app.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(src), "worker.New(") != 1 || !strings.Contains(string(src), "worker.New(c, *queue, reed.WorkerOptions(worker.Options{BackgroundActivityContext: loom.WorkerContext(*store)}))") {
+		t.Error("app.go's worker doesn't start its activities from loom.WorkerContext(*store)")
+	}
+}

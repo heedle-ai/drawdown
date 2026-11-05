@@ -107,7 +107,10 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	// same way (review 33).
 	stepKeys := &drawdown.OAuthVault{Keys: vault}
 	if *runWorker {
-		w := worker.New(c, *queue, reed.WorkerOptions(worker.Options{}))
+		// Every container a step starts says this store's home, so two
+		// heedle homes running at once each tidy only their own (roadmap
+		// 9.2.1, DRAW-520).
+		w := worker.New(c, *queue, reed.WorkerOptions(worker.Options{BackgroundActivityContext: loom.WorkerContext(*store)}))
 		// Every step's containers are labelled with its run and step
 		// (roadmap 9.2, DRAW-505).
 		steps := loom.Labelled(w)
