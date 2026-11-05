@@ -616,7 +616,7 @@ func TestServeForBrowser(t *testing.T) {
 		return reg
 	}
 	ui := &drawdown.Server{Skills: &treadle.Library{Store: w.store}, Commands: commands, Store: w.store, Ref: loom.DefaultRef, Registry: commands(),
-		Temporal: w.fake, TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}, MemoryFile: w.memory}
+		Temporal: w.fake, TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}, MemoryFile: w.memory, StoreDir: w.store.Dir()}
 	s := &http.Server{Addr: addr, Handler: ui.Handler()}
 	go s.ListenAndServe()
 	defer s.Close()

@@ -160,6 +160,9 @@ type Server struct {
 	// PricesFile is your prices file, if any (loom.ReadPrices): costs are
 	// estimated with it (roadmap 10.4).
 	PricesFile string
+	// StoreDir is the store's folder, for the command a skill's Share
+	// panel shows (roadmap 10.6); shown only to this machine.
+	StoreDir string
 	// Secrets, if set, is the keychain the Connectors page keeps keys in.
 	Secrets Secrets
 	// StepKeys, if set, is the vault steps read keys through (Secrets
