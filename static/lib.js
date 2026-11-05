@@ -1029,6 +1029,30 @@ const DD = (() => {
     return asSchedules(res.data).filter((s) => s.paused && str(s.note) && FAILURE_PAUSE.test(s.note)).length;
   }
 
-  return { SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
+  // === Share a skill (roadmap 10.6) ========================================
+
+  // shellWord is s as one word of a POSIX shell; a leading ~/ stays
+  // unquoted, so the shell still reads it as your home.
+  function shellWord(s) {
+    s = String(s);
+    const home = s.startsWith("~/") ? "~/" : "";
+    const rest = home ? s.slice(2) : s;
+    if (rest !== "" && /^[A-Za-z0-9._\/@:+=-]+$/.test(rest)) return home + rest;
+    return home + "'" + rest.replace(/'/g, "'\\''") + "'";
+  }
+  // publishCommand is the command that publishes a skill into a clone.
+  const publishCommand = (name, repo, store) => `heedle skills publish ${name} -repo ${shellWord(repo || "~/src/my-skills")} -store ${shellWord(store || "~/.heedle/store.git")}`;
+  // shareLink is the link a friend imports a published skill with: its
+  // folder on GitHub, from your repository's link and branch; "" unless
+  // that is a GitHub repository's link.
+  function shareLink(repo, branch, name) {
+    const m = /^(?:https:\/\/)?github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(String(repo).trim());
+    const b = String(branch || "main").trim();
+    if (!m || !/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(b) || b.includes("..") || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)) return "";
+    return `https://github.com/${m[1]}/${m[2]}/tree/${b}/skills/${name}`;
+  }
+
+  return { shellWord, publishCommand, shareLink,
+    SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
 })();
 if (typeof module !== "undefined") module.exports = DD;

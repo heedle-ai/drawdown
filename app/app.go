@@ -206,6 +206,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	srv := &drawdown.Server{
 		Connectors:     func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) },
 		ConnectorsFile: *connectorsFile,
+		StoreDir:       s.Dir(),
 		Secrets:        vault,
 		StepKeys:       stepKeys,
 		Agents:         *agentImage != "",
