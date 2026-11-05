@@ -351,7 +351,11 @@ func actShown(w http.ResponseWriter, p plan.Plan, shown, shownFreely, shownUses 
 		msg = "This program's act steps can click, type and submit forms on " + strings.Join(freely, ", ") + " without asking again."
 	}
 	if len(uses) > 0 {
-		msg += " They may use your " + strings.Join(uses, ", ") + "."
+		words := make([]string, len(uses))
+		for i, f := range uses {
+			words[i] = pirn.ProfileLabels[f]
+		}
+		msg += " They may use your " + strings.Join(words, ", ") + "."
 	}
 	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 		"error":    msg + " Run it where the page says so.",
