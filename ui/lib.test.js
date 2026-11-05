@@ -866,6 +866,9 @@ test("costs show a dollar figure only where every step had a price", () => {
   const usage = { steps: [{ node: "n0", kind: "ask", model: "claude-sonnet-5-5", tokens: { input: 5, output: 1 }, requests: 1 }, { node: "n1", kind: "agent", tokens: { input: 0, output: 0 }, missing: "no counts" }],
     total: { input: 5, output: 1 }, cost: { usd: 0.00002, byModel: {}, unpriced: [{ node: "n1", tokens: { input: 0, output: 0 }, why: "no counts" }], complete: false, asOf: "2026-11-05", source: "https://x" } };
   assert.ok(DD.asRunUsage(usage));
+  // A bounded step (review 48) is still unpriced, and its bound must be a number.
+  assert.ok(DD.asRunUsage({ ...usage, cost: { ...usage.cost, unpriced: [{ ...usage.cost.unpriced[0], atMost: 0.1 }] } }));
+  assert.equal(DD.asRunUsage({ ...usage, cost: { ...usage.cost, unpriced: [{ ...usage.cost.unpriced[0], atMost: "0.1" }] } }), null);
   assert.equal(DD.asRunUsage({ ...usage, steps: [{ node: "n0", kind: "ask", tokens: { input: -1, output: 0 } }] }), null);
   assert.equal(DD.asRunUsage({ ...usage, cost: { ...usage.cost, complete: "no" } }), null);
   assert.deepEqual(DD.asSpend({ spend: { news: { month: sp(0.03, 0.03), last30: sp(0.05, 0.05) }, bad: { month: sp(1, 1) } } }), { news: { month: sp(0.03, 0.03), last30: sp(0.05, 0.05) } });
