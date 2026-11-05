@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -44,6 +46,33 @@ type PodmanSystem struct {
 	Pins, Kept []string
 	// Mac is whether Podman runs in a virtual machine (macOS).
 	Mac bool
+	// Homes is the folder where each running heedle home says it runs
+	// (heedle up gives it, -homes), and Home this worker's home label
+	// (bobbin.HomeOf its store). While another home is named there, its
+	// images aren't known here, so Prune refuses (roadmap 9.2.1, review
+	// 55): heedle images -prune keeps every running home's.
+	Homes, Home string
+}
+
+// ErrOtherHomes is a prune refused because another heedle home runs.
+var ErrOtherHomes = errors.New("another heedle home is running, and this page doesn't know which images it keeps: remove old images with heedle images -prune, which keeps every running home's")
+
+// otherHome is another home Homes names, if any.
+func (p PodmanSystem) otherHome() (string, bool) {
+	if p.Homes == "" {
+		return "", false
+	}
+	es, err := os.ReadDir(p.Homes)
+	if err != nil {
+		return "", !errors.Is(err, os.ErrNotExist) // can't tell: assume one
+	}
+	for _, e := range es {
+		if e.Name() != p.Home && bobbin.ValidHome(e.Name()) {
+			b, _ := os.ReadFile(filepath.Join(p.Homes, e.Name()))
+			return strings.TrimSpace(string(b)), true
+		}
+	}
+	return "", false
 }
 
 func (p PodmanSystem) Containers(ctx context.Context) ([]loom.Container, error) {
@@ -75,6 +104,9 @@ var ErrNoPins = errors.New("old images can be removed only when the worker knows
 func (p PodmanSystem) Prune(ctx context.Context) ([]string, error) {
 	if len(p.Pins) == 0 {
 		return nil, ErrNoPins
+	}
+	if home, ok := p.otherHome(); ok {
+		return nil, fmt.Errorf("%w (%s)", ErrOtherHomes, home)
 	}
 	return bobbin.Runner{}.PruneImages(ctx, bobbin.HeedleRepo, p.keep())
 }
@@ -220,7 +252,7 @@ func (s *Server) systemPrune(w http.ResponseWriter, r *http.Request) {
 	if removed == nil {
 		removed = []string{}
 	}
-	if errors.Is(err, ErrNoPins) {
+	if errors.Is(err, ErrNoPins) || errors.Is(err, ErrOtherHomes) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "removed": removed})
 		return
 	}

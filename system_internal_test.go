@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -253,5 +254,33 @@ func TestInv_TheUIsWorkerSaysItsHome(t *testing.T) {
 	}
 	if strings.Count(string(src), "worker.New(") != 1 || !strings.Contains(string(src), "worker.New(c, *queue, reed.WorkerOptions(worker.Options{BackgroundActivityContext: loom.WorkerContext(*store)}))") {
 		t.Error("app.go's worker doesn't start its activities from loom.WorkerContext(*store)")
+	}
+}
+
+// TestInv_NoPruneWhileAnotherHomeRuns: the System page removes no old
+// images while the homes folder heedle up gives it names another home:
+// it can't know which images that home keeps, so the prune is refused
+// (409) before Podman is asked; its own home doesn't hold it back; and
+// app.go gives the System page the folder and its own home (DRAW-521,
+// review 55).
+func TestInv_NoPruneWhileAnotherHomeRuns(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no podman: a prune that got as far as Podman fails otherwise
+	dir := t.TempDir()
+	own, other := "aaaaaaaaaaaa", "bbbbbbbbbbbb"
+	os.WriteFile(filepath.Join(dir, own), []byte("/home/me/.heedle\n"), 0o600)
+	p := PodmanSystem{Pins: []string{"ghcr.io/heedle-ai/pirn-agent@sha256:pinned"}, Homes: dir, Home: own}
+	if _, err := p.Prune(context.Background()); err == nil || errors.Is(err, ErrOtherHomes) {
+		t.Errorf("with only its own home running, prune: %v (want podman's error, not a refusal)", err)
+	}
+	os.WriteFile(filepath.Join(dir, other), []byte("/home/me/other\n"), 0o600)
+	if removed, err := p.Prune(context.Background()); !errors.Is(err, ErrOtherHomes) || !strings.Contains(err.Error(), "/home/me/other") || len(removed) != 0 {
+		t.Errorf("with another home running, prune: %v, %v", removed, err)
+	}
+	src, err := os.ReadFile("app/app.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "Homes: *homes, Home: bobbin.HomeOf(*store)}") {
+		t.Error("app.go doesn't give the System page the homes folder and its own home")
 	}
 }
