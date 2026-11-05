@@ -514,7 +514,7 @@ function ActWork({ act: a, part = "all" }) {
       ${summary && html`
       <div class="pills muted">
         <${Pill} cls="k-act">${a.model}<//>
-        <${Pill} cls=${finished ? "s-Completed" : "s-Failed"}>${DD.actEnding(a.ended)}<//>
+        <${Pill} cls=${finished ? "s-Completed" : "s-Failed"}>${DD.actEndingOf(a)}<//>
         <${Pill} cls="k-other" plain>${a.calls.length} action${a.calls.length === 1 ? "" : "s"}${failed ? `, ${failed} refused or failed` : ""}<//>
         <${Pill} cls="k-other" plain>${a.turns} turn${a.turns === 1 ? "" : "s"}<//>
         ${a.allowed.map((h) => html`<${Pill} key=${h} cls="s-Completed" mono>${h}<//>`)}
@@ -3013,6 +3013,7 @@ function CostsPage() {
           <td class="mono">${m.model || html`<span class="muted">no counts recorded</span>`}</td><td class="num">${m.runs}</td>
           <td class="num">${DD.count(m.tokens.input)}</td><td class="num">${DD.count(m.tokens.output)}</td><td class="num">${m.model ? DD.estimate(m) : "–"}</td></tr>`)}</tbody>
       </table>`}
+      ${now.replayed > 0 && html`<p class="muted replayed-note">${now.replayed} act step${now.replayed === 1 ? "" : "s"} replayed an earlier run without asking Claude: no tokens, so ${now.replayed === 1 ? "it isn't" : "they aren't"} counted by model.</p>`}
     </div>
     <h3>The six months before</h3>
     <div class="panel costs">
@@ -3191,8 +3192,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
 // ReplayPill says on an act step's card whether it replayed an earlier
 // run's script: green when Claude wasn't asked at all.
 function ReplayPill({ replay: r }) {
-  const cls = !r.handedOver ? "s-Completed" : "k-other";
-  const words = !r.handedOver ? "replayed, no Claude" : r.replayed ? `replayed ${r.replayed} of ${r.steps}` : "not replayed";
+  const all = DD.replayedAll(r);
+  const cls = all ? "s-Completed" : "k-other";
+  const words = all ? "replayed, no Claude" : r.replayed ? `replayed ${r.replayed} of ${r.steps}` : "not replayed";
   return html`<${Pill} cls=${cls} plain>${words}<//>`;
 }
 

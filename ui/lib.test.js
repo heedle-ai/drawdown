@@ -966,6 +966,14 @@ test("act replays are read strictly and said in words", () => {
   assert.equal(DD.replayWords({ steps: 4, replayed: 0, handedOver: true, at: 1, why: "this step's inputs differ from that run's" }), "didn't replay: this step's inputs differ from that run's");
   assert.equal(DD.replayWords({ steps: 4, replayed: 1, handedOver: true, at: 2, why: "x" }), "replayed 1 of 4, then Claude from action 2: x");
   assert.equal(DD.replayWords(undefined), "");
+  // Review 51: a replay a "no" cut short isn't all of it, and only a whole
+  // replay finishes "as the run it replayed did".
+  const cut = { steps: 4, replayed: 2, at: 3, why: "a send there wasn't confirmed, so nothing more was done" };
+  assert.equal(DD.replayWords(cut), "replayed 2 of 4, then stopped at action 3: a send there wasn't confirmed, so nothing more was done");
+  assert.equal(DD.replayedAll(cut), false);
+  assert.equal(DD.actEndingOf({ ended: "finished", replay: { steps: 2, replayed: 2 } }), "finished, as the run it replayed did");
+  assert.equal(DD.actEndingOf({ ended: "finished", replay: { steps: 2, replayed: 1, handedOver: true, at: 2 } }), "Claude said it finished");
+  assert.ok(DD.asCosts({ asOf: "x", source: "y", zone: "UTC", months: [], runs: [], schedules: [] }));
   assert.deepEqual(DD.decisions("act", actJSON({ replay: { steps: 2, replayed: 2 } })).find((r) => r[0] === "Replay"), ["Replay", "replayed all 2 actions, without Claude"]);
   assert.equal(DD.locatorText({ role: "button", name: 'Say "hi"', nth: 1 }), 'getByRole("button", { name: "Say \\"hi\\"", exact: true }).nth(1)');
   for (const bad of [actJSON({ replay: { steps: "4", replayed: 1 } }), actJSON({ script: [{ tool: 1 }] }), actJSON({ script: [{ ...script[0], targets: [{ role: 1, name: "x" }] }] }),

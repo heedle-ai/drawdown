@@ -357,3 +357,38 @@ func TestInv_SchedulesAnswerWhenSpendCant(t *testing.T) {
 		t.Errorf("%d %s", code, raw)
 	}
 }
+
+// TestInv_CostsPageCountsReplays: an act step that replayed an earlier
+// run's script whole, asking Claude nothing, is counted on the Costs page
+// as replayed, not as a model's run with no tokens; one that handed over
+// to Claude counts under its model as usual (roadmap 9.9, review 51).
+func TestInv_CostsPageCountsReplays(t *testing.T) {
+	w := newWorld(t)
+	act := func(r *pirn.ActReplay, in int64) map[string]any {
+		return map[string]any{"n0": pirn.ActResult{Answer: pirn.Answer{Pirn: 1, Model: "claude-sonnet-5-5", InputTokens: in}, Act: 1, Replay: r}}
+	}
+	prog := `(act "Book the table." "https://book.example.org/")`
+	w.claudeRun(prog, act(&pirn.ActReplay{Steps: 3, Replayed: 3}, 0), time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC), "")
+	w.claudeRun(prog, act(&pirn.ActReplay{Steps: 3, Replayed: 1, HandedOver: true, At: 2}, 500), time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), "")
+	// Review 51 round 3: one a "no" cut short, Claude never asked, counts
+	// under its model too, with no tokens.
+	w.claudeRun(prog, act(&pirn.ActReplay{Steps: 3, Replayed: 2, At: 3, Why: "a send there wasn't confirmed"}, 0), time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC), "")
+	code, m, raw := w.call("GET", "/api/costs?month=2026-11&tz=UTC", nil)
+	if code != 200 {
+		t.Fatalf("%d %s", code, raw)
+	}
+	var v struct {
+		Months []struct {
+			Replayed int
+			ByModel  []struct {
+				Model string
+				Runs  int
+			}
+		}
+	}
+	b, _ := json.Marshal(m)
+	json.Unmarshal(b, &v)
+	if nov := v.Months[0]; nov.Replayed != 1 || len(nov.ByModel) != 1 || nov.ByModel[0].Runs != 2 {
+		t.Errorf("November: %+v", nov)
+	}
+}
