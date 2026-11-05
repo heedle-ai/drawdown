@@ -872,9 +872,12 @@ const DD = (() => {
   // forgetInConversation is the conversation kept for the tab (json),
   // without the turns made with any of the memories ids, just forgotten:
   // what they proposed may repeat them (review 47).
-  function forgetInConversation(json, ids) {
-    const gone = new Set(ids);
-    return restoreConversation(json).filter((t) => !(t.proposal && t.proposal.memory.some((id) => gone.has(id))));
+  // The forgotten words (texts) leave the suggestions the kept turns made,
+  // too.
+  function forgetInConversation(json, ids, texts = []) {
+    const gone = new Set(ids), words = new Set(texts.map((t) => t.toLowerCase()));
+    return restoreConversation(json).filter((t) => !(t.proposal && t.proposal.memory.some((id) => gone.has(id))))
+      .map((t) => (t.proposal ? { ...t, proposal: { ...t.proposal, remember: t.proposal.remember.filter((r) => !words.has(r.toLowerCase())) } } : t));
   }
 
   // notNow is the suggestions turned down with Not now for this tab, as
