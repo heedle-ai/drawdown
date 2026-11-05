@@ -1131,6 +1131,8 @@ function SchedulesPage() {
     <p class="lede">Programs Temporal runs on a timer. Each run is a run like any other: on the runs list, recorded in Git, its writes waiting for your approval. Make one with <strong>Schedule…</strong> beside <strong>Run</strong>.</p>
     ${err && html`<p class="error" role="alert">${err}</p>`}
     ${note && html`<p role="status">${note}</p>`}
+    ${typeof data.data.spendError === "string" && html`<p class="error">${data.data.spendError}</p>`}
+    ${typeof data.data.pricesError === "string" && html`<p class="error">${data.data.pricesError}</p>`}
     ${ss.length === 0 && html`<div class="panel muted">No schedules yet. Write a program on the home page, then <strong>Schedule…</strong>.</div>`}
     ${ss.map((s) => html`
       <div class="panel connector" key=${s.name}>

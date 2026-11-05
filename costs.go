@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.temporal.io/api/serviceerror"
@@ -34,12 +35,14 @@ func (t TemporalClient) SetBudget(ctx context.Context, name string, b loom.Budge
 const CostMonths = 7
 
 // spent is tokens and their estimate: USD is nil unless every step was
-// priced (Priced holds the part that was).
+// priced (Priced holds the part that was), and AtMost bounds it when
+// every step could at least be bounded, as a budget counts it.
 type spent struct {
 	Runs     int             `json:"runs"`
 	Tokens   loom.Tokens     `json:"tokens"`
 	USD      *float64        `json:"usd"`
 	Priced   float64         `json:"priced"`
+	AtMost   *float64        `json:"atMost,omitempty"`
 	Unpriced []loom.Unpriced `json:"unpriced"`
 }
 
@@ -48,6 +51,8 @@ func spentOf(runs int, u loom.Usage, p loom.Prices) spent {
 	s := spent{Runs: runs, Tokens: u.Total(), Priced: c.USD, Unpriced: c.Unpriced}
 	if c.Complete {
 		s.USD = &c.USD
+	} else if most, ok := c.AtMost(); ok {
+		s.AtMost = &most
 	}
 	return s
 }
@@ -212,7 +217,7 @@ func monthsBetween(t, start time.Time) int {
 // (as its budget counts it), and the last 30 days. Each ref is read
 // once, however many schedules record on it (review 48: once per
 // schedule, on every top-bar refresh).
-func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time.Time) (map[string]map[string]spent, string, error) {
+func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time.Time) (spend map[string]map[string]spent, pricesErr, spendErr string) {
 	prices, perr := loom.ReadPrices(s.PricesFile)
 	type window struct{ month, last30 time.Time }
 	windows := map[string]window{}
@@ -244,14 +249,21 @@ func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time
 		nMonth, nLast30 int
 	}
 	sums := map[string]*acc{}
+	var problems []string
 	for ref, names := range byRef {
-		runs, err := loom.RunsBetween(ctx, s.Store, ref, from[ref], now.Add(time.Minute), "")
+		// A schedule on a ref that can't be read gets no spend, never $0.
+		runs, err := loom.RunsBetween(ctx, s.Store, ref, from[ref], now.Add(time.Minute), names...)
 		if err != nil {
-			return nil, "", err
+			// That ref's schedules show no spend, and why; the page,
+			// where a budget is changed, still answers (review 48).
+			problems = append(problems, ref+": "+err.Error())
+			continue
 		}
 		mine := map[string]bool{}
 		for _, n := range names {
 			mine[n] = true
+		}
+		for _, n := range names {
 			sums[n] = &acc{}
 		}
 		for _, run := range runs {
@@ -268,13 +280,16 @@ func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time
 		}
 	}
 	out := map[string]map[string]spent{}
+	if len(problems) > 0 {
+		spendErr = "can't add up what schedules used on " + strings.Join(problems, "; ")
+	}
 	for name, a := range sums {
 		out[name] = map[string]spent{"month": spentOf(a.nMonth, a.month, prices), "last30": spentOf(a.nLast30, a.last30, prices)}
 	}
 	if perr != nil {
-		return out, perr.Error(), nil
+		pricesErr = perr.Error()
 	}
-	return out, "", nil
+	return out, pricesErr, spendErr
 }
 
 // budgetRequest sets a schedule's monthly budget: USD 0 removes it.
