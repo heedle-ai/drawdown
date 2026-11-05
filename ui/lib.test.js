@@ -784,6 +784,9 @@ test("memory: the page's answer, the card's suggestions and its used line (roadm
   const turns = JSON.stringify([{ request: "a", proposal: { summary: "A, no peanuts.", program: "(echo)", plan: plan0, memory: ["m0123456789ab"] } },
     { request: "b", proposal: { summary: "B.", program: "(echo)", plan: plan0, memory: ["m0123456789ac"] } }, { request: "c", error: "no" }]);
   assert.deepEqual(DD.forgetInConversation(turns, ["m0123456789ab"]).map((t) => t.request), ["b", "c"]);
+  // The forgotten words leave the kept turns' suggestions too (review 47).
+  const sugg = JSON.stringify([{ request: "a", proposal: { summary: "A.", program: "(echo)", plan: plan0, remember: ["Vegetarian.", "IAD"] } }]);
+  assert.deepEqual(DD.forgetInConversation(sugg, [], ["vegetarian."])[0].proposal.remember, ["IAD"]);
   assert.deepEqual(DD.earlierTurns(DD.restoreConversation(turns))[0].memory, ["m0123456789ab"]);
   assert.deepEqual(DD.notNow(null), []);
   assert.deepEqual(DD.notNow("not json"), []);

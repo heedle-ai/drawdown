@@ -64,6 +64,12 @@ func TestInv_MemoryPageShowsAndChangesIt(t *testing.T) {
 	if code != 200 || !strings.Contains(body, "Vegan.") || strings.Contains(body, "Vegetarian") {
 		t.Fatalf("edit: %d %s", code, body)
 	}
+	// New words are a new memory, with a new ID (review 47).
+	if nid := got["memories"].([]any)[0].(map[string]any)["id"].(string); nid == id {
+		t.Errorf("an edit kept the ID %s", id)
+	} else {
+		id = nid
+	}
 	if code, _, _ := w.call("POST", "/api/memory/forget", map[string]string{"id": id, "version": v}); code != 409 {
 		t.Errorf("a stale version: %d", code)
 	}
@@ -196,6 +202,18 @@ func TestInv_RememberedOnlyWhenYouSaySo(t *testing.T) {
 		if strings.Contains(s.Text, "fish") {
 			t.Errorf("after Forget, source %s still says: %s", s.ID, s.Text)
 		}
+	}
+	// A request from another machine (with -hosts) sends no memory: it's
+	// shown and changed only from this one (review 47).
+	w.call("POST", "/api/memory/add", map[string]string{"text": "Home airport: IAD."})
+	remote := &drawdown.Server{Store: w.store, Hosts: []string{"heedle.example"}, Temporal: w.fake, MemoryFile: w.memory}
+	rs := httptest.NewServer(remote.Handler())
+	defer rs.Close()
+	if code, got, body := (&world{t: t, srv: rs}).call("POST", "/api/ask", map[string]any{"request": "Plan Lisbon"}); code != 200 || got["memory"] != nil {
+		t.Errorf("an ask from elsewhere: %d %s", code, body)
+	}
+	if last := asker.asked[len(asker.asked)-1]; last.Sources[len(last.Sources)-1].ID == "memory" {
+		t.Error("an ask from elsewhere sent memory")
 	}
 	// The suggestion's words were in what was asked, so they're in the
 	// requests; the memory itself is in the memory file alone.
