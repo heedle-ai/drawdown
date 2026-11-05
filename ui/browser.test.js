@@ -288,9 +288,10 @@ test("a command inserted before the editor is clicked goes after the program", a
   await ctx.close();
 });
 
-// Roadmap 9.5: an act step's proposal says, in red, where it may act
-// without asking again, before Run.
-test("a proposal with act steps discloses their hosts in red before Run", async () => {
+// Roadmap 9.5, 9.7: an act step's proposal says, before Run, where it may
+// act and that it stops before sending and asks; one whose program lets it
+// send without asking is said apart, in red.
+test("a proposal with act steps discloses their hosts before Run, and sending without asking in red", async () => {
   const program = '(act "Join the volunteer list as Ada" "https://forms.example.org/volunteer" "cdn.example.org")';
   const plan = { nodes: [{ id: "n0", activity: "Act", args: ["Join the volunteer list as Ada", "https://forms.example.org/volunteer", "cdn.example.org"] }] };
   const { p, ctx, errors } = await page({ ask: { summary: "I'll put you on the volunteer list.", program, plan, actHosts: ["cdn.example.org", "forms.example.org"],
@@ -299,10 +300,25 @@ test("a proposal with act steps discloses their hosts in red before Run", async 
   await p.getByRole("button", { name: "Ask", exact: true }).click();
   const note = p.locator(".proposal .acts");
   await note.waitFor();
-  assert.equal(await note.textContent(), "Its act steps can click, type and submit forms on cdn.example.org, forms.example.org without asking again.");
-  const [color, bad] = await note.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(document.documentElement).getPropertyValue("--bad").trim()]);
+  assert.equal(await note.textContent(), "Its act steps can click and type on cdn.example.org, forms.example.org, and stop before sending and ask you.");
   const rgb = (h) => `rgb(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
-  assert.equal(color, rgb(bad));
+  const [asksColor, bad0] = await note.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(document.documentElement).getPropertyValue("--bad").trim()]);
+  assert.notEqual(asksColor, rgb(bad0));
+  {
+    const free = await page({ ask: { summary: "I'll put you on the volunteer list.", program: program.replace(")", " :send-without-asking)"),
+      plan: { nodes: [{ ...plan.nodes[0], args: [...plan.nodes[0].args, ":send-without-asking"] }] },
+      actHosts: ["cdn.example.org", "forms.example.org"], actSendsFreely: ["cdn.example.org", "forms.example.org"], ready: { needs: [], ready: true } } });
+    await free.p.locator(".front-row input").fill("Sign me up as a volunteer");
+    await free.p.getByRole("button", { name: "Ask", exact: true }).click();
+    const red = free.p.locator(".proposal .acts");
+    await red.waitFor();
+    assert.deepEqual(await red.allTextContents(), ["Its act steps can click, type and submit forms on cdn.example.org, forms.example.org without asking again."]);
+    const [color, bad] = await red.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(document.documentElement).getPropertyValue("--bad").trim()]);
+    assert.equal(color, rgb(bad));
+    if (process.env.DRAWDOWN_SHOTS) await free.p.locator(".proposal").first().screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, "act-card-freely.png") });
+    assert.deepEqual(free.errors, []);
+    await free.ctx.close();
+  }
   // The disclosure comes before Run, and Run waits for the image.
   const before = await p.evaluate(() => {
     const acts = document.querySelector(".proposal .acts"), run = [...document.querySelectorAll(".proposal button")].find((b) => b.textContent === "Run it now");
@@ -378,15 +394,52 @@ test("the editor shows where act steps may act, and Run sends those hosts", asyn
   const { p, ctx, errors } = await page({ program });
   const note = p.locator(".panel > .acts");
   await note.waitFor();
-  assert.equal(await note.textContent(), "Its act steps can click, type and submit forms on cdn.example.org, forms.example.org without asking again.");
+  assert.equal(await note.textContent(), "Its act steps can click and type on cdn.example.org, forms.example.org, and stop before sending and ask you.");
   let sent = null;
   await ctx.route("**/api/runs", (r) => { sent = r.request().postDataJSON(); r.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: "not here" }) }); });
   await p.getByRole("button", { name: "Run", exact: true }).click();
   await p.getByText("not here").waitFor();
   assert.deepEqual(sent.actHosts, ["cdn.example.org", "forms.example.org"]);
+  assert.equal(sent.actSendsFreely.length, 0);
   // Without the hosts shown, the real server refuses it.
   const res = await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program }) });
   assert.equal(res.status, 422);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// Roadmap 9.7: a form an act step filled waits on the run page, with its
+// screenshot, for Send or Cancel, which look like a write's Approve and
+// Decline; deciding signals the run through /api/forms.
+test("a run page shows a filled form waiting, with Send and Cancel", async () => {
+  const sub = await (await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program: '(echo "x")' }) })).json();
+  const shotPage = await browser.newPage({ viewport: { width: 320, height: 200 } });
+  await shotPage.setContent('<body style="margin:0;background:#e9f0fb;font:20px sans-serif"><p style="padding:20px">Name: Ada</p></body>');
+  const jpeg = "data:image/jpeg;base64," + (await shotPage.screenshot({ type: "jpeg", quality: 40 })).toString("base64");
+  await shotPage.close();
+  const frame = { activity: "3", kind: "act", attempt: 1, url: "https://forms.example.org/volunteer", image: jpeg,
+    pending: { id: "f00d", node: "n0", summary: "Name: Ada. Sends the volunteer form.", url: "https://forms.example.org/volunteer" } };
+  const { p, ctx, errors } = await page({});
+  await ctx.route(new RegExp(`/api/runs/${encodeURIComponent(sub.workflowId)}/`), async (r) => {
+    const res = await r.fetch(), d = await res.json();
+    d.execution = { ...(d.execution || {}), status: "Running" }; delete d.record;
+    r.fulfill({ response: res, json: d });
+  });
+  let decided = null;
+  await ctx.route("**/api/live/*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames: [decided ? { ...frame, pending: undefined } : frame] }) }));
+  await ctx.route("**/api/forms/*", (r) => { decided = r.request().postDataJSON(); r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames: [{ ...frame, pending: undefined }] }) }); });
+  await p.goto(BASE + "/#/run/" + [sub.workflowId, sub.runId].map(encodeURIComponent).join("/"));
+  const form = p.getByRole("group", { name: "A form waiting to be sent" });
+  await form.waitFor();
+  assert.match(await form.textContent(), /Name: Ada\. Sends the volunteer form\./);
+  const send = form.getByRole("button", { name: "Send", exact: true }), cancel = form.getByRole("button", { name: "Cancel", exact: true });
+  assert.equal(await send.getAttribute("class"), "primary");
+  assert.equal(await cancel.getAttribute("class"), "reject");
+  await p.locator(".live img").waitFor();
+  if (process.env.DRAWDOWN_SHOTS) await p.locator(".live").first().screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, "act-pending.png") });
+  await send.click();
+  await form.waitFor({ state: "detached" });
+  assert.deepEqual(decided, { id: "f00d", send: true });
   assert.deepEqual(errors, []);
   await ctx.close();
 });

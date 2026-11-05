@@ -44,6 +44,7 @@ type fakeTemporal struct {
 	live    map[string][]drawdown.LiveFrame
 	steps   map[string][]drawdown.Step
 	writes  map[string][]loom.WriteOutcome
+	forms   []loom.FormDecision
 	writer  *loom.Writer
 	create  func(context.Context, string) (map[string][]byte, error)
 	catalog loom.Catalog
@@ -181,6 +182,24 @@ func (f *fakeTemporal) DecideWrite(_ context.Context, wf string, d loom.WriteDec
 		}
 	}
 	return nil
+}
+
+// DecideForm decides a form an act step waits to send, as loom.DecideForm
+// does: only one waiting now (on a live frame), which then stops waiting.
+func (f *fakeTemporal) DecideForm(_ context.Context, wf string, d loom.FormDecision) error {
+	if f.down {
+		return errors.New("connection refused")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, fr := range f.live[wf] {
+		if fr.Pending != nil && fr.Pending.ID == d.ID {
+			f.forms = append(f.forms, d)
+			f.live[wf][i].Pending = nil
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: no form %q waits", pirn.ErrInvalid, d.ID)
 }
 
 // ListSkills answers the fake's catalog, keeping what it was asked.

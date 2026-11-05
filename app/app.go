@@ -133,7 +133,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if err := pirn.RegisterAgent(reg, w, agent); err != nil {
 			return err
 		}
-		act := pirn.Act{Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage}
+		act := pirn.Act{Confirm: loom.Confirmer(c), Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage}
 		if err := pirn.RegisterAct(reg, w, act); err != nil {
 			return err
 		}

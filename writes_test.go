@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/heedle-ai/draft"
+	"github.com/heedle-ai/drawdown"
 	"github.com/heedle-ai/loom"
 	"github.com/heedle-ai/pirn"
 	"github.com/heedle-ai/shuttle/plan"
@@ -72,5 +73,48 @@ func TestInv_WritesAreDecidedThroughTheRun(t *testing.T) {
 	}
 	if code, _, _ := w.call("POST", "/api/writes/"+wf, map[string]any{"node": "n0", "id": "w1", "approve": true}); code != 502 {
 		t.Errorf("Temporal down, deciding: %d", code)
+	}
+}
+
+// TestInv_FormsAreSentOnlyWhenAPersonSays: a running act step's live frame
+// carries the form it waits to send (summary and screenshot); Send or
+// Cancel signals the run, only for a form waiting now (409 otherwise, and
+// for one decided already); anything but a run's workflow ID, or a
+// decision without an ID, is refused; Temporal being down is reported.
+// (Roadmap 9.7.)
+func TestInv_FormsAreSentOnlyWhenAPersonSays(t *testing.T) {
+	w := newWorld(t)
+	wf := "loom-" + strings.Repeat("cd", 20)
+	w.fake.live = map[string][]drawdown.LiveFrame{wf: {{Activity: "3", Kind: "act", URL: "https://forms.example.org/x", Image: "data:image/jpeg;base64,/9g=",
+		Pending: &pirn.ActPending{ID: "f00d", Node: "n0", Summary: "Name Ada.", URL: "https://forms.example.org/x"}}}}
+	code, m, _ := w.call("GET", "/api/live/"+wf, nil)
+	if fr := m["frames"].([]any); code != 200 || fr[0].(map[string]any)["pending"].(map[string]any)["summary"] != "Name Ada." {
+		t.Errorf("live: %d %v", code, m)
+	}
+	if code, _, _ := w.call("POST", "/api/forms/"+wf, map[string]any{"id": "beef", "send": true}); code != 409 || len(w.fake.forms) != 0 {
+		t.Errorf("a form that isn't waiting: %d %v", code, w.fake.forms)
+	}
+	code, m, _ = w.call("POST", "/api/forms/"+wf, map[string]any{"id": "f00d", "send": false})
+	if code != 200 || len(w.fake.forms) != 1 || w.fake.forms[0].Send || m["frames"].([]any)[0].(map[string]any)["pending"] != nil {
+		t.Errorf("cancel: %d %v %v", code, m, w.fake.forms)
+	}
+	if code, _, _ := w.call("POST", "/api/forms/"+wf, map[string]any{"id": "f00d", "send": true}); code != 409 || len(w.fake.forms) != 1 {
+		t.Errorf("a second decision: %d %v", code, w.fake.forms)
+	}
+	for _, c := range []struct {
+		path string
+		body any
+	}{
+		{"/api/forms/not-a-run", map[string]any{"id": "f00d", "send": true}},
+		{"/api/forms/" + wf, map[string]any{"send": true}},
+		{"/api/forms/" + wf, map[string]any{"id": "f00d", "send": true, "extra": 1}},
+	} {
+		if code, _, _ := w.call("POST", c.path, c.body); code != 400 {
+			t.Errorf("%s %v: %d", c.path, c.body, code)
+		}
+	}
+	w.fake.down = true
+	if code, _, _ := w.call("POST", "/api/forms/"+wf, map[string]any{"id": "f00d", "send": true}); code != 502 {
+		t.Errorf("Temporal down: %d", code)
 	}
 }
