@@ -1187,21 +1187,27 @@ const DD = (() => {
     s = String(s);
     const home = s.startsWith("~/") ? "~/" : "";
     const rest = home ? s.slice(2) : s;
-    if (rest !== "" && /^[A-Za-z0-9._\/@:+=-]+$/.test(rest)) return home + rest;
+    // A word starting with = is expanded by zsh: quoted (review 49).
+    if (rest !== "" && /^[A-Za-z0-9._\/@:+-][A-Za-z0-9._\/@:+=-]*$/.test(rest)) return home + rest;
     return home + "'" + rest.replace(/'/g, "'\\''") + "'";
   }
   // publishCommand is the command that publishes a skill into a clone.
-  const publishCommand = (name, repo, store) => `heedle skills publish ${name} -repo ${shellWord(repo || "~/src/my-skills")} -store ${shellWord(store || "~/.heedle/store.git")}`;
+  const publishCommand = (name, repo, store) => `heedle skills publish ${shellWord(name)} -repo ${shellWord(repo || "~/src/my-skills")} -store ${shellWord(store || "~/.heedle/store.git")}`;
+  // pushCommand pushes a clone's branch, setting its upstream: a fresh
+  // clone has none (review 49).
+  const pushCommand = (repo) => `git -C ${shellWord(repo || "~/src/my-skills")} push -u origin HEAD`;
   // shareLink is the link a friend imports a published skill with: its
   // folder on GitHub, from your repository's link and branch; "" unless
   // that is a GitHub repository's link.
   function shareLink(repo, branch, name) {
     const m = /^(?:https:\/\/)?github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(String(repo).trim());
     const b = String(branch || "main").trim();
-    if (!m || !/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(b) || b.includes("..") || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)) return "";
+    // A branch with / reads, in a GitHub link, as a branch and a folder
+    // (treadle's ParseGitHub): refused (review 49).
+    if (!m || !/^[A-Za-z0-9._-]+$/.test(b) || b.includes("..") || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)) return "";
     return `https://github.com/${m[1]}/${m[2]}/tree/${b}/skills/${name}`;
   }
 
-  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink };
+  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
 })();
 if (typeof module !== "undefined") module.exports = DD;
