@@ -522,17 +522,21 @@ function ActWork({ act: a, part = "all" }) {
         ${a.sendWithoutAsking ? html`<${Pill} cls="s-Failed">sent without asking<//>`
           : a.heldTotal > 0 && html`<${Pill} cls="k-other" plain>${a.heldTotal} send${a.heldTotal === 1 ? "" : "s"} held for you<//>`}
         <${Pill} cls="k-container" mono>image ${a.image.replace(/^sha256:/, "").slice(0, 12)}<//>
+        ${a.replay && html`<${ReplayPill} replay=${a.replay} />`}
       </div>
-      <div class="mono muted">ended on ${a.url || "no page"}</div>`}
+      <div class="mono muted">ended on ${a.url || "no page"}</div>
+      ${a.replay && html`<p class="muted replay-note">${DD.replayWords(a.replay)}</p>`}`}
       ${work && html`<ol class="act-steps" aria-label="Actions">${a.calls.map((c, i) => html`
         <li key=${i} class=${c.isError ? "bad" : ""}>
           <div class="act-head"><span class="act-n">${i + 1}</span>
             <code>${c.tool.replace(/^browser_/, "")}</code>
+            ${c.replayed && html`<${Pill} cls="k-other" plain>replayed<//>`}
             ${c.url && html`<span class="mono muted act-url">${c.url}</span>`}</div>
           <pre class="cmd-out">${DD.visible(c.input)}</pre>
           ${c.output && html`<details><summary>${c.isError ? "What went wrong" : "What it saw"}</summary><pre class="cmd-out">${DD.visible(c.output)}${c.truncated ? "\n[cut]" : ""}</pre></details>`}
           ${c.screenshot && html`<img class="act-shot" src=${c.screenshot} alt=${`After action ${i + 1}, ${c.tool.replace(/^browser_/, "")}${c.url ? ", on " + c.url : ""}`} loading="lazy" />`}
         </li>`)}</ol>`}
+      ${work && (a.script || []).length > 0 && html`<${ActScript} script=${a.script} />`}
       ${work && (a.held || []).length > 0 && html`<details><summary>Sends held until a person said so (${a.heldTotal})</summary><pre>${a.held.join("\n")}</pre></details>`}
       ${work && a.blocked.length > 0 && html`<details><summary>Blocked requests (${a.blockedTotal})</summary><pre>${a.blocked.join("\n")}</pre></details>`}
     </div>`;
@@ -2544,7 +2548,7 @@ const SANDBOX = {
   image: { where: "podman build on the worker, from base images pinned to content and already on it: nothing is pulled", fs: "A fresh build context holding only the Containerfile and in/<node>.txt for each input, removed afterwards. The built image stays in the worker's Podman storage", net: "None for RUN steps (--network=none). With \"push\", the worker pushes the image with its own login", gets: "Its Containerfile, and its inputs as files in in/", leaves: "The image ID, and where it was pushed if asked" },
   browse: { where: "A fresh Podman container running a fresh Chromium profile, removed when the step ends", fs: "A brand-new browser profile, deleted with the container. Nothing is mounted from the machine", net: "Chromium is set to reach only the hosts the program names, refusing and recording every other request. The container itself is on Podman's network, so this rests on Chromium's own settings", gets: "Its URL and allowed hosts, from the program", leaves: "What the browser saw: URL, title, text, screenshot, blocked requests" },
   agent: { where: "A fresh Podman container (a bobbin session) for this step alone, from the worker's content-pinned agent image, removed when the step ends; Claude, through Anthropic's SDK, decides each command", fs: "A brand-new, empty writable layer over the image, where its inputs are written to /work/in. Deleted with the container: no other step ever sees it, and nothing is mounted from the machine", net: "None for its commands (--network=none). Only the worker talks to the Claude API, and to the MCP servers the step is granted: remote ones through Anthropic's MCP connector, local ones each in its own container with no network", gets: "Its instruction, its inputs as files in /work/in, and the connector tools its arguments grant (as far as the worker allows); no environment variables from the machine or the worker", leaves: "Claude's reply, every command it ran with its output, every connector call it made and every write it queued (run once after the run's steps, never in the step), the files it left in /work/out, and the list of changed paths" },
-  act: { where: "A fresh Podman container from the worker's browser-agent image, running Playwright MCP and a fresh Chromium profile, removed when the step ends; Claude, through Anthropic's SDK, decides each action", fs: "A brand-new browser profile, deleted with the container. Nothing is mounted from the machine, and it can't upload or download files", net: "Chromium is set to reach only the hosts the program names, refusing and recording every other request. Only the worker talks to the Claude API", gets: "Its instruction, start page and allowed hosts, from the program, and its inputs as cited sources. Claude may only read pages and work forms: no scripts, uploads or shell", leaves: "Claude's reply, every action with the page it left and a screenshot, the final page, the hosts it could reach, the requests blocked, and how it ended" },
+  act: { where: "A fresh Podman container from the worker's browser-agent image, running Playwright MCP and a fresh Chromium profile, removed when the step ends; Claude, through Anthropic's SDK, decides each action", fs: "A brand-new browser profile, deleted with the container. Nothing is mounted from the machine, and it can't upload or download files", net: "Chromium is set to reach only the hosts the program names, refusing and recording every other request. Only the worker talks to the Claude API", gets: "Its instruction, start page and allowed hosts, from the program, and its inputs as cited sources. Claude may only read pages and work forms: no scripts, uploads or shell", leaves: "Claude's reply, every action with the page it left and a screenshot, the final page, the hosts it could reach, the requests blocked, how it ended, and the script of its actions that the next run of its program replays without Claude" },
   ask: { where: "One request to Claude through Anthropic's SDK; no container", fs: "None", net: "Only the Claude API, signed with the worker's key (never recorded)", gets: "Its instruction, and its inputs as cited sources", leaves: "Claude's answer, with the model, stop reason and token counts" },
   record: { where: "loom's worker, writing to the Git store outside every container", fs: "The warp store only", net: "None", gets: "Every step's output", leaves: "One commit" },
   other: { where: "The loom worker", fs: "Whatever this command's implementation allows", net: "Whatever this command's implementation allows", gets: "Its arguments and inputs", leaves: "Its output" },
@@ -2651,7 +2655,7 @@ function StepPage({ workflow, run, node, history: ref }) {
 
     ${actOut && html`
       <h3>Actions</h3>
-      <p class="lede">Every action Claude took in the browser, in order, each with the page it left and what that page looked like.</p>
+      <p class="lede">Every action in the browser, Claude's or a replay's, in order, each with the page it left and what that page looked like.</p>
       <div class="panel"><${ActWork} act=${actOut} part="work" /></div>`}
 
     ${DD.asFiles((rec.files || {})[node]).length > 0 && html`<${StepFiles} files=${DD.asFiles(rec.files[node])} node=${node}
@@ -2933,7 +2937,7 @@ function RunCost({ usage, workflow, run }) {
       <table class="list costs">
         <thead><tr><th>Step</th><th>Model</th><th class="num">Input</th><th class="num">Output</th><th class="num">Requests</th></tr></thead>
         <tbody>${u.steps.map((s) => html`<tr key=${s.node}>
-          <td><a class="mono" href=${"#/step/" + [workflow, run, s.node].map(encodeURIComponent).join("/")}>${s.node}</a> <span class="muted">${s.kind}</span></td>
+          <td><a class="mono" href=${"#/step/" + [workflow, run, s.node].map(encodeURIComponent).join("/")}>${s.node}</a> <span class="muted">${s.kind}</span>${s.replayed && html` <${Pill} cls="k-other" plain>${s.replayed === "all" ? "replayed" : "partly replayed"}<//>`}</td>
           ${s.missing ? html`<td colspan="4" class="muted">no counts: ${s.missing}</td>` : html`
             <td class="mono">${s.model}</td><td class="num">${DD.count(s.tokens.input)}</td><td class="num">${DD.count(s.tokens.output)}</td><td class="num">${s.requests || "–"}</td>`}
         </tr>`)}</tbody>
@@ -3181,3 +3185,26 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
+
+// === Replay without Claude (roadmap 9.9) ====================================
+
+// ReplayPill says on an act step's card whether it replayed an earlier
+// run's script: green when Claude wasn't asked at all.
+function ReplayPill({ replay: r }) {
+  const cls = !r.handedOver ? "s-Completed" : "k-other";
+  const words = !r.handedOver ? "replayed, no Claude" : r.replayed ? `replayed ${r.replayed} of ${r.steps}` : "not replayed";
+  return html`<${Pill} cls=${cls} plain>${words}<//>`;
+}
+
+// ActScript lists the script an act step kept for the next run of its
+// program: each action, its elements by Playwright locator, and whether a
+// replay did it.
+function ActScript({ script }) {
+  return html`<details class="act-script"><summary>Script kept for the next run (${script.length} action${script.length === 1 ? "" : "s"})</summary>
+    <ol class="commands">${script.map((st, i) => html`<li key=${i}>
+      <div class="cmd-line"><code>${st.tool.replace(/^browser_/, "")}</code>${st.replayed && html`<span class="muted">replayed</span>`}</div>
+      ${(st.targets || []).map((l, j) => html`<div key=${j} class="mono muted">${DD.locatorText(l)}</div>`)}
+      <pre class="cmd-out">${DD.visible(st.input)}</pre>
+    </li>`)}</ol>
+  </details>`;
+}

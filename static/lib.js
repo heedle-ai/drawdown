@@ -53,7 +53,28 @@ const DD = (() => {
     // Roadmap 9.7: the sends it held for a person, and whether its program
     // let it send without asking (records from 9.5 have neither).
     if (!opt(v.held, strs) || !opt(v.heldTotal, num) || !opt(v.sendWithoutAsking, bool)) return null;
+    // Roadmap 9.9: the script it kept, and what it replayed of an earlier
+    // run's (records before 9.9 have neither).
+    if (!v.calls.every((c) => opt(c.replayed, bool)) || !opt(v.scriptInputs, str) || !opt(v.replay, isReplay)) return null;
+    if (!opt(v.script, (s) => objs(s, (st) => str(st.tool) && str(st.input) && str(st.outline) && str(st.outlineSha256) && opt(st.replayed, bool) &&
+      opt(st.targets, (ts) => objs(ts, (l) => str(l.role) && str(l.name) && opt(l.nth, num)))))) return null;
     return v;
+  }
+  const isReplay = (r) => r && typeof r === "object" && num(r.steps) && num(r.replayed) && opt(r.from, str) && opt(r.record, str) && opt(r.handedOver, bool) && opt(r.at, num) && opt(r.why, str);
+
+  // replayWords says, in words, what an act step replayed (roadmap 9.9),
+  // or "" if it found no script.
+  function replayWords(r) {
+    if (!r) return "";
+    const from = r.from ? ` from run ${r.from.slice(0, 12)}` : "";
+    if (!r.handedOver) return `replayed all ${r.steps} action${r.steps === 1 ? "" : "s"}${from}, without Claude`;
+    if (r.replayed === 0) return `didn't replay${from}: ${r.why || "no reason given"}`;
+    return `replayed ${r.replayed} of ${r.steps}${from}, then Claude from action ${r.at}: ${r.why || ""}`;
+  }
+
+  // locatorText is a script step's element in Playwright's words.
+  function locatorText(l) {
+    return `getByRole(${JSON.stringify(l.role)}, { name: ${JSON.stringify(l.name)}, exact: true })${l.nth ? `.nth(${l.nth})` : ""}`;
   }
 
   // actEnding says, in words, how an act step ended.
@@ -143,6 +164,7 @@ const DD = (() => {
       if (a.sendWithoutAsking) rows.push(["Sending", "without asking: its program said so"]);
       else if (num(a.heldTotal)) rows.push(["Held", `${a.heldTotal} send${a.heldTotal === 1 ? "" : "s"} until a person said so`]);
       if (num(a.inputTokens) && num(a.outputTokens)) rows.push(["Tokens", `${a.inputTokens} in, ${a.outputTokens} out`]);
+      if (a.replay) rows.push(["Replay", replayWords(a.replay)]);
       return rows;
     }
     if (o.answer) {
@@ -1161,7 +1183,8 @@ const DD = (() => {
   // loom's note for a schedule its budget paused (loom.BudgetPaused).
   const BUDGET_PAUSE = /^paused: monthly budget \$[0-9]+\.[0-9]{2} (reached \((at most \$[0-9]+\.[0-9]{2}, )?est\.\)|can't be checked) in [A-Z][a-z]+ [0-9]{4}/;
   const isTokens = (t) => t && typeof t === "object" && num(t.input) && num(t.output) && t.input >= 0 && t.output >= 0;
-  const isStepUsage = (s) => str(s.node) && str(s.kind) && opt(s.model, str) && isTokens(s.tokens) && opt(s.requests, num) && opt(s.missing, str);
+  const isStepUsage = (s) => str(s.node) && str(s.kind) && opt(s.model, str) && isTokens(s.tokens) && opt(s.requests, num) && opt(s.missing, str) &&
+    opt(s.replayed, (r) => r === "all" || r === "part");
   const isUnpriced = (u) => str(u.node) && opt(u.model, str) && isTokens(u.tokens) && str(u.why) && opt(u.atMost, num);
   // isSpent is drawdown's spent: tokens, and usd only if all was priced.
   const isSpent = (v) => v && typeof v === "object" && num(v.runs) && isTokens(v.tokens) && (v.usd === null || num(v.usd)) && num(v.priced) && opt(v.atMost, num) && objs(v.unpriced, isUnpriced);
@@ -1236,6 +1259,6 @@ const DD = (() => {
     return `https://github.com/${m[1]}/${m[2]}/tree/${b}/skills/${name}`;
   }
 
-  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
+  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, replayWords, locatorText, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
 })();
 if (typeof module !== "undefined") module.exports = DD;
