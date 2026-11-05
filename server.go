@@ -247,6 +247,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/memory/{op}", s.changeMemory)
 	mux.HandleFunc("POST /api/secrets", s.setSecret)
 	mux.HandleFunc("POST /api/secrets/delete", s.setSecret)
+	mux.HandleFunc("GET /api/profile", s.profile)
+	mux.HandleFunc("POST /api/profile", s.setProfile)
+	mux.HandleFunc("POST /api/profile/delete", s.setProfile)
 	mux.HandleFunc("POST /api/connectors/catalog", s.connectorCatalog)
 	mux.HandleFunc("POST /api/connectors/add", s.addConnector)
 	mux.HandleFunc("POST /api/connectors/remove", s.addConnector)
@@ -351,6 +354,9 @@ type programRequest struct {
 	// whose act steps send forms without asking (loom.ActSendsFreely;
 	// roadmap 9.7).
 	ActSendsFreely []string `json:"actSendsFreely,omitempty"`
+	// ActUses (submit only) are the person's details the page showed the
+	// program's act steps may use (loom.ActUses; roadmap 9.8).
+	ActUses []string `json:"actUses,omitempty"`
 }
 
 // actShown says whether the person was shown where p's act steps may
@@ -358,18 +364,21 @@ type programRequest struct {
 // (loom.ActSendsFreely, exactly), answering 422 with both if not: every
 // way to run or schedule a program goes through it, not only the front
 // door's card (review 39, roadmap 9.7).
-func actShown(w http.ResponseWriter, p plan.Plan, shown, shownFreely []string) bool {
-	hosts, freely := loom.ActHosts(p), loom.ActSendsFreely(p)
-	if slices.Equal(hosts, shown) && slices.Equal(freely, shownFreely) || len(hosts) == 0 && len(freely) == 0 {
+func actShown(w http.ResponseWriter, p plan.Plan, shown, shownFreely, shownUses []string) bool {
+	hosts, freely, uses := loom.ActHosts(p), loom.ActSendsFreely(p), loom.ActUses(p)
+	if slices.Equal(hosts, shown) && slices.Equal(freely, shownFreely) && slices.Equal(uses, shownUses) || len(hosts) == 0 && len(freely) == 0 && len(uses) == 0 {
 		return true
 	}
 	msg := "This program's act steps can click and type on " + strings.Join(hosts, ", ") + ", and stop before sending and ask you."
 	if len(freely) > 0 {
 		msg = "This program's act steps can click, type and submit forms on " + strings.Join(freely, ", ") + " without asking again."
 	}
+	if len(uses) > 0 {
+		msg += " They may use your " + strings.Join(uses, ", ") + "."
+	}
 	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 		"error":    msg + " Run it where the page says so.",
-		"actHosts": hosts, "actSendsFreely": freely,
+		"actHosts": hosts, "actSendsFreely": freely, "actUses": uses,
 	})
 	return false
 }
@@ -472,7 +481,7 @@ func (s *Server) compile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ce)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p), "actHosts": loom.ActHosts(p), "actSendsFreely": loom.ActSendsFreely(p)})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p), "actHosts": loom.ActHosts(p), "actSendsFreely": loom.ActSendsFreely(p), "actUses": loom.ActUses(p)})
 }
 
 // shapeOf is a program's composition (draft.Composition), for drawing its
@@ -571,7 +580,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
 		return
 	}
-	if !actShown(w, p, req.ActHosts, req.ActSendsFreely) {
+	if !actShown(w, p, req.ActHosts, req.ActSendsFreely, req.ActUses) {
 		return
 	}
 	ref, err := s.ref(r.Context(), req.Ref)
