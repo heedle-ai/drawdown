@@ -66,7 +66,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	connectorsFile := fs.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by name: an environment variable, or a keychain secret set with `heedle secret set NAME`)")
 	imageRegistry := fs.String("image-registry", "", "OCI repository (such as ghcr.io/acme/heedle-images) that (image … \"push\") pushes to, with the worker's podman login")
 	keepImages := fs.String("keep-images", "", "the images heedle's release pins, comma-separated (heedle up gives them): the System page never removes them or the worker's own, and removes none without them")
-	pricesFile := fs.String("prices", "", "your prices file, overriding the built-in prices model by model (USD per million tokens; default: prices.json beside -connectors)")
+	pricesFile := fs.String("prices", "", "your prices file, overriding the built-in prices model by model (USD per million tokens; default: prices.json beside -connectors, else ~/.heedle/prices.json)")
 	agentRegistry := fs.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
 	memoryFile := fs.String("memory", "", "the file of what heedle remembers about you, sent to Claude with every request to the front door (default: memory.json beside the -connectors file, if given)")
 	if err := fs.Parse(args); err != nil {
@@ -80,7 +80,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	if *store == "" {
 		return errors.New("give -store DIR, e.g. -store ~/heedle-store.git")
 	}
-	*pricesFile = pricesPath(*pricesFile, *connectorsFile)
+	*pricesFile = pricesPath(*pricesFile, *connectorsFile, os.UserHomeDir)
 
 	s, err := warp.Init(ctx, *store)
 	if err != nil {
@@ -167,6 +167,9 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if _, err := loom.ReadPrices(*pricesFile); err != nil {
 			log.Print(err)
 		}
+		// A new month resumes the schedules their budget paused that are
+		// to resume (roadmap 10.4), watched or not.
+		go loom.ResumeBudgetsEvery(ctx, c, *queue, loom.ResumeBudgetsLook, log.Printf)
 		// Skills change only through a workflow on this worker (drawdown never
 		// writes), never through a program.
 		loom.RegisterSkills(w, loom.Skills{Library: lib, Create: creator(agent)})
@@ -348,10 +351,18 @@ func kept(list string, worker ...string) []string {
 }
 
 // pricesPath is the prices file: the one given, else prices.json beside
-// the connectors file, else none (the built-in prices).
-func pricesPath(prices, connectors string) string {
-	if prices == "" && connectors != "" {
+// the connectors file, else ~/.heedle/prices.json, as loom's worker and
+// heedle costs read (review 48: the UI and the worker estimated with
+// different prices).
+func pricesPath(prices, connectors string, home func() (string, error)) string {
+	switch {
+	case prices != "":
+		return prices
+	case connectors != "":
 		return filepath.Join(filepath.Dir(connectors), "prices.json")
 	}
-	return prices
+	if h, err := home(); err == nil {
+		return filepath.Join(h, ".heedle", "prices.json")
+	}
+	return ""
 }

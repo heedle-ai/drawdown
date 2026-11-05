@@ -18,6 +18,7 @@ import (
 	"github.com/heedle-ai/pirn"
 	"github.com/heedle-ai/shuttle/plan"
 	"github.com/heedle-ai/treadle"
+	"github.com/heedle-ai/warp"
 )
 
 // claudeRun records a run of src, whose Claude steps answered as outs
@@ -302,5 +303,38 @@ func TestInv_BudgetPausesAScheduleBeforeItsSecondRun(t *testing.T) {
 	_, _, raw = w.call("GET", "/api/schedules", nil)
 	if !strings.Contains(raw, `"paused":true,"note":"paused: monthly budget $0.01 reached (est.) in `+month+`"`) {
 		t.Errorf("schedule not paused: %s", raw)
+	}
+}
+
+// countingStore counts the walks of history made through it.
+type countingStore struct {
+	drawdown.History
+	logs int
+}
+
+func (c *countingStore) Log(ctx context.Context, from warp.ID, limit int) ([]warp.CommitInfo, error) {
+	c.logs++
+	return c.History.Log(ctx, from, limit)
+}
+
+// TestInv_SchedulesReadEachRefOnce: the Schedules page, which the top
+// bar asks for on every page, reads each ref's history once, however
+// many schedules record on it. (Review 48: once a schedule.)
+func TestInv_SchedulesReadEachRefOnce(t *testing.T) {
+	w := newWorld(t)
+	for _, n := range []string{"a", "b", "c"} {
+		if code, _, raw := w.call("POST", "/api/schedules", map[string]string{"name": n, "program": `(echo "a")`, "every": "1h"}); code != 201 {
+			t.Fatalf("%d %s", code, raw)
+		}
+	}
+	w.claudeRun(`(ask "the news")`, map[string]any{"n0": pirn.Answer{Pirn: 1, Model: "claude-sonnet-5-5", InputTokens: 1, OutputTokens: 1}}, time.Now().UTC(), "b")
+	cs := &countingStore{History: w.store}
+	s := &drawdown.Server{Store: cs, Ref: loom.DefaultRef, Registry: shipment.Registry(), Temporal: w.fake}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	w2 := &world{t: t, srv: srv, fake: w.fake, store: w.store}
+	_, _, raw := w2.call("GET", "/api/schedules", nil)
+	if cs.logs != 1 || !strings.Contains(raw, `"b":{"last30":{"runs":1`) {
+		t.Errorf("%d walks: %s", cs.logs, raw)
 	}
 }

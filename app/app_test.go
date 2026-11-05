@@ -8,6 +8,7 @@ import (
 	"flag"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -136,15 +137,21 @@ func TestInv_MemoryIsBesideTheConnectors(t *testing.T) {
 
 // TestInv_PricesAreBesideTheConnectors: without -prices, your prices file
 // is prices.json beside the connectors file, as heedle up keeps both in
-// its home; with neither, the built-in prices. (Roadmap 10.4.)
+// its home; with neither, ~/.heedle/prices.json, as loom's worker reads.
+// And the worker resumes schedules a new month resumes. (Roadmap 10.4,
+// review 48.)
 func TestInv_PricesAreBesideTheConnectors(t *testing.T) {
+	home := func() (string, error) { return "/home/me", nil }
 	for _, c := range [][3]string{
-		{"", "/home/me/.heedle/connectors.json", "/home/me/.heedle/prices.json"},
-		{"/etc/p.json", "/home/me/.heedle/connectors.json", "/etc/p.json"},
-		{"", "", ""},
+		{"", "/srv/heedle/connectors.json", "/srv/heedle/prices.json"},
+		{"/etc/p.json", "/srv/heedle/connectors.json", "/etc/p.json"},
+		{"", "", "/home/me/.heedle/prices.json"},
 	} {
-		if got := pricesPath(c[0], c[1]); got != c[2] {
+		if got := pricesPath(c[0], c[1], home); got != c[2] {
 			t.Errorf("pricesPath(%q, %q) = %q, want %q", c[0], c[1], got, c[2])
 		}
+	}
+	if src, _ := os.ReadFile("app.go"); !strings.Contains(string(src), "go loom.ResumeBudgetsEvery(ctx, c, *queue,") {
+		t.Error("drawdown's worker doesn't resume schedules in a new month")
 	}
 }
