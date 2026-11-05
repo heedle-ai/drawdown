@@ -860,8 +860,30 @@ const DD = (() => {
   // the file it's in; else null.
   function asMemory(v) {
     if (!v || typeof v !== "object" || !Array.isArray(v.memories) || !str(v.version) || !str(v.file)) return null;
-    const ok = v.memories.every((m) => m && typeof m === "object" && MEMORY_ID.test(m.id) && str(m.text) && isTime(m.added) && opt(m.used, isTime));
-    return ok ? { memories: v.memories.map((m) => ({ id: m.id, text: m.text, added: m.added, used: m.used || "" })), version: v.version, file: v.file } : null;
+    // A memory edited by hand into one heedle won't send has a problem:
+    // why, to see and forget it (review 47).
+    if (!opt(v.problems, (p) => p && typeof p === "object" && !Array.isArray(p) && Object.values(p).every(str))) return null;
+    const ok = v.memories.every((m) => m && typeof m === "object" && MEMORY_ID.test(m.id) && str(m.text) && (m.added === undefined || isTime(m.added)) && opt(m.used, isTime));
+    const problems = v.problems || {};
+    return ok ? { memories: v.memories.map((m) => ({ id: m.id, text: m.text, added: m.added || "", used: m.used || "", problem: Object.prototype.hasOwnProperty.call(problems, m.id) ? problems[m.id] : "" })),
+      version: v.version, file: v.file, problem: Object.prototype.hasOwnProperty.call(problems, "") ? problems[""] : "" } : null;
+  }
+
+  // forgetInConversation is the conversation kept for the tab (json),
+  // without the turns made with any of the memories ids, just forgotten:
+  // what they proposed may repeat them (review 47).
+  function forgetInConversation(json, ids) {
+    const gone = new Set(ids);
+    return restoreConversation(json).filter((t) => !(t.proposal && t.proposal.memory.some((id) => gone.has(id))));
+  }
+
+  // notNow is the suggestions turned down with Not now for this tab, as
+  // kept in json: a list of strings, the newest 50; anything else, none.
+  function notNow(json, add) {
+    let v;
+    try { v = JSON.parse(json || "[]"); } catch { v = []; }
+    const kept = Array.isArray(v) ? v.filter(str) : [];
+    return add === undefined ? kept : [...kept.filter((t) => t !== add), add].slice(-50);
   }
 
   // usedMemory is the card's line for the memories a request sent to
@@ -928,7 +950,9 @@ const DD = (() => {
   // earlierTurns is what the API is told of the conversation before a
   // request: each turn's request, summary and program, newest MaxTurns.
   function earlierTurns(conv, max = 10) {
-    return conv.filter((t) => t.proposal).slice(-max).map((t) => ({ request: t.request, summary: t.proposal.summary, program: t.proposal.program || "" }));
+    // Each with the memories it was made with, so loom leaves out what a
+    // turn made with a memory since forgotten proposed (review 47).
+    return conv.filter((t) => t.proposal).slice(-max).map((t) => ({ request: t.request, summary: t.proposal.summary, program: t.proposal.program || "", memory: t.proposal.memory || [] }));
   }
 
   // localDay is d's date where the browser is, as YYYY-MM-DD.
@@ -1055,6 +1079,6 @@ const DD = (() => {
     return asSchedules(res.data).filter((s) => s.paused && str(s.note) && FAILURE_PAUSE.test(s.note)).length;
   }
 
-  return { asMemory, usedMemory, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
+  return { asMemory, usedMemory, forgetInConversation, notNow, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
 })();
 if (typeof module !== "undefined") module.exports = DD;
