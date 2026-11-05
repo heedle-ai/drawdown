@@ -194,7 +194,7 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 	}
 	// A local connector's server runs in a bobbin session of its own
 	// (with the same --network=none), and writes are only ever queued.
-	if src, err := os.ReadFile("../pirn/mcp.go"); err != nil || !strings.Contains(string(src), "box, err := a.Runner.Start(ctx, bobbin.Spec{Image: c.Image, Secrets: secrets})") ||
+	if src, err := os.ReadFile("../pirn/mcp.go"); err != nil || !strings.Contains(string(src), "box, err := a.Runner.Start(ctx, bobbin.Spec{Image: c.Image, Secrets: secrets, Labels: bobbin.Labels{Kind: \"connector\"}})") ||
 		!strings.Contains(string(src), "res.Writes = append(res.Writes, w)") {
 		t.Errorf("connectors changed; update the inspector (%v)", err)
 	}
@@ -205,9 +205,10 @@ func TestInv_InspectorTellsTheTruth(t *testing.T) {
 	if src, err := os.ReadFile("../pirn/agent.go"); err != nil || !strings.Contains(string(src), `SkillDir = "/work/skill"`) {
 		t.Errorf("skills moved from /work/skill; update the inspector (%v)", err)
 	}
-	// pirn starts its session from an image alone: no environment.
+	// pirn starts its session from an image alone: no environment, only
+	// heedle's labels (roadmap 9.2), which give the container nothing.
 	// (Review 7: DRAW-22 said agent steps had HEEDLE_NODE and HEEDLE_ATTEMPT.)
-	if pirnSrc, err := os.ReadFile("../pirn/agent.go"); err != nil || !strings.Contains(string(pirnSrc), "a.Runner.Start(ctx, bobbin.Spec{Image: a.Image})") || strings.Contains(session, "--env") {
+	if pirnSrc, err := os.ReadFile("../pirn/agent.go"); err != nil || !strings.Contains(string(pirnSrc), "a.Runner.Start(ctx, bobbin.Spec{Image: a.Image, Labels: bobbin.Labels{Kind: kind}})") || strings.Contains(session, "--env") {
 		t.Errorf("an agent session's environment changed; update the inspector (%v): %s", err, session)
 	}
 	for name, argv := range map[string]string{"container": container, "browse": browser, "agent": session} {

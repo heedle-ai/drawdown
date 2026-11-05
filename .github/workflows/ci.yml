@@ -94,6 +94,14 @@ jobs:
           npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
           "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
           NODE_PATH="$RUNNER_TEMP/pw/node_modules" node ui/topbar.check.js
+      - name: system
+        # The System page and Cancel run in Chromium (roadmap 9.2): what it
+        # shows, what its buttons send and only after asking, and that it
+        # fits at 375 px (ui/system.check.js). Playwright is the topbar
+        # step's.
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: drawdown
+        run: NODE_PATH="$RUNNER_TEMP/pw/node_modules" node ui/system.check.js
       - name: browser
         # The program viewer and editor in Chromium (Playwright), on the real
         # server with the fake Temporal (TestServeForBrowser).
