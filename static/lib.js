@@ -67,9 +67,20 @@ const DD = (() => {
   function replayWords(r) {
     if (!r) return "";
     const from = r.from ? ` from run ${r.from.slice(0, 12)}` : "";
-    if (!r.handedOver) return `replayed all ${r.steps} action${r.steps === 1 ? "" : "s"}${from}, without Claude`;
+    if (replayedAll(r)) return `replayed all ${r.steps} action${r.steps === 1 ? "" : "s"}${from}, without Claude`;
+    // Review 51: one cut short (a send not confirmed) isn't all of it.
+    if (!r.handedOver) return `replayed ${r.replayed} of ${r.steps}${from}, then stopped at action ${r.at}: ${r.why || "no reason given"}`;
     if (r.replayed === 0) return `didn't replay${from}: ${r.why || "no reason given"}`;
     return `replayed ${r.replayed} of ${r.steps}${from}, then Claude from action ${r.at}: ${r.why || ""}`;
+  }
+  // replayedAll is whether a replay did the whole script, Claude never asked.
+  const replayedAll = (r) => !!r && !r.handedOver && r.replayed === r.steps;
+
+  // actEndingOf is how an act step ended, in words: a whole replay
+  // finished as the run it replayed did, not on Claude's word.
+  function actEndingOf(a) {
+    if (a.ended === "finished" && replayedAll(a.replay)) return "finished, as the run it replayed did";
+    return actEnding(a.ended);
   }
 
   // locatorText is a script step's element in Playwright's words.
@@ -159,7 +170,7 @@ const DD = (() => {
     }
     if (o.act) {
       const a = o.act;
-      const rows = [["Model", a.model], ["Turns", String(a.turns)], ["Actions", String(a.calls.length)], ["Ended", actEnding(a.ended)],
+      const rows = [["Model", a.model], ["Turns", String(a.turns)], ["Actions", String(a.calls.length)], ["Ended", actEndingOf(a)],
         ["Last page", a.url || "none"], ["Could reach", a.allowed.join(", ")], ["Blocked", a.blockedUnknown ? "unknown: the browser couldn't say" : `${a.blockedTotal} request${a.blockedTotal === 1 ? "" : "s"}`]];
       if (a.sendWithoutAsking) rows.push(["Sending", "without asking: its program said so"]);
       else if (num(a.heldTotal)) rows.push(["Held", `${a.heldTotal} send${a.heldTotal === 1 ? "" : "s"} until a person said so`]);
@@ -1209,7 +1220,7 @@ const DD = (() => {
   // asCosts is the Costs page's answer, if well formed; else null.
   function asCosts(v) {
     if (!v || typeof v !== "object" || !str(v.asOf) || !str(v.source) || !str(v.zone) || !opt(v.yours, strs) || !opt(v.pricesError, str)) return null;
-    const months = objs(v.months, (m) => str(m.month) && /^\d{4}-\d{2}$/.test(m.month) && isSpent(m) && objs(m.byModel, (x) => str(x.model) && isSpent(x)));
+    const months = objs(v.months, (m) => str(m.month) && /^\d{4}-\d{2}$/.test(m.month) && isSpent(m) && objs(m.byModel, (x) => str(x.model) && isSpent(x)) && opt(m.replayed, num));
     const runs = objs(v.runs, (r) => str(r.workflowId) && RUN_ID.test(r.workflowId) && str(r.runId) && RUN_ID.test(r.runId) && opt(r.schedule, str) && str(r.at) && isSpent(r));
     const scheds = objs(v.schedules, (s) => str(s.name) && /^[a-z0-9-]{1,40}$/.test(s.name) && isSpent(s));
     return months && runs && scheds ? { ...v, yours: v.yours || [] } : null;
@@ -1259,6 +1270,6 @@ const DD = (() => {
     return `https://github.com/${m[1]}/${m[2]}/tree/${b}/skills/${name}`;
   }
 
-  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, replayWords, locatorText, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
+  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, actEndingOf, replayedAll, replayWords, locatorText, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
 })();
 if (typeof module !== "undefined") module.exports = DD;
