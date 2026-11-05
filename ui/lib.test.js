@@ -776,10 +776,14 @@ test("a skill's Share panel gives a command that pastes safely, and only a GitHu
   assert.equal(DD.publishCommand("trip-planner", "~/my skills; rm -rf ~", "/s"), "heedle skills publish trip-planner -repo ~/'my skills; rm -rf ~' -store /s");
   assert.equal(DD.shellWord("it's $(here)"), "'it'\\''s $(here)'");
   assert.equal(DD.shellWord(""), "''");
+  // Review 49: zsh expands a word starting with =; a fresh clone has no upstream.
+  assert.equal(DD.shellWord("=ls"), "'=ls'");
+  assert.equal(DD.shellWord("a=b"), "a=b");
+  assert.equal(DD.pushCommand("~/src/my skills"), "git -C ~/'src/my skills' push -u origin HEAD");
   assert.equal(DD.shareLink("https://github.com/ada/my-skills", "main", "trip-planner"), "https://github.com/ada/my-skills/tree/main/skills/trip-planner");
   assert.equal(DD.shareLink("github.com/ada/my-skills.git/", "", "trip-planner"), "https://github.com/ada/my-skills/tree/main/skills/trip-planner");
   for (const [repo, branch] of [["https://evil.example/ada/x", "main"], ["https://github.com/ada/x/tree/main", "main"], ["javascript:alert(1)", "main"],
-    ["https://github.com/ada/x", "../x"], ["https://github.com/ada/x", "a b"], ["https://github.com/a/b?x=1", "main"]]) {
+    ["https://github.com/ada/x", "../x"], ["https://github.com/ada/x", "a b"], ["https://github.com/a/b?x=1", "main"], ["https://github.com/ada/x", "feature/x"]]) {
     assert.equal(DD.shareLink(repo, branch, "trip-planner"), "", repo + " " + branch);
   }
   assert.equal(DD.shareLink("https://github.com/ada/x", "main", "Bad Name"), "");
