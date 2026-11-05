@@ -1480,10 +1480,12 @@ function BrowseRepo({ onDone, library }) {
   const importChosen = async () => {
     setBusy("import");
     for (const e of cat.entries.filter((e) => chosen.has(keyOf(e)))) {
-      const r = await api("/api/skills/import", { link: e.source.repo, path: e.source.path || "", branch: e.source.ref || "" });
+      // Pinned to the commit the catalog was read at (roadmap 10.6): if
+      // the repository has moved on since, the import says so.
+      const r = await api("/api/skills/import", { link: e.source.repo, path: e.source.path || "", branch: e.source.ref || "", commit: e.source.commit || "" });
       const sk = r.ok ? DD.asSkill(r.data.skill) : null;
-      // The import fetches the branch as it is now: say if that isn't
-      // what was listed (review 24).
+      // A worker from before roadmap 10.6 fetches the branch as it is
+      // now: say if that isn't what was listed (review 24).
       const moved = sk && sk.source && e.source.commit && sk.source.commit && sk.source.commit !== e.source.commit;
       setDone((d) => ({ ...d, [keyOf(e)]: sk ? { skill: sk, moved } : { error: (r.data && r.data.error) || String(r.data) } }));
     }
@@ -1585,6 +1587,7 @@ function SkillPage({ name, version }) {
       ${cur && cur.created && html`<p class="muted">Created by Claude from: “${cur.created}”</p>`}
       ${cur && cur.source && html`<p class="muted">Imported from <span class="mono">${cur.source.repo}${cur.source.path ? " " + cur.source.path : ""}</span>
         ${cur.source.commit && html` at <span class="mono">${cur.source.commit.slice(0, 12)}</span>`}${link && html` · <a href=${link} target="_blank" rel="noopener noreferrer">view the source ↗</a>`}</p>`}
+      ${cur && list[0] && cur.version === list[0].version && html`<${ShareSkill} name=${name} store=${typeof versions.data.store === "string" ? versions.data.store : ""} />`}
     </div>
     <div class="skill-cols">
       <section>
@@ -1602,6 +1605,41 @@ function SkillPage({ name, version }) {
             <span class="mono">${v.version.slice(0, 12)}</span></a>
             ${v.source ? html` <span class="muted">from ${v.source.repo.replace(/^https:\/\//, "")}${v.source.commit ? " @" + v.source.commit.slice(0, 7) : ""}</span>` : v.created ? html` <span class="muted">created by Claude from a description</span>` : html` <span class="muted">added from a folder</span>`}</li>`)}</ol>
       </section>
+    </div>`;
+}
+
+// === Share a skill (roadmap 10.6) ===========================================
+// Share shows how to publish a skill into a repository of yours, and the
+// link a friend imports it with. The page never publishes or pushes: it
+// shows the commands, you run them.
+
+function ShareSkill({ name, store }) {
+  const [open, setOpen] = useState(false);
+  const [dir, setDir] = useState("~/src/my-skills");
+  const [repo, setRepo] = useState("");
+  const [branch, setBranch] = useState("main");
+  const [copied, setCopied] = useState("");
+  const cmd = DD.publishCommand(name, dir, store);
+  const push = `git -C ${DD.shellWord(dir || "~/src/my-skills")} push`;
+  const link = DD.shareLink(repo, branch, name);
+  const copy = async (what, text) => { try { await navigator.clipboard.writeText(text); setCopied(what); } catch { setCopied(""); } };
+  if (!open) return html`<p><button type="button" onClick=${() => setOpen(true)}>Share…</button></p>`;
+  return html`
+    <div class="panel share">
+      <h3 style=${{ marginTop: 0 }}>Share ${name}</h3>
+      <p class="lede">Publish its newest approved version to a Git repository of yours; friends import it with one link, and their own review protects them. heedle commits in your clone and never pushes: you do.</p>
+      <ol class="share-steps">
+        <li>Make a repository and clone it, once: <code>gh repo create my-skills --public --clone</code></li>
+        <li><label for="share-dir">Your clone</label> <input id="share-dir" type="text" spellcheck="false" value=${dir} onInput=${(e) => setDir(e.target.value)} />
+          <div class="row"><code class="share-cmd">${cmd}</code><button type="button" onClick=${() => copy("cmd", cmd)}>${copied === "cmd" ? "Copied" : "Copy"}</button></div>
+          <p class="muted">It refuses a skill whose files look like they hold a key, naming the file and line.</p></li>
+        <li>Push it: <code>${push}</code></li>
+        <li><label for="share-repo">Your repository's link</label> <input id="share-repo" type="text" spellcheck="false" placeholder="github.com/you/my-skills" value=${repo} onInput=${(e) => setRepo(e.target.value)} />
+          <label for="share-branch">branch</label> <input id="share-branch" class="share-branch" type="text" spellcheck="false" value=${branch} onInput=${(e) => setBranch(e.target.value)} />
+          ${link ? html`<div class="row"><span>A friend imports it with</span> <code class="share-link">${link}</code><button type="button" onClick=${() => copy("link", link)}>${copied === "link" ? "Copied" : "Copy"}</button></div>`
+            : repo && html`<p class="muted">Give a GitHub repository's link, such as github.com/you/my-skills.</p>`}</li>
+      </ol>
+      <button type="button" class="link-btn" onClick=${() => setOpen(false)}>Close</button>
     </div>`;
 }
 

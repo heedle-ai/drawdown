@@ -893,3 +893,19 @@ test("a schedule its budget paused is counted, and its budget read (roadmap 10.4
   assert.deepEqual(DD.asSchedules({ schedules: all }).map((s) => s.name), ["a", "b", "e", "c", "d"]);
   assert.deepEqual(DD.asSchedules({ schedules: [sched("e", "", { usd: -1 }), sched("f", "", { usd: "5" }), sched("g", "", { usd: 5, resumeNextMonth: "yes" })] }), []);
 });
+
+// Roadmap 10.6: the Share panel's command and link.
+test("a skill's Share panel gives a command that pastes safely, and only a GitHub folder link", () => {
+  assert.equal(DD.publishCommand("trip-planner", "~/src/my-skills", "/home/ada/.heedle/store.git"),
+    "heedle skills publish trip-planner -repo ~/src/my-skills -store /home/ada/.heedle/store.git");
+  assert.equal(DD.publishCommand("trip-planner", "~/my skills; rm -rf ~", "/s"), "heedle skills publish trip-planner -repo ~/'my skills; rm -rf ~' -store /s");
+  assert.equal(DD.shellWord("it's $(here)"), "'it'\\''s $(here)'");
+  assert.equal(DD.shellWord(""), "''");
+  assert.equal(DD.shareLink("https://github.com/ada/my-skills", "main", "trip-planner"), "https://github.com/ada/my-skills/tree/main/skills/trip-planner");
+  assert.equal(DD.shareLink("github.com/ada/my-skills.git/", "", "trip-planner"), "https://github.com/ada/my-skills/tree/main/skills/trip-planner");
+  for (const [repo, branch] of [["https://evil.example/ada/x", "main"], ["https://github.com/ada/x/tree/main", "main"], ["javascript:alert(1)", "main"],
+    ["https://github.com/ada/x", "../x"], ["https://github.com/ada/x", "a b"], ["https://github.com/a/b?x=1", "main"]]) {
+    assert.equal(DD.shareLink(repo, branch, "trip-planner"), "", repo + " " + branch);
+  }
+  assert.equal(DD.shareLink("https://github.com/ada/x", "main", "Bad Name"), "");
+});

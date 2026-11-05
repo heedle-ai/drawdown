@@ -23,8 +23,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"runtime"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -228,6 +228,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		ConnectorsFile: *connectorsFile,
 		MemoryFile:     *memoryFile,
 		PricesFile:     *pricesFile,
+		StoreDir:       s.Dir(),
 		Secrets:        vault,
 		StepKeys:       stepKeys,
 		Agents:         *agentImage != "",
