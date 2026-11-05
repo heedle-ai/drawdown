@@ -1616,7 +1616,7 @@ function ShareSkill({ name, store }) {
   const [branch, setBranch] = useState("main");
   const [copied, setCopied] = useState("");
   const cmd = DD.publishCommand(name, dir, store);
-  const push = `git -C ${DD.shellWord(dir || "~/src/my-skills")} push`;
+  const push = DD.pushCommand(dir);
   const link = DD.shareLink(repo, branch, name);
   const copy = async (what, text) => { try { await navigator.clipboard.writeText(text); setCopied(what); } catch { setCopied(""); } };
   if (!open) return html`<p><button type="button" onClick=${() => setOpen(true)}>Share…</button></p>`;
