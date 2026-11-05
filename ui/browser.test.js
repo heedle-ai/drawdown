@@ -53,8 +53,8 @@ test.after(async () => {
   fs.rmSync(work, { recursive: true, force: true });
 });
 
-async function page({ program, ask, info, width = 1280 } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+async function page({ program, ask, info, width = 1280, scheme = "light" } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme });
   await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
   await ctx.route(/^https:\/\/cdn\.jsdelivr\.net\/npm\//, (r) => {
     const m = /\/npm\/((?:@[^/]+\/)?[^@/]+@[^/]+)\/(.*)$/.exec(r.request().url());
@@ -389,4 +389,91 @@ test("the editor shows where act steps may act, and Run sends those hosts", asyn
   assert.equal(res.status, 422);
   assert.deepEqual(errors, []);
   await ctx.close();
+});
+
+// Roadmap 10.1: memory you can see. A suggestion is remembered only on
+// Remember; the memory page shows it word for word (never as HTML), edits
+// and forgets it, never over a hand edit made while it was open.
+test("Remember saves only on Remember, the memory page shows it as written, and Forget takes it out", async () => {
+  const evil = '<img src=x onerror="window.pwned=1">Vegetarian, no fish';
+  const memory = async () => (await (await fetch(BASE + "/api/memory")).json());
+  const file = (await memory()).file;
+  const plan = { nodes: [{ id: "n0", activity: "Echo", args: ["porto"] }] };
+  const { p, ctx, errors } = await page({ ask: { summary: "A weekend in Porto, with vegetarian places.", program: '(echo "porto")', plan,
+    remember: [evil, "Home airport: IAD."], memory: ["m0123456789ab"], ready: { needs: [], ready: true }, attempts: 1 } });
+  await p.locator(".front-row input").fill("Plan a weekend in Porto, I'm vegetarian and don't eat fish");
+  await p.getByRole("button", { name: "Ask", exact: true }).click();
+  await p.locator(".remember li").first().waitFor();
+  assert.equal(await p.locator(".used-memory a").textContent(), "Used 1 thing heedle remembers");
+  assert.equal(await p.locator(".used-memory a").getAttribute("href"), "#/memory");
+  assert.equal((await memory()).memories.length, 0, "nothing is remembered before Remember");
+  // Not now: gone from the card, not remembered; the proposal still runs.
+  await p.locator(".remember li", { hasText: "IAD" }).getByRole("button", { name: "Not now" }).click();
+  assert.equal(await p.locator(".remember li", { hasText: "IAD" }).count(), 0);
+  assert.equal(await p.getByRole("button", { name: "Run it now" }).isDisabled(), false);
+  await p.locator(".remember li").getByRole("button", { name: "Remember" }).click();
+  await p.locator(".remember [role=status]").waitFor();
+  let m = await memory();
+  assert.deepEqual(m.memories.map((x) => x.text), [evil]);
+  // As written, everywhere: no image, no script.
+  assert.equal(await p.locator(".proposal img").count(), 0);
+  await p.evaluate(() => { location.hash = "#/memory"; });
+  await p.locator(".memory-text").first().waitFor();
+  assert.equal(await p.locator(".memory-text").first().textContent(), evil);
+  assert.equal(await p.locator("main img").count(), 0);
+  assert.equal(await p.evaluate(() => window.pwned), undefined);
+  assert.equal(await p.locator('header a[aria-current="page"]').textContent(), "Memory");
+  // Edit in place.
+  await p.getByRole("button", { name: "Edit" }).click();
+  await p.getByLabel("Change what heedle remembers").fill("Vegan.");
+  await p.getByRole("button", { name: "Save" }).click();
+  await p.locator(".memory-text", { hasText: "Vegan." }).waitFor();
+  // Edited by hand while the page is open: Forget is refused, the page
+  // shows what the file holds now, and the hand edit stays.
+  fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("Vegan.", "Vegan, but eats eggs."));
+  await p.getByRole("button", { name: "Forget", exact: true }).click();
+  await p.locator("main .error[role=alert]").waitFor();
+  await p.locator(".memory-text", { hasText: "Vegan, but eats eggs." }).waitFor();
+  assert.match(fs.readFileSync(file, "utf8"), /eats eggs/);
+  // Now Forget, then add two and forget everything.
+  await p.getByRole("button", { name: "Forget", exact: true }).click();
+  await p.getByText("heedle remembers nothing about you yet.").waitFor();
+  assert.ok(!fs.readFileSync(file, "utf8").includes("eggs"));
+  for (const t of ["Home airport: IAD.", "Prefers trains to planes."]) {
+    await p.getByLabel("Something for heedle to remember").fill(t);
+    await p.locator(".memory-add").getByRole("button", { name: "Remember" }).click();
+    await p.locator(".memory-text", { hasText: t }).waitFor();
+  }
+  if (process.env.DRAWDOWN_SHOTS) await p.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, "memory-light.png"), fullPage: true });
+  await p.getByRole("button", { name: "Forget everything" }).click();
+  await p.getByRole("button", { name: "Forget everything" }).click();
+  await p.getByText("heedle remembers nothing about you yet.").waitFor();
+  assert.equal(fs.readFileSync(file, "utf8").trim(), "[]");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("the memory page and a card's suggestions read well in dark mode, and at phone width", async () => {
+  await fetch(BASE + "/api/memory/add", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Home airport: IAD." }) });
+  await fetch(BASE + "/api/memory/add", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Vegetarian, and no fish either." }) });
+  for (const [width, scheme] of [[1280, "dark"], [375, "light"], [375, "dark"]]) {
+    const plan = { nodes: [{ id: "n0", activity: "Echo", args: ["lisbon"] }] };
+    const { p, ctx, errors } = await page({ width, scheme, ask: { summary: "Three days in Lisbon, with vegetarian places, as you like.", program: '(echo "lisbon")', plan,
+      remember: ["Likes azulejo tiles."], memory: ["m0123456789ab", "m0123456789ac"], ready: { needs: [], ready: true }, attempts: 1 } });
+    await p.evaluate(() => { location.hash = "#/memory"; });
+    await p.locator(".memory-text").first().waitFor();
+    const sideways = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.equal(sideways, 0, `${width}px ${scheme}: the memory page scrolls sideways`);
+    if (process.env.DRAWDOWN_SHOTS) await p.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `memory-${width}-${scheme}.png`), fullPage: true });
+    await p.evaluate(() => { location.hash = "#/"; });
+    await p.locator(".front-row input").fill("Plan three days in Lisbon");
+    await p.getByRole("button", { name: "Ask", exact: true }).click();
+    await p.locator(".remember li").waitFor();
+    assert.equal(await p.locator(".used-memory a").textContent(), "Used 2 things heedle remembers");
+    if (process.env.DRAWDOWN_SHOTS) await p.locator(".proposal").first().screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `memory-card-${width}-${scheme}.png`) });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  const m = await (await fetch(BASE + "/api/memory")).json();
+  await fetch(BASE + "/api/memory/forget-all", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: m.version }) });
 });

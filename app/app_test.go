@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -87,5 +88,48 @@ func TestInv_RunServesUntilItsContextEnds(t *testing.T) {
 	var help bytes.Buffer
 	if err := Run(context.Background(), []string{"-h"}, &help); !errors.Is(err, flag.ErrHelp) || !strings.Contains(help.String(), "-store") {
 		t.Errorf("-h: %v\n%s", err, help.String())
+	}
+}
+
+// TestInv_MemoryIsBesideTheConnectors: the memory file is -memory FILE,
+// or memory.json beside the -connectors file (so heedle up's is
+// ~/.heedle/memory.json, as loom memory's is), or none: the memory page
+// and the front door's worker use the same one. (Roadmap 10.1.)
+func TestInv_MemoryIsBesideTheConnectors(t *testing.T) {
+	dir := t.TempDir()
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-connectors", dir + "/connectors.json"}, dir + "/memory.json"},
+		{[]string{"-connectors", dir + "/connectors.json", "-memory", dir + "/elsewhere.json"}, dir + "/elsewhere.json"},
+		{nil, ""},
+	} {
+		ctx, cancel := context.WithCancel(context.Background())
+		var out syncBuffer
+		done := make(chan error, 1)
+		go func() {
+			done <- Run(ctx, append([]string{"-store", t.TempDir() + "/s.git", "-listen", "127.0.0.1:0", "-worker=false", "-address", "127.0.0.1:1"}, c.args...), &out)
+		}()
+		addr := regexp.MustCompile(`http://(\S+) `)
+		url := ""
+		for i := 0; i < 100 && url == ""; i++ {
+			time.Sleep(50 * time.Millisecond)
+			if m := addr.FindStringSubmatch(out.String()); m != nil {
+				url = "http://" + m[1]
+			}
+		}
+		res, err := http.Get(url + "/api/memory")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v struct{ File string }
+		json.NewDecoder(res.Body).Decode(&v)
+		res.Body.Close()
+		if v.File != c.want {
+			t.Errorf("%q: the memory file is %q, want %q", c.args, v.File, c.want)
+		}
+		cancel()
+		<-done
 	}
 }

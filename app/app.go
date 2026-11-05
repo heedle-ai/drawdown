@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -66,8 +67,14 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	imageRegistry := fs.String("image-registry", "", "OCI repository (such as ghcr.io/acme/heedle-images) that (image … \"push\") pushes to, with the worker's podman login")
 	keepImages := fs.String("keep-images", "", "the images heedle's release pins, comma-separated (heedle up gives them): the System page never removes them or the worker's own, and removes none without them")
 	agentRegistry := fs.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
+	memoryFile := fs.String("memory", "", "the file of what heedle remembers about you, sent to Claude with every request to the front door (default: memory.json beside the -connectors file, if given)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *memoryFile == "" && *connectorsFile != "" {
+		// heedle up gives -connectors ~/.heedle/connectors.json, so its
+		// memory is ~/.heedle/memory.json (roadmap 10.1).
+		*memoryFile = filepath.Join(filepath.Dir(*connectorsFile), "memory.json")
 	}
 	if *store == "" {
 		return errors.New("give -store DIR, e.g. -store ~/heedle-store.git")
@@ -185,7 +192,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 				return loom.Readiness{}, err
 			}
 			return loom.CheckReady(ctx, p, lib, loom.Worker{Connectors: cs, Keys: agent.Vault, Agents: agent.Image != "", Browsers: *browserImage != "", BrowserAgents: *browserAgentImage != ""})
-		}}
+		}, MemoryFile: *memoryFile}
 		loom.RegisterWriter(w, writer)
 		loom.RegisterAsk(w, writer)
 		shipment.RegisterCommands(w, *sources)
@@ -211,6 +218,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	srv := &drawdown.Server{
 		Connectors:     func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) },
 		ConnectorsFile: *connectorsFile,
+		MemoryFile:     *memoryFile,
 		Secrets:        vault,
 		StepKeys:       stepKeys,
 		Agents:         *agentImage != "",

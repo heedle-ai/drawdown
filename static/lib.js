@@ -833,7 +833,11 @@ const DD = (() => {
   function asProposal(v) {
     if (!v || typeof v !== "object" || !str(v.summary) || !v.summary.trim() || !opt(v.program, str) || !opt(v.skill, str) || !opt(v.name, str)) return null;
     const program = v.program || "", skill = v.skill || "";
-    if (!program === !skill) return null;
+    // What it suggests remembering, and the memories that went to Claude
+    // (roadmap 10.1); a proposal may be only something to remember.
+    if (!opt(v.remember, (r) => strs(r) && r.every((x) => x.trim() && x.length <= 2000)) || !opt(v.memory, (m) => strs(m) && m.every((x) => MEMORY_ID.test(x)))) return null;
+    const remember = v.remember || [];
+    if (!program === !skill && !(!program && !skill && remember.length)) return null;
     if (program && (!v.plan || !Array.isArray(v.plan.nodes))) return null;
     const sp = v.schedule;
     if (sp !== undefined && sp !== null && (!program || typeof sp !== "object" || !opt(sp.every, num) || !opt(sp.cron, str) || !opt(sp.timeZone, str) ||
@@ -843,7 +847,28 @@ const DD = (() => {
     // (roadmap 9.5): only with a program.
     if (!opt(v.actHosts, (h) => strs(h) && h.every((x) => ACT_HOST.test(x))) || (v.actHosts && v.actHosts.length && !program)) return null;
     return { summary: v.summary, program, plan: program ? v.plan : null, schedule: sp || null, name: sp ? v.name : "", skill, ready: v.ready ? { ...v.ready, needs: v.ready.needs || [] } : null,
-      actHosts: v.actHosts || [] };
+      actHosts: v.actHosts || [], remember, memory: v.memory || [] };
+  }
+
+  // === Memory (roadmap 10.1) ===============================================
+
+  const MEMORY_ID = /^m[0-9a-f]{12}$/;
+  const isTime = (v) => str(v) && !Number.isNaN(Date.parse(v));
+
+  // asMemory is /api/memory's answer, if well formed: everything heedle
+  // remembers, word for word, with the version a change is based on and
+  // the file it's in; else null.
+  function asMemory(v) {
+    if (!v || typeof v !== "object" || !Array.isArray(v.memories) || !str(v.version) || !str(v.file)) return null;
+    const ok = v.memories.every((m) => m && typeof m === "object" && MEMORY_ID.test(m.id) && str(m.text) && isTime(m.added) && opt(m.used, isTime));
+    return ok ? { memories: v.memories.map((m) => ({ id: m.id, text: m.text, added: m.added, used: m.used || "" })), version: v.version, file: v.file } : null;
+  }
+
+  // usedMemory is the card's line for the memories a request sent to
+  // Claude: "Used 1 thing heedle remembers", or "" for none.
+  function usedMemory(ids) {
+    const n = Array.isArray(ids) ? ids.length : 0;
+    return n ? `Used ${n} thing${n === 1 ? "" : "s"} heedle remembers` : "";
   }
 
   // asReadiness is /api/ready's answer, if well formed; else null.
@@ -969,7 +994,7 @@ const DD = (() => {
   // === The top bar ==========================================================
 
   // SECTIONS are the top bar's sections, in its order.
-  const SECTIONS = ["runs", "skills", "schedules", "connectors", "system"];
+  const SECTIONS = ["runs", "skills", "schedules", "connectors", "memory", "system"];
 
   // PAGES is every page the app shows other than the home page: the
   // route's first segment, the lengths of route it takes, and the section
@@ -985,6 +1010,7 @@ const DD = (() => {
     review: { sizes: [2], section: "skills" },
     schedules: { sizes: [1], section: "schedules" },
     connectors: { sizes: [1], section: "connectors" },
+    memory: { sizes: [1], section: "memory" },
     system: { sizes: [1], section: "system" },
   };
 
@@ -1071,6 +1097,6 @@ const DD = (() => {
     return { images: old, bytes: old.reduce((n, im) => n + im.size, 0) };
   }
 
-  return { asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
+  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, strsOf, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass };
 })();
 if (typeof module !== "undefined") module.exports = DD;

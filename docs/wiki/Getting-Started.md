@@ -91,6 +91,17 @@ Click **Example: ask**, then **Run**. The three shipment sources are read in par
 
 The answer shows as text with the model and token counts. Change a source as in step 3, run again, and **vs. previous run of this program** shows how the evidence and Claude's answer changed. See [pirn](https://github.com/heedle-ai/pirn/wiki) for what Claude is sent and how errors are handled.
 
+## What heedle remembers
+
+Start drawdown with a memory file (or with `-connectors FILE`, which puts `memory.json` beside it):
+
+```bash
+cd ~/src/heedle-ai/drawdown
+ANTHROPIC_API_KEY=sk-ant-... go run ./cmd/drawdown -store ~/heedle-store.git -memory ~/heedle-memory.json
+```
+
+Ask heedle *Plan a weekend in Porto, I'm vegetarian*. The card suggests remembering that you're vegetarian, with **Remember** and **Not now**; nothing is remembered until you press **Remember**. Ask *Plan three days in Lisbon* next, and its card says **Used 1 thing heedle remembers**. **Memory** in the top bar shows everything remembered, word for word, to edit or forget. Without the UI, the same file is `heedle memory -memory ~/heedle-memory.json` ([loom → Getting Started](https://github.com/heedle-ai/loom/wiki/Getting-Started#6-what-heedle-remembers)).
+
 ## Your own programs
 
 Type any program using `echo`, `source`, `assess`, `ask`, `agent` or `browse`. Errors show as you type, with line and column; **Run** is enabled only when the program compiles. To add commands, see [draft → Adding Commands](https://github.com/heedle-ai/draft/wiki/Adding-Commands), and register them in `app/app.go` for both the registry and the worker.

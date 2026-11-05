@@ -589,7 +589,7 @@ test("every route the app shows is one page in one section (DRAW-68)", () => {
   const cases2 = {
     "": "runs", "agent/refs/loom/main": "runs", "run/w/r": "runs", "step/w/r/n0": "runs", "diff/a/b": "runs",
     skills: "skills", "skill/pdf": "skills", "skill/pdf/abc": "skills", "review/pdf": "skills",
-    schedules: "schedules", connectors: "connectors",
+    schedules: "schedules", connectors: "connectors", memory: "memory",
   };
   for (const [hash, section] of Object.entries(cases2)) assert.equal(DD.page(hash.split("/")).section, section, hash);
   assert.deepEqual(DD.page(["agent", "refs/loom/main"]), { name: "agent", section: "runs" });
@@ -797,4 +797,30 @@ test("the System page reads only well-formed answers, and links only to runs (DR
   const old = DD.oldImages([im({ id: "1", size: 5 }), im({ id: "2", size: 7, pinned: true }), im({ id: "3", size: 11, containers: 1 }), im({ id: "4", size: 13 })]);
   assert.deepEqual(old.images.map((i) => i.id), ["1", "4"]);
   assert.equal(old.bytes, 18);
+});
+
+test("memory: the page's answer, the card's suggestions and its used line (roadmap 10.1)", () => {
+  const m = { id: "m0123456789ab", text: "<b>Vegetarian</b>.", added: "2026-11-05T09:00:00Z" };
+  const v = DD.asMemory({ memories: [m, { ...m, id: "m0123456789ac", used: "2026-11-05T10:00:00Z" }], version: "abc", file: "/home/me/.heedle/memory.json" });
+  assert.deepEqual(v.memories.map((x) => [x.id, x.text, x.used]), [["m0123456789ab", "<b>Vegetarian</b>.", ""], ["m0123456789ac", "<b>Vegetarian</b>.", "2026-11-05T10:00:00Z"]]);
+  assert.deepEqual(DD.asMemory({ memories: [], version: "", file: "" }), { memories: [], version: "", file: "" });
+  for (const bad of [null, {}, { memories: [m] }, { memories: "x", version: "", file: "" }, { memories: [{ ...m, id: "1" }], version: "", file: "" },
+    { memories: [{ ...m, text: 3 }], version: "", file: "" }, { memories: [{ ...m, added: "soon" }], version: "", file: "" }, { memories: [{ ...m, used: "never" }], version: "", file: "" }])
+    assert.equal(DD.asMemory(bad), null, JSON.stringify(bad));
+  const plan = { nodes: [{ id: "n0", activity: "Echo", args: [] }] };
+  const p = DD.asProposal({ summary: "Porto, vegetarian.", program: "(echo)", plan, remember: ["Vegetarian."], memory: ["m0123456789ab"], attempts: 1 });
+  assert.deepEqual([p.remember, p.memory], [["Vegetarian."], ["m0123456789ab"]]);
+  assert.deepEqual(DD.asProposal({ summary: "Hi.", program: "(echo)", plan, attempts: 1 }).remember, []);
+  // Only something to remember: no program, no skill.
+  const only = DD.asProposal({ summary: "I'll remember that.", remember: ["Vegetarian."], attempts: 1 });
+  assert.ok(only && !only.program && !only.skill && only.remember.length === 1);
+  for (const bad of [{ summary: "x", remember: [] }, { summary: "x", program: "(echo)", plan, remember: "Vegan." }, { summary: "x", program: "(echo)", plan, remember: [""] },
+    { summary: "x", program: "(echo)", plan, memory: ["nope"] }, { summary: "x", program: "(echo)", plan, memory: "m0123456789ab" }])
+    assert.equal(DD.asProposal(bad), null, JSON.stringify(bad));
+  assert.equal(DD.usedMemory([]), "");
+  assert.equal(DD.usedMemory(undefined), "");
+  assert.equal(DD.usedMemory(["m0123456789ab"]), "Used 1 thing heedle remembers");
+  assert.equal(DD.usedMemory(["m0123456789ab", "m0123456789ac", "m0123456789ad"]), "Used 3 things heedle remembers");
+  assert.deepEqual(DD.page(["memory"]), { name: "memory", section: "memory" });
+  assert.deepEqual(DD.page(["memory", "x"]), { name: "home", section: "runs" });
 });
