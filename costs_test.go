@@ -3,6 +3,7 @@ package drawdown_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -336,5 +337,23 @@ func TestInv_SchedulesReadEachRefOnce(t *testing.T) {
 	_, _, raw := w2.call("GET", "/api/schedules", nil)
 	if cs.logs != 1 || !strings.Contains(raw, `"b":{"last30":{"runs":1`) {
 		t.Errorf("%d walks: %s", cs.logs, raw)
+	}
+}
+
+// TestInv_SchedulesAnswerWhenSpendCant: a ref whose history can't be
+// read leaves its schedules without spend (never $0) and says why; the
+// page, where a budget is changed, still answers. (Review 48 round 2.)
+func TestInv_SchedulesAnswerWhenSpendCant(t *testing.T) {
+	w := newWorld(t)
+	for _, n := range []string{"good", "bad"} {
+		if code, _, raw := w.call("POST", "/api/schedules", map[string]string{"name": n, "program": `(echo "a")`, "every": "1h"}); code != 201 {
+			t.Fatalf("%d %s", code, raw)
+		}
+	}
+	w.fake.sched["bad"].Ref = "refs/loom/bad..ref"
+	code, m, raw := w.call("GET", "/api/schedules", nil)
+	spend, _ := m["spend"].(map[string]any)
+	if code != 200 || spend["good"] == nil || spend["bad"] != nil || !strings.Contains(fmt.Sprint(m["spendError"]), "refs/loom/bad..ref") {
+		t.Errorf("%d %s", code, raw)
 	}
 }

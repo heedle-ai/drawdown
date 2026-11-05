@@ -29,14 +29,13 @@ func (s *Server) schedules(w http.ResponseWriter, r *http.Request) {
 		ss = []loom.Schedule{}
 	}
 	// Each one's spend, as its budget counts it (roadmap 10.4).
-	spend, perr, err := s.scheduleSpend(r.Context(), ss, time.Now())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
-		return
-	}
+	spend, perr, serr := s.scheduleSpend(r.Context(), ss, time.Now())
 	resp := map[string]any{"schedules": ss, "spend": spend}
 	if perr != "" {
 		resp["pricesError"] = perr
+	}
+	if serr != "" {
+		resp["spendError"] = serr
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
