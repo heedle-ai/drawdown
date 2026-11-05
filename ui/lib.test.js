@@ -769,10 +769,10 @@ test("a proposal discloses the hosts its act steps may submit forms on, and a mi
   assert.equal(lines[0].fix, "no browser-agent image");
 });
 
-test("the System page reads only well-formed answers, and links only to runs (DRAW-503)", () => {
+test("the System page reads only well-formed answers, and links only to runs (DRAW-503, DRAW-506)", () => {
   const H = (c) => c.repeat(64);
   const c = (o) => ({ id: H("a"), name: "s", image: "img", created: "2026-11-05T10:00:00Z", state: "running", labels: { kind: "agent", workflow: "loom-a/plan", run: "p1", step: "n0" },
-    workflow: "loom-a", run: "r1", status: "running", ...o });
+    workflow: "loom-a", run: "r1", status: "running", stoppable: true, ...o });
   const im = (o) => ({ id: "1", names: ["ghcr.io/heedle-ai/x@sha256:1"], size: 10, created: "2026-11-05T10:00:00Z", containers: 0, pinned: false, ...o });
   const frame = (o) => ({ containers: [c()], images: [im()], keep: ["k"], machine: null, notes: [], errors: {}, ...o });
   const v = DD.asSystem(frame({ containers: [c(), c({ id: "short" }), c({ labels: { kind: "evil" } }), c({ labels: { kind: "act", step: "--privileged" } }), null],
@@ -787,9 +787,12 @@ test("the System page reads only well-formed answers, and links only to runs (DR
   // A container links to its run only through an ID a link can hold.
   assert.deepEqual(DD.runOf(c()), { href: "#/run/loom-a/r1", workflow: "loom-a" });
   for (const o of [{ workflow: "" }, { run: "" }, { workflow: "a/b" }, { workflow: "javascript:alert(1)" }, { run: "x y" }]) assert.equal(DD.runOf(c(o)), null, JSON.stringify(o));
-  // Only a running run's container offers Stop run.
+  // Only a container the server says is a running run's offers Stop run,
+  // and only with its exact run. Review 50: a running skill's creation
+  // offered it too (DRAW-506).
   assert.ok(DD.stoppable(c()));
-  for (const o of [{ status: "canceled" }, { status: "unknown" }, { workflow: "" }]) assert.ok(!DD.stoppable(c(o)), JSON.stringify(o));
+  for (const o of [{ stoppable: false }, { stoppable: undefined }, { stoppable: "true" }, { workflow: "" }, { run: "" }]) assert.ok(!DD.stoppable(c(o)), JSON.stringify(o));
+  assert.equal(DD.asSystem(frame({ containers: [c({ stoppable: "yes" })] })).unreadable, 1);
   // What Remove old images removes: not kept, used by none.
   const old = DD.oldImages([im({ id: "1", size: 5 }), im({ id: "2", size: 7, pinned: true }), im({ id: "3", size: 11, containers: 1 }), im({ id: "4", size: 13 })]);
   assert.deepEqual(old.images.map((i) => i.id), ["1", "4"]);

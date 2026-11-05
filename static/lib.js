@@ -1037,7 +1037,7 @@ const DD = (() => {
   const label = (v) => v === undefined || v === "" || (str(v) && LABEL_VALUE.test(v));
   const isContainer = (c) => c && typeof c === "object" && str(c.id) && /^[0-9a-f]{64}$/.test(c.id) && str(c.name) && str(c.image) &&
     c.labels && typeof c.labels === "object" && KINDS9.includes(c.labels.kind) && label(c.labels.workflow) && label(c.labels.run) && label(c.labels.step) &&
-    str(c.created) && str(c.state) && opt(c.cpu, str) && opt(c.memory, str) && label(c.workflow) && label(c.run) && opt(c.status, str);
+    str(c.created) && str(c.state) && opt(c.cpu, str) && opt(c.memory, str) && label(c.workflow) && label(c.run) && opt(c.status, str) && opt(c.stoppable, bool);
   const isImage = (im) => im && typeof im === "object" && str(im.id) && strs(im.names) && im.names.length > 0 && num(im.size) && num(im.containers) && bool(im.pinned) && str(im.created);
   const isMachine = (m) => m && typeof m === "object" && str(m.name) && bool(m.running) && num(m.cpus) && num(m.memory) && num(m.disk);
 
@@ -1060,8 +1060,9 @@ const DD = (() => {
   }
 
   // stoppable says whether a container's run can be stopped from the page:
-  // its run is known and running.
-  const stoppable = (c) => !!c.workflow && c.status === "running";
+  // the server says Temporal knows it as a run that is running (DRAW-506),
+  // and the page knows exactly which run it is.
+  const stoppable = (c) => c.stoppable === true && !!c.workflow && !!c.run;
 
   // oldImages are the images a prune would remove: not kept, used by no
   // container; and their bytes.

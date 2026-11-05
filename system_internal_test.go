@@ -49,8 +49,8 @@ func (f *fakeSystem) Machine(context.Context) (*bobbin.Machine, error) {
 	return f.machine, nil
 }
 
-func (f *fakeSystem) Cancel(_ context.Context, wf string) (string, error) {
-	f.asked = append(f.asked, "cancel "+wf)
+func (f *fakeSystem) Cancel(_ context.Context, wf, run string) (string, error) {
+	f.asked = append(f.asked, "cancel "+wf+" "+run)
 	return f.cancelRun, f.cancelErr
 }
 
@@ -87,7 +87,7 @@ const here = "127.0.0.1:50000"
 func TestInv_SystemActsOnlyFromThisMachine(t *testing.T) {
 	for _, c := range []struct {
 		method, path, body string
-	}{{"GET", "/api/system", ""}, {"POST", "/api/system/stop", `{"workflow":"loom-a"}`}, {"POST", "/api/system/prune", `{}`}} {
+	}{{"GET", "/api/system", ""}, {"POST", "/api/system/stop", `{"workflow":"loom-a","run":"r1"}`}, {"POST", "/api/system/prune", `{}`}} {
 		f := &fakeSystem{cancelRun: "r1"}
 		h := (&Server{System: f}).Handler()
 		for _, away := range []struct {
@@ -151,18 +151,22 @@ func TestInv_SystemShowsWhatItSees(t *testing.T) {
 }
 
 // TestInv_StoppingIsOnlyCancellingARun: POST /api/system/stop asks the
-// system to cancel exactly the run named, through Temporal (loom.Cancel),
-// and nothing else: it never lists or removes a container; a name that
-// isn't one is refused before it's asked; a workflow that isn't a run is
-// 400, one that has ended 409, Temporal failing 502 (DRAW-502).
+// system to cancel exactly the run named, by workflow ID and run ID,
+// through Temporal (loom.Cancel), and nothing else: it never lists or
+// removes a container; a name that isn't one, or a missing run ID, is
+// refused before it's asked; a workflow that isn't a run is 400, one that
+// has ended 409, Temporal failing 502 (DRAW-502, DRAW-506).
 func TestInv_StoppingIsOnlyCancellingARun(t *testing.T) {
 	f := &fakeSystem{cancelRun: "r1"}
 	h := (&Server{System: f}).Handler()
-	code, m := systemCall(h, "POST", "/api/system/stop", `{"workflow":"loom-a"}`, here)
-	if code != 200 || m["run"] != "r1" || strings.Join(f.asked, ",") != "cancel loom-a" {
+	code, m := systemCall(h, "POST", "/api/system/stop", `{"workflow":"loom-a","run":"r1"}`, here)
+	if code != 200 || m["run"] != "r1" || strings.Join(f.asked, ",") != "cancel loom-a r1" {
 		t.Errorf("stop: %d %v, asked %q", code, m, f.asked)
 	}
-	for _, body := range []string{`{}`, `{"workflow":""}`, `{"workflow":"a b"}`, `{"workflow":"a\nb"}`, `{"workflow":"` + strings.Repeat("w", 1001) + `"}`, `{"workflow":"x","kill":true}`} {
+	// Review 50: a stop named only the workflow, so a page showing an old
+	// run could cancel a newer run of the same workflow ID.
+	for _, body := range []string{`{}`, `{"workflow":""}`, `{"workflow":"a b","run":"r"}`, `{"workflow":"a\nb","run":"r"}`, `{"workflow":"` + strings.Repeat("w", 1001) + `","run":"r"}`,
+		`{"workflow":"x","run":"r","kill":true}`, `{"workflow":"loom-a"}`, `{"workflow":"loom-a","run":""}`, `{"workflow":"loom-a","run":"r 1"}`} {
 		f.asked = nil
 		if code, _ := systemCall(h, "POST", "/api/system/stop", body, here); code != http.StatusBadRequest || len(f.asked) != 0 {
 			t.Errorf("stop %s: %d, asked %q", body, code, f.asked)
@@ -174,7 +178,7 @@ func TestInv_StoppingIsOnlyCancellingARun(t *testing.T) {
 		code int
 	}{{"", fmt.Errorf("%w: merge-x is a LoomMerge workflow", loom.ErrNotARun), 400}, {"r2", errors.New("run loom-b has already ended (completed)"), 409}, {"", errors.New("connection refused"), 502}} {
 		f := &fakeSystem{cancelRun: c.run, cancelErr: c.err}
-		if code, m := systemCall((&Server{System: f}).Handler(), "POST", "/api/system/stop", `{"workflow":"w"}`, here); code != c.code || m["error"] == nil {
+		if code, m := systemCall((&Server{System: f}).Handler(), "POST", "/api/system/stop", `{"workflow":"w","run":"r"}`, here); code != c.code || m["error"] == nil {
 			t.Errorf("Cancel %v: %d %v, want %d", c.err, code, m, c.code)
 		}
 	}
@@ -205,7 +209,35 @@ func TestInv_EveryStepIsLabelledHere(t *testing.T) {
 	if !strings.Contains(string(src), "steps := loom.Labelled(w)") {
 		t.Error("app.go doesn't make steps with loom.Labelled")
 	}
-	if !strings.Contains(string(src), "Kept: kept(*keepImages, *browserImage, *agentImage, *browserAgentImage)") {
+	if !strings.Contains(string(src), `Pins: kept(*keepImages), Kept: kept("", *browserImage, *agentImage, *browserAgentImage)`) {
 		t.Error("the System page doesn't keep heedle's pins and the worker's images")
+	}
+}
+
+// TestInv_NoPruneWithoutTheReleasesPins: the System page removes old
+// images only when it knows the images the release pins (heedle up gives
+// them): without them, the worker's own images aren't enough to keep, so
+// a prune is refused (409) before Podman is asked, and the page is told
+// nothing is kept (DRAW-507).
+func TestInv_NoPruneWithoutTheReleasesPins(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no podman: a prune that got as far as Podman would fail otherwise
+	worker := PodmanSystem{Kept: []string{"ghcr.io/heedle-ai/pirn-agent@sha256:mine"}}
+	// Review 50: heedle ui, with no pins, could prune the release's images.
+	if removed, err := worker.Prune(context.Background()); !errors.Is(err, ErrNoPins) || len(removed) != 0 {
+		t.Errorf("Prune with no pins: %v, %v", removed, err)
+	}
+	if k := worker.Keep(); len(k) != 0 {
+		t.Errorf("Keep with no pins: %q", k)
+	}
+	code, m := systemCall((&Server{System: worker}).Handler(), "POST", "/api/system/prune", `{}`, here)
+	if code != http.StatusConflict || !strings.Contains(fmt.Sprint(m["error"]), "pins") {
+		t.Errorf("prune with no pins: %d %v", code, m)
+	}
+	pinned := PodmanSystem{Pins: []string{"ghcr.io/heedle-ai/pirn-agent@sha256:release"}, Kept: worker.Kept}
+	if k := pinned.Keep(); strings.Join(k, ",") != "ghcr.io/heedle-ai/pirn-agent@sha256:release,ghcr.io/heedle-ai/pirn-agent@sha256:mine" {
+		t.Errorf("Keep with pins: %q", k)
+	}
+	if _, err := pinned.Prune(context.Background()); errors.Is(err, ErrNoPins) || err == nil {
+		t.Errorf("Prune with pins and no podman: %v", err)
 	}
 }

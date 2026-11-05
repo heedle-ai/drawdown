@@ -8,7 +8,8 @@
 // and Podman's machine with its notes; that Stop run, Remove old images
 // and Cancel run send exactly what they should, and only after asking;
 // that the page fits at 375 px in light and dark mode with no sideways
-// scroll; and that an answer it can't read says so. With a directory, it
+// scroll; that Stop run is offered only for a container the server says
+// is a running run's; and that an answer it can't read says so. With a directory, it
 // saves the screenshots there.
 const { chromium } = require("playwright");
 const fs = require("node:fs");
@@ -20,11 +21,14 @@ const HEX = (c) => c.repeat(64);
 const SYSTEM = {
   containers: [
     { id: HEX("a"), name: "bobbin-session-4f2a", image: "ghcr.io/heedle-ai/pirn-agent@sha256:" + HEX("1"), created: new Date(Date.now() - 260e3).toISOString(), state: "running",
-      cpu: "38.2%", memory: "212MB / 536.9MB", labels: { kind: "agent", workflow: "loom-7d1c/plan", run: "p-1", step: "n2" }, workflow: "loom-7d1c", run: "r-1", status: "running" },
+      cpu: "38.2%", memory: "212MB / 536.9MB", labels: { kind: "agent", workflow: "loom-7d1c/plan", run: "p-1", step: "n2" }, workflow: "loom-7d1c", run: "r-1", status: "running", stoppable: true },
     { id: HEX("b"), name: "reed-act-9c01", image: "ghcr.io/heedle-ai/reed-browser-agent@sha256:" + HEX("2"), created: new Date(Date.now() - 90e3).toISOString(), state: "running",
-      cpu: "11.0%", memory: "640MB / 1.074GB", labels: { kind: "act", workflow: "loom-7d1c/plan", run: "p-1", step: "n3" }, workflow: "loom-7d1c", run: "r-1", status: "running" },
+      cpu: "11.0%", memory: "640MB / 1.074GB", labels: { kind: "act", workflow: "loom-7d1c/plan", run: "p-1", step: "n3" }, workflow: "loom-7d1c", run: "r-1", status: "running", stoppable: true },
     { id: HEX("c"), name: "bobbin-session-77e0", image: "ghcr.io/heedle-ai/pirn-agent@sha256:" + HEX("1"), created: new Date(Date.now() - 3600e3).toISOString(), state: "running",
-      labels: { kind: "connector", workflow: "loom-50aa/plan", run: "p-2", step: "n0" }, workflow: "loom-50aa", run: "r-2", status: "canceled" },
+      labels: { kind: "connector", workflow: "loom-50aa/plan", run: "p-2", step: "n0" }, workflow: "loom-50aa", run: "r-2", status: "canceled", stoppable: false },
+    // A skill being created: running, but not a run, so not stoppable.
+    { id: HEX("d"), name: "bobbin-session-0b3c", image: "ghcr.io/heedle-ai/pirn-agent@sha256:" + HEX("1"), created: new Date(Date.now() - 30e3).toISOString(), state: "running",
+      labels: { kind: "agent", workflow: "skills-create-weather", run: "s-1" }, workflow: "skills-create-weather", run: "s-1", status: "running", stoppable: false },
   ],
   images: [
     { id: "1", names: ["ghcr.io/heedle-ai/pirn-agent@sha256:" + HEX("1")], size: 412e6, created: "2026-11-04T10:00:00Z", containers: 2, pinned: true },
@@ -74,15 +78,16 @@ async function main() {
         stops: [...document.querySelectorAll("main button")].filter((b) => b.textContent === "Stop run").length,
       }));
       assert.deepEqual(v.current, ["System"], `${where}: the System section is current`);
-      assert.deepEqual(v.links, ["#/run/loom-7d1c/r-1", "#/run/loom-7d1c/r-1", "#/run/loom-50aa/r-2"], `${where}: each container links to its run`);
+      assert.deepEqual(v.links, ["#/run/loom-7d1c/r-1", "#/run/loom-7d1c/r-1", "#/run/loom-50aa/r-2", "#/run/skills-create-weather/s-1"], `${where}: each container links to its run`);
       for (const want of ["agent", "act", "connector", "step n2", "38.2%", "212MB / 536.9MB", "canceled", "kept", "in use", "old", "3.0 GB in all; 1.3 GB is old.", "2 CPUs", "2 GiB memory", "100 GiB disk", "at least 4 GiB"]) {
         assert.ok(v.text.includes(want), `${where}: the page doesn't say "${want}"`);
       }
-      assert.equal(v.stops, 2, `${where}: Stop run is offered for the running run's containers only`);
+      assert.equal(v.stops, 2, `${where}: Stop run is offered for the running run's containers only, never a running skill's creation`);
       assert.equal(v.overflow, 0, `${where}: the page scrolls sideways by ${v.overflow}px`);
       if (shots) await page.screenshot({ path: path.join(shots, `system-${width}-${scheme}.png`), fullPage: true });
       if (width === 1280 && scheme === "light") {
-        // Stop run asks first, then sends only the run's workflow ID.
+        // Stop run asks first, then sends only the run's workflow ID and run
+        // ID.
         await page.getByRole("button", { name: "Stop run" }).first().click();
         assert.deepEqual(sent, [], "Stop run sent before it was confirmed");
         await page.getByRole("button", { name: "Keep it" }).click();
@@ -91,14 +96,14 @@ async function main() {
         await page.getByRole("status").filter({ hasText: "Stopped loom-7d1c" }).waitFor();
         await page.getByRole("button", { name: "Remove old images" }).click();
         await page.getByRole("status").filter({ hasText: "Removed 2 old image names" }).waitFor();
-        assert.deepEqual(sent, ['/api/system/stop {"workflow":"loom-7d1c"}', "/api/system/prune {}"], "what the page sent");
+        assert.deepEqual(sent, ['/api/system/stop {"workflow":"loom-7d1c","run":"r-1"}', "/api/system/prune {}"], "what the page sent");
       }
       assert.deepEqual(errors, [], `${where}: page errors`);
       checks++;
       await ctx.close();
     }
     // The Run page offers Cancel run while a run runs, and sends only its
-    // workflow ID, after asking.
+    // workflow ID and run ID, after asking.
     {
       const { ctx, page, errors } = await open(browser, cdn, { width: 375, scheme: "light", answers, hash: "#/run/loom-7d1c/r-1" });
       const sent = await posts(page);
@@ -106,7 +111,7 @@ async function main() {
       assert.deepEqual(sent, [], "Cancel run sent before it was confirmed");
       await page.locator("button.danger", { hasText: "Cancel run" }).click();
       await page.getByRole("status").filter({ hasText: "Cancelled." }).waitFor();
-      assert.deepEqual(sent, ['/api/system/stop {"workflow":"loom-7d1c"}']);
+      assert.deepEqual(sent, ['/api/system/stop {"workflow":"loom-7d1c","run":"r-1"}']);
       if (shots) await page.screenshot({ path: path.join(shots, "run-cancel-375-light.png") });
       assert.deepEqual(errors, []);
       checks++;

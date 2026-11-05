@@ -64,7 +64,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	agentImage := fs.String("agent-image", "", "content-pinned image ID agent steps run in (needs /bin/sh)")
 	connectorsFile := fs.String("connectors", "", "a JSON file of the MCP servers agent steps may be granted (tokens by name: an environment variable, or a keychain secret set with `heedle secret set NAME`)")
 	imageRegistry := fs.String("image-registry", "", "OCI repository (such as ghcr.io/acme/heedle-images) that (image … \"push\") pushes to, with the worker's podman login")
-	keepImages := fs.String("keep-images", "", "images the System page never removes, comma-separated (heedle up gives the ones its release pins); the worker's own images are kept too")
+	keepImages := fs.String("keep-images", "", "the images heedle's release pins, comma-separated (heedle up gives them): the System page never removes them or the worker's own, and removes none without them")
 	agentRegistry := fs.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -224,7 +224,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		Temporal:       drawdown.TemporalClient{Client: c, Queue: *queue},
 		TemporalUI:     *temporalUI,
 		Namespace:      *namespace,
-		System:         drawdown.PodmanSystem{Temporal: c, Kept: kept(*keepImages, *browserImage, *agentImage, *browserAgentImage), Mac: runtime.GOOS == "darwin"},
+		System:         drawdown.PodmanSystem{Temporal: c, Pins: kept(*keepImages), Kept: kept("", *browserImage, *agentImage, *browserAgentImage), Mac: runtime.GOOS == "darwin"},
 		Examples: map[string]string{
 			"shipment": shipment.Program,
 			"echo":     `(pipe (par (echo "a") (echo "b")) echo)`,

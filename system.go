@@ -22,13 +22,14 @@ type System interface {
 	Images(ctx context.Context) ([]bobbin.Image, error)
 	// Machine is Podman's virtual machine, on macOS; nil elsewhere.
 	Machine(ctx context.Context) (*bobbin.Machine, error)
-	// Cancel stops a run through Temporal (loom.Cancel), returning its
-	// run ID.
-	Cancel(ctx context.Context, workflowID string) (string, error)
+	// Cancel stops a run through Temporal (loom.Cancel): exactly the run
+	// runID of workflowID, never a later one, returning its run ID.
+	Cancel(ctx context.Context, workflowID, runID string) (string, error)
 	// Prune removes heedle's images that aren't kept and that no
 	// container uses, returning the names removed.
 	Prune(ctx context.Context) ([]string, error)
-	// Keep is the images Prune never removes.
+	// Keep is the images Prune never removes; empty when Prune would
+	// refuse, not knowing the release's.
 	Keep() []string
 }
 
@@ -36,9 +37,11 @@ type System interface {
 // Temporal, through loom.
 type PodmanSystem struct {
 	Temporal client.Client
-	// Kept are the images never removed: the worker's and the release's
-	// (heedle up passes its pins).
-	Kept []string
+	// Pins are the release's images (heedle up passes them, -keep-images),
+	// and Kept the worker's own: neither is ever removed. Without Pins,
+	// nothing is: the worker's images alone don't say which of heedle's
+	// images the release still needs (DRAW-507).
+	Pins, Kept []string
 	// Mac is whether Podman runs in a virtual machine (macOS).
 	Mac bool
 }
@@ -48,8 +51,11 @@ func (p PodmanSystem) Containers(ctx context.Context) ([]loom.Container, error) 
 }
 
 func (p PodmanSystem) Images(ctx context.Context) ([]bobbin.Image, error) {
-	return bobbin.Runner{}.Images(ctx, bobbin.HeedleRepo, p.Kept)
+	return bobbin.Runner{}.Images(ctx, bobbin.HeedleRepo, p.keep())
 }
+
+// keep is every image never removed: the release's and the worker's.
+func (p PodmanSystem) keep() []string { return append(append([]string{}, p.Pins...), p.Kept...) }
 
 func (p PodmanSystem) Machine(ctx context.Context) (*bobbin.Machine, error) {
 	if !p.Mac {
@@ -58,15 +64,27 @@ func (p PodmanSystem) Machine(ctx context.Context) (*bobbin.Machine, error) {
 	return bobbin.Runner{}.Machine(ctx)
 }
 
-func (p PodmanSystem) Cancel(ctx context.Context, workflowID string) (string, error) {
-	return loom.Cancel(ctx, p.Temporal, workflowID, "")
+func (p PodmanSystem) Cancel(ctx context.Context, workflowID, runID string) (string, error) {
+	return loom.Cancel(ctx, p.Temporal, workflowID, runID)
 }
+
+// ErrNoPins is a prune refused because the server doesn't know the
+// release's images.
+var ErrNoPins = errors.New("old images can be removed only when the worker knows which images its release pins (heedle up tells it, with -keep-images)")
 
 func (p PodmanSystem) Prune(ctx context.Context) ([]string, error) {
-	return bobbin.Runner{}.PruneImages(ctx, bobbin.HeedleRepo, p.Kept)
+	if len(p.Pins) == 0 {
+		return nil, ErrNoPins
+	}
+	return bobbin.Runner{}.PruneImages(ctx, bobbin.HeedleRepo, p.keep())
 }
 
-func (p PodmanSystem) Keep() []string { return p.Kept }
+func (p PodmanSystem) Keep() []string {
+	if len(p.Pins) == 0 {
+		return nil
+	}
+	return p.keep()
+}
 
 // What browser agents need of Podman's machine: reed gives each browser 1
 // GB, an agent's workspace takes 512 MB, and Podman and the machine need
@@ -148,9 +166,12 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, v)
 }
 
-// stopRequest names the run to stop: its workflow ID.
+// stopRequest names the run to stop: its workflow ID and run ID. The run
+// ID is needed, so a page showing an old run never stops a newer run of
+// the same workflow ID (DRAW-506).
 type stopRequest struct {
 	Workflow string `json:"workflow"`
+	Run      string `json:"run"`
 }
 
 // systemStop stops a run through Temporal (loom.Cancel): never anything
@@ -163,13 +184,16 @@ func (s *Server) systemStop(w http.ResponseWriter, r *http.Request) {
 	if !readJSONUpTo(w, r, &req, 4<<10) {
 		return
 	}
-	if req.Workflow == "" || len(req.Workflow) > 1000 || strings.IndexFunc(req.Workflow, func(c rune) bool { return !unicode.IsPrint(c) || c == ' ' }) >= 0 {
-		writeJSON(w, http.StatusBadRequest, apiError{Error: "name the run to stop by its workflow ID"})
+	bad := func(id string) bool {
+		return id == "" || len(id) > 1000 || strings.IndexFunc(id, func(c rune) bool { return !unicode.IsPrint(c) || c == ' ' }) >= 0
+	}
+	if bad(req.Workflow) || bad(req.Run) {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "name the run to stop by its workflow ID and run ID"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
 	defer cancel()
-	run, err := s.System.Cancel(ctx, req.Workflow)
+	run, err := s.System.Cancel(ctx, req.Workflow, req.Run)
 	switch {
 	case errors.Is(err, loom.ErrNotARun):
 		writeJSON(w, http.StatusBadRequest, apiError{Error: err.Error()})
@@ -195,6 +219,10 @@ func (s *Server) systemPrune(w http.ResponseWriter, r *http.Request) {
 	removed, err := s.System.Prune(r.Context())
 	if removed == nil {
 		removed = []string{}
+	}
+	if errors.Is(err, ErrNoPins) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "removed": removed})
+		return
 	}
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "removed": removed})
