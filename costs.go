@@ -114,6 +114,10 @@ func (s *Server) costs(w http.ResponseWriter, r *http.Request) {
 	type month struct {
 		Month   string  `json:"month"` // YYYY-MM
 		ByModel []model `json:"byModel"`
+		// Replayed counts the act steps that replayed an earlier run's
+		// script whole, asking Claude nothing (roadmap 9.9); they aren't
+		// in ByModel.
+		Replayed int `json:"replayed"`
 		spent
 	}
 	type runCost struct {
@@ -147,6 +151,10 @@ func (s *Server) costs(w http.ResponseWriter, r *http.Request) {
 		usages[i] = usages[i].Add(run.Usage)
 		counts[i]++
 		for _, st := range run.Usage.Steps {
+			if st.Replayed == "all" {
+				months[i].Replayed++ // no Claude: not a model's (review 51)
+				continue
+			}
 			m := st.Model
 			if st.Missing != "" {
 				m = ""
