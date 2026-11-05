@@ -1116,6 +1116,7 @@ function SchedulesPage() {
   if (!data) return html`<p class="muted">Loading…</p>`;
   if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
   const ss = DD.asSchedules(data.data);
+  const spend = DD.asSpend(data.data);
   const act = async (name, action) => {
     setErr(""); setSure(""); setNote("");
     const r = await api(`/api/schedules/${encodeURIComponent(name)}/${action}`, {});
@@ -1147,6 +1148,7 @@ function SchedulesPage() {
         </div>
         ${s.paused && s.note && html`<p class="muted">${s.note}</p>`}
         <${Program} text=${s.program} max=${400} />
+        <${ScheduleCost} key=${s.name + JSON.stringify(s.budget || null)} name=${s.name} budget=${s.budget} spend=${spend[s.name]} onDone=${() => setTick((t) => t + 1)} />
         ${(s.recent || []).length > 0 && html`<p class="muted">Recent runs: ${s.recent.slice(-8).reverse().map((r, i) => html`${i ? ", " : ""}<a key=${r.runId} href=${"#/run/" + encodeURIComponent(r.workflowId) + "/" + encodeURIComponent(r.runId)}>${when(r.at)}</a>`)}</p>`}
       </div>`)}`;
 }
@@ -1837,6 +1839,7 @@ function ProposalCard({ p, history, latest }) {
           <button onClick=${edit}>Edit the program</button>
           ${!canRun && html`<span class="muted">Connect what's missing first.</span>`}
         </div>`}`}
+      ${latest && html`<${ProposalCost} usage=${p.usage} />`}
       ${note && note.ok && html`<p role="status">${note.ok}</p>`}
       ${note && note.error && html`<p class="error" role="alert">${note.error}</p>`}
     </div>`;
@@ -2165,7 +2168,7 @@ function RunDetail({ workflow, run, history: ref }) {
       // Keep polling only while the run is in progress, or finished but
       // not yet recorded. Failed, canceled and timed-out runs have no record.
       const st = r.ok && r.data.execution && r.data.execution.status;
-      if (st === "Running" || (st === "Completed" && !r.data.record)) timer = setTimeout(load, 1000);
+      if (st === "Running" || (st === "Completed" && !r.data.record && !r.data.execution.skipped)) timer = setTimeout(load, 1000);
       else if (!fetchSteps) { tick = 0; timer = setTimeout(load, 0); } // the final steps, once
     };
     load();
@@ -2202,6 +2205,7 @@ function RunDetail({ workflow, run, history: ref }) {
       </div>
     </div>
     ${rec && html`<${Provenance} rec=${rec} workflow=${workflow} run=${run} history=${(ex && ex.ref) || ref} temporalLink=${temporalLink} />`}
+    ${rec && html`<${RunCost} usage=${data.data.usage} workflow=${workflow} run=${run} />`}
     ${data.data.temporalError && html`<p class="error">Temporal: ${data.data.temporalError}</p>`}
     ${status === "Running" && html`<${LiveView} workflow=${workflow} />`}
     <${Writes} workflow=${workflow} recorded=${rec && rec.writes} running=${status === "Running"} />
@@ -2220,6 +2224,7 @@ function RunDetail({ workflow, run, history: ref }) {
         <${ConnectPrompt} failure=${s.failure} />
       </div>`)}`}
     ${!rec && html`<p class="muted">${status === "Running" ? "Running… the record appears when the run finishes."
+      : ex && ex.skipped ? `Not run: ${ex.skipped}. Its schedule's monthly budget stopped it before any step, so there's no record.`
       : status === "Completed" ? "Recording…" : "No record: only completed runs are recorded."}</p>`}
     ${rec && html`
       <h2>Composition</h2>
@@ -2522,6 +2527,125 @@ function Home({ info, refs, heads, current }) {
     <${Runs} data=${shown} day=${day} />`;
 }
 
+// === Costs (roadmap 10.4) ==================================================
+// What runs used of Claude, as their records say, and estimates in dollars
+// from a price table of a date. Tokens are always shown; a dollar figure
+// only where every step it covers had a price (DD.estimate). heedle isn't
+// connected to your Anthropic account and never shows a bill.
+
+const zone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } };
+const priceNote = (asOf, source, yours) => html`Dollars are estimates (est.) with prices as of ${asOf} (<a href=${source} target="_blank" rel="noopener">Anthropic's pricing<span class="sr"> (opens in a new tab)</span></a>)${(yours || []).length > 0 && html`, and your prices for <span class="mono">${yours.join(", ")}</span>`}. heedle doesn't see your bill.`;
+
+// RunCost is a recorded run's Claude usage: tokens per step and its
+// estimated total.
+function RunCost({ usage, workflow, run }) {
+  const u = DD.asRunUsage(usage);
+  if (!u || u.steps.length === 0) return null;
+  const c = u.cost;
+  const total = DD.estimate({ usd: c.complete ? c.usd : null, priced: c.usd, unpriced: c.unpriced });
+  return html`
+    <h2>Claude usage</h2>
+    <p class="lede">Each step's tokens, as Claude counted them, from the record. ${priceNote(c.asOf, c.source, c.yours)}</p>
+    <div class="panel costs">
+      <table class="list costs">
+        <thead><tr><th>Step</th><th>Model</th><th class="num">Input</th><th class="num">Output</th><th class="num">Requests</th></tr></thead>
+        <tbody>${u.steps.map((s) => html`<tr key=${s.node}>
+          <td><a class="mono" href=${"#/step/" + [workflow, run, s.node].map(encodeURIComponent).join("/")}>${s.node}</a> <span class="muted">${s.kind}</span></td>
+          ${s.missing ? html`<td colspan="4" class="muted">no counts: ${s.missing}</td>` : html`
+            <td class="mono">${s.model}</td><td class="num">${DD.count(s.tokens.input)}</td><td class="num">${DD.count(s.tokens.output)}</td><td class="num">${s.requests || "–"}</td>`}
+        </tr>`)}</tbody>
+        <tfoot><tr><th>Total</th><td></td><td class="num">${DD.count(u.total.input)}</td><td class="num">${DD.count(u.total.output)}</td><td></td></tr></tfoot>
+      </table>
+      <p class="cost-total"><strong>${total}</strong></p>
+      ${c.unpriced.length > 0 && html`<p class="muted">No estimate for ${c.unpriced.map((x, i) => html`${i ? "; " : ""}<span class="mono">${x.node}</span> (${x.why})`)}.</p>`}
+      ${u.pricesError && html`<p class="error">${u.pricesError}</p>`}
+    </div>`;
+}
+
+// ScheduleCost is a schedule's month to date and last 30 days, and its
+// monthly budget, which can be changed here.
+function ScheduleCost({ name, budget, spend, onDone }) {
+  const b = DD.asBudget(budget);
+  const [usd, setUSD] = useState(b ? b.usd.toFixed(2) : "");
+  const [resume, setResume] = useState(!!(b && b.resumeNextMonth));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const save = async (value) => {
+    setBusy(true); setErr("");
+    const v = Number(value);
+    if (!(value === "" || (Number.isFinite(v) && v >= 0))) { setBusy(false); setErr("A budget is dollars, such as 5 or 0.50."); return; }
+    const r = await api(`/api/schedules/${encodeURIComponent(name)}/budget`, { usd: value === "" ? 0 : v, resumeNextMonth: value !== "" && v > 0 && resume });
+    setBusy(false);
+    if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
+    onDone();
+  };
+  const id = "budget-" + name;
+  return html`
+    <div class="schedule-cost">
+      ${spend && html`<p class="muted">This month: <strong>${DD.estimate(spend.month)}</strong>, ${spend.month.runs} run${spend.month.runs === 1 ? "" : "s"}${b && html`; budget $${b.usd.toFixed(2)} a month`} · last 30 days: ${DD.estimate(spend.last30)}</p>`}
+      <form class="row" onSubmit=${(e) => { e.preventDefault(); save(usd.trim()); }}>
+        <label for=${id}>Monthly budget, $</label>
+        <input id=${id} class="budget" type="text" inputmode="decimal" placeholder="none" value=${usd} onInput=${(e) => setUSD(e.target.value)} />
+        <label class="check"><input type="checkbox" checked=${resume} onChange=${(e) => setResume(e.target.checked)} /> resume in a new month</label>
+        <button type="submit" disabled=${busy}>${busy ? "Saving…" : "Save"}</button>
+        ${b && html`<button type="button" class="link-btn" disabled=${busy} onClick=${() => { setUSD(""); save(""); }}>Remove</button>`}
+      </form>
+      ${err && html`<p class="error" role="alert">${err}</p>`}
+    </div>`;
+}
+
+// ProposalCost says what proposing used of Claude.
+function ProposalCost({ usage }) {
+  const by = {};
+  for (const s of usage || []) if (!s.missing) by[s.model] = { input: (by[s.model] || { input: 0 }).input + s.tokens.input, output: (by[s.model] || { output: 0 }).output + s.tokens.output };
+  const models = Object.keys(by).sort();
+  if (models.length === 0) return null;
+  return html`<p class="muted proposal-cost">Proposing this used ${models.map((m, i) => html`${i ? "; " : ""}${DD.count(by[m].input)} input and ${DD.count(by[m].output)} output tokens of <span class="mono">${m}</span>`)}.</p>`;
+}
+
+const monthName = (m) => new Date(m + "-01T12:00:00Z").toLocaleString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+
+function CostsPage() {
+  const [data, setData] = useState(null);
+  useEffect(() => { const z = zone(); api("/api/costs" + (z ? "?tz=" + encodeURIComponent(z) : "")).then(setData); }, []);
+  if (!data) return html`<p class="muted">Loading…</p>`;
+  if (!data.ok) return html`<p class="error">${data.data.error}</p>`;
+  const v = DD.asCosts(data.data);
+  if (!v) return html`<p class="error">The costs weren't understood.</p>`;
+  const [now, ...before] = v.months;
+  return html`
+    <h2>Costs</h2>
+    <p class="lede">What runs used of Claude, as their records say, by month in ${v.zone}. ${priceNote(v.asOf, v.source, v.yours)} A model with no price shows its tokens only. Front-door proposals aren't recorded, so they aren't here: each card says what it used.</p>
+    ${v.pricesError && html`<p class="error">${v.pricesError}</p>`}
+    <div class="panel costs">
+      <h3 style=${{ marginTop: 0 }}>${monthName(now.month)}: ${DD.estimate(now)}</h3>
+      ${now.byModel.length === 0 ? html`<p class="muted">No run asked Claude this month.</p>` : html`
+      <table class="list costs">
+        <thead><tr><th>Model</th><th class="num">Runs</th><th class="num">Input</th><th class="num">Output</th><th class="num">Estimate</th></tr></thead>
+        <tbody>${now.byModel.map((m) => html`<tr key=${m.model}>
+          <td class="mono">${m.model || html`<span class="muted">no counts recorded</span>`}</td><td class="num">${m.runs}</td>
+          <td class="num">${DD.count(m.tokens.input)}</td><td class="num">${DD.count(m.tokens.output)}</td><td class="num">${m.model ? DD.estimate(m) : "–"}</td></tr>`)}</tbody>
+      </table>`}
+    </div>
+    <h3>The six months before</h3>
+    <div class="panel costs">
+      <table class="list costs">
+        <thead><tr><th>Month</th><th class="num">Runs</th><th class="num">Input</th><th class="num">Output</th><th class="num">Estimate</th></tr></thead>
+        <tbody>${before.map((m) => html`<tr key=${m.month}><td>${monthName(m.month)}</td><td class="num">${m.runs}</td>
+          <td class="num">${DD.count(m.tokens.input)}</td><td class="num">${DD.count(m.tokens.output)}</td><td class="num">${m.runs ? DD.estimate(m) : "–"}</td></tr>`)}</tbody>
+      </table>
+    </div>
+    <h3>Costliest this month</h3>
+    <div class="panel costs">
+      ${v.schedules.length > 0 && html`<p class="muted">Schedules</p>
+        <ul class="cost-list">${v.schedules.map((s) => html`<li key=${s.name}><a class="mono" href="#/schedules">${s.name}</a> <span>${DD.estimate(s)}</span> <span class="muted">${s.runs} run${s.runs === 1 ? "" : "s"}, ${DD.count(s.tokens.input + s.tokens.output)} tokens</span></li>`)}</ul>`}
+      <p class="muted">Runs</p>
+      ${v.runs.length === 0 ? html`<p class="muted">None yet.</p>` : html`<ul class="cost-list">${v.runs.map((r) => html`<li key=${r.runId}>
+        <a href=${"#/run/" + encodeURIComponent(r.workflowId) + "/" + encodeURIComponent(r.runId)}>${when(r.at)}</a>
+        ${r.schedule && html`<span class="mono">${r.schedule}</span>`} <span>${DD.estimate(r)}</span> <span class="muted">${DD.count(r.tokens.input + r.tokens.output)} tokens</span></li>`)}</ul>`}
+    </div>`;
+}
+
 // === Top bar ===============================================================
 // The sections, the current one marked, each with a count of what there
 // needs you; then Temporal's Web UI, set apart as a tool outside drawdown.
@@ -2529,7 +2653,8 @@ function Home({ info, refs, heads, current }) {
 const SECTION_LINKS = [
   { section: "runs", href: "#/", label: "Runs", dye: "source" },
   { section: "skills", href: "#/skills", label: "Skills", dye: "skill", need: (n) => `${n} waiting for review` },
-  { section: "schedules", href: "#/schedules", label: "Schedules", dye: "record", need: (n) => `${n} paused after a failed or timed-out run` },
+  { section: "schedules", href: "#/schedules", label: "Schedules", dye: "record", need: (n) => `${n} paused after a failed or timed-out run, or by a budget` },
+  { section: "costs", href: "#/costs", label: "Costs", dye: "ask" },
   { section: "connectors", href: "#/connectors", label: "Connectors", dye: "agent", need: (n) => `${n} key${n === 1 ? "" : "s"} to set` },
 ];
 
@@ -2640,6 +2765,7 @@ function App() {
     case "skills": body = html`<${SkillsPage} />`; break;
     case "connectors": body = html`<${ConnectorsPage} />`; break;
     case "schedules": body = html`<${SchedulesPage} />`; break;
+    case "costs": body = html`<${CostsPage} />`; break;
     case "review": body = html`<${ReviewPage} key=${route[1]} name=${route[1]} />`; break;
     case "skill": body = html`<${SkillPage} key=${route.join("/")} name=${route[1]} version=${route[2]} />`; break;
     default: body = html`<${Home} info=${info} refs=${refs} heads=${heads} current=${current} />`;

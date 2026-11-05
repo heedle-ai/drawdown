@@ -89,3 +89,18 @@ func TestInv_RunServesUntilItsContextEnds(t *testing.T) {
 		t.Errorf("-h: %v\n%s", err, help.String())
 	}
 }
+
+// TestInv_PricesAreBesideTheConnectors: without -prices, your prices file
+// is prices.json beside the connectors file, as heedle up keeps both in
+// its home; with neither, the built-in prices. (Roadmap 10.4.)
+func TestInv_PricesAreBesideTheConnectors(t *testing.T) {
+	for _, c := range [][3]string{
+		{"", "/home/me/.heedle/connectors.json", "/home/me/.heedle/prices.json"},
+		{"/etc/p.json", "/home/me/.heedle/connectors.json", "/etc/p.json"},
+		{"", "", ""},
+	} {
+		if got := pricesPath(c[0], c[1]); got != c[2] {
+			t.Errorf("pricesPath(%q, %q) = %q, want %q", c[0], c[1], got, c[2])
+		}
+	}
+}
