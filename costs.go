@@ -209,39 +209,67 @@ func monthsBetween(t, start time.Time) int {
 }
 
 // scheduleSpend is each schedule's month to date, in its own time zone
-// (as its budget counts it), and the last 30 days.
+// (as its budget counts it), and the last 30 days. Each ref is read
+// once, however many schedules record on it (review 48: once per
+// schedule, on every top-bar refresh).
 func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time.Time) (map[string]map[string]spent, string, error) {
 	prices, perr := loom.ReadPrices(s.PricesFile)
-	out := map[string]map[string]spent{}
+	type window struct{ month, last30 time.Time }
+	windows := map[string]window{}
+	byRef := map[string][]string{}
+	from := map[string]time.Time{}
 	for _, sc := range ss {
 		loc, ok := costLocation(sc.Spec.TimeZone)
 		if !ok {
 			loc = time.UTC
 		}
 		start, _ := loom.MonthOf(now, loc)
-		from := now.AddDate(0, 0, -30)
-		if start.Before(from) {
-			from = start
-		}
+		w := window{start, now.AddDate(0, 0, -30)}
+		windows[sc.Name] = w
 		ref := sc.Ref
 		if ref == "" {
 			ref = s.Ref
 		}
-		runs, err := loom.RunsBetween(ctx, s.Store, ref, from, now.Add(time.Minute), sc.Name)
+		byRef[ref] = append(byRef[ref], sc.Name)
+		earliest := w.month
+		if w.last30.Before(earliest) {
+			earliest = w.last30
+		}
+		if f, ok := from[ref]; !ok || earliest.Before(f) {
+			from[ref] = earliest
+		}
+	}
+	type acc struct {
+		month, last30   loom.Usage
+		nMonth, nLast30 int
+	}
+	sums := map[string]*acc{}
+	for ref, names := range byRef {
+		runs, err := loom.RunsBetween(ctx, s.Store, ref, from[ref], now.Add(time.Minute), "")
 		if err != nil {
 			return nil, "", err
 		}
-		var month, last30 loom.Usage
-		var nMonth, n30 int
+		mine := map[string]bool{}
+		for _, n := range names {
+			mine[n] = true
+			sums[n] = &acc{}
+		}
 		for _, run := range runs {
-			if !run.At.Before(start) {
-				month, nMonth = month.Add(run.Usage), nMonth+1
+			if !mine[run.Schedule] {
+				continue
 			}
-			if !run.At.Before(now.AddDate(0, 0, -30)) {
-				last30, n30 = last30.Add(run.Usage), n30+1
+			a, w := sums[run.Schedule], windows[run.Schedule]
+			if !run.At.Before(w.month) {
+				a.month, a.nMonth = a.month.Add(run.Usage), a.nMonth+1
+			}
+			if !run.At.Before(w.last30) {
+				a.last30, a.nLast30 = a.last30.Add(run.Usage), a.nLast30+1
 			}
 		}
-		out[sc.Name] = map[string]spent{"month": spentOf(nMonth, month, prices), "last30": spentOf(n30, last30, prices)}
+	}
+	out := map[string]map[string]spent{}
+	for name, a := range sums {
+		out[name] = map[string]spent{"month": spentOf(a.nMonth, a.month, prices), "last30": spentOf(a.nLast30, a.last30, prices)}
 	}
 	if perr != nil {
 		return out, perr.Error(), nil
