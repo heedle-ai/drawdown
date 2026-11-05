@@ -97,8 +97,13 @@ func TestInv_MemoryPageShowsAndChangesIt(t *testing.T) {
 	remote := &drawdown.Server{Store: w.store, Hosts: []string{"heedle.example"}, MemoryFile: w.memory}
 	rs := httptest.NewServer(remote.Handler())
 	defer rs.Close()
-	if code, _, _ := (&world{t: t, srv: rs}).call("POST", "/api/memory/add", map[string]string{"text": "x"}); code != 403 {
+	rw := &world{t: t, srv: rs}
+	if code, _, _ := rw.call("POST", "/api/memory/add", map[string]string{"text": "x"}); code != 403 {
 		t.Errorf("from elsewhere: %d", code)
+	}
+	// Review 47: reading it too.
+	if code, _, body := rw.call("GET", "/api/memory", nil); code != 403 || strings.Contains(body, "IAD") {
+		t.Errorf("read from elsewhere: %d %s", code, body)
 	}
 	none := httptest.NewServer((&drawdown.Server{Store: w.store}).Handler())
 	defer none.Close()
@@ -108,6 +113,40 @@ func TestInv_MemoryPageShowsAndChangesIt(t *testing.T) {
 	}
 	if code, _, _ := nw.call("POST", "/api/memory/add", map[string]string{"text": "x"}); code != 501 {
 		t.Errorf("no memory file, add: %d", code)
+	}
+}
+
+// TestInv_MemoryProblemsCanBeSeenAndForgotten: a memory edited by hand
+// into one heedle won't send is listed, with why, and can be forgotten;
+// a file heedle can't read at all is said, with nothing listed, and Forget
+// everything empties it without a version. (Review 47: either one locked
+// the page and the front door.)
+func TestInv_MemoryProblemsCanBeSeenAndForgotten(t *testing.T) {
+	w := newWorld(t)
+	_, got, _ := w.call("POST", "/api/memory/add", map[string]string{"text": "Window seat."})
+	id := got["memory"].(map[string]any)["id"].(string)
+	b, _ := os.ReadFile(w.memory)
+	os.WriteFile(w.memory, []byte(strings.Replace(string(b), "Window seat.", "pw: hunter2", 1)), 0o600)
+	code, got, body := w.call("GET", "/api/memory", nil)
+	if probs, _ := got["problems"].(map[string]any); code != 200 || !strings.Contains(probs[id].(string), "password") {
+		t.Fatalf("a hand-edited secret: %d %s", code, body)
+	}
+	if code, _, body := w.call("POST", "/api/memory/forget", map[string]string{"id": id, "version": got["version"].(string)}); code != 200 || strings.Contains(body, "hunter2") {
+		t.Errorf("forgetting it: %d %s", code, body)
+	}
+	os.WriteFile(w.memory, []byte("{ not json"), 0o600)
+	if code, got, _ := w.call("GET", "/api/memory", nil); code != 409 || got["unreadable"] != true {
+		t.Errorf("an unreadable file: %d %v", code, got)
+	}
+	if code, _, body := w.call("POST", "/api/memory/forget-all", map[string]string{}); code != 200 {
+		t.Errorf("emptying it: %d %s", code, body)
+	}
+	if b, _ := os.ReadFile(w.memory); strings.TrimSpace(string(b)) != "[]" {
+		t.Errorf("after emptying: %s", b)
+	}
+	// With a readable file, forget-all still needs the version.
+	if code, _, _ := w.call("POST", "/api/memory/forget-all", map[string]string{}); code != 400 {
+		t.Errorf("forget-all without a version: %d", code)
 	}
 }
 
@@ -145,10 +184,18 @@ func TestInv_RememberedOnlyWhenYouSaySo(t *testing.T) {
 	}
 	_, mem, _ := w.call("GET", "/api/memory", nil)
 	w.call("POST", "/api/memory/forget", map[string]string{"id": ms[0].ID, "version": mem["version"].(string)})
-	_, got, _ = w.call("POST", "/api/ask", map[string]any{"request": "Plan three days in Lisbon"})
+	// The page sends the turn made with it, as it keeps them; what that
+	// turn proposed stays out (review 47).
+	_, got, _ = w.call("POST", "/api/ask", map[string]any{"request": "make it four days", "earlier": []map[string]any{
+		{"request": "Plan three days in Lisbon", "summary": "Lisbon, and no fish either, as you said.", "program": "(echo \"lisbon\")", "memory": []string{ms[0].ID}}}})
 	last = asker.asked[len(asker.asked)-1]
 	if got["memory"] != nil || last.Sources[len(last.Sources)-1].ID == "memory" {
 		t.Errorf("after Forget, the request still used memory: %v %+v", got, last.Sources)
+	}
+	for _, s := range last.Sources {
+		if strings.Contains(s.Text, "fish") {
+			t.Errorf("after Forget, source %s still says: %s", s.ID, s.Text)
+		}
 	}
 	// The suggestion's words were in what was asked, so they're in the
 	// requests; the memory itself is in the memory file alone.

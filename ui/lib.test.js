@@ -549,7 +549,7 @@ test("the front door reads proposals and says what's missing (roadmap 8.3)", () 
     { summary: "s", program: "(x)", plan, ready: { needs: [{ connector: "<b>" }], ready: true } },
   ]) assert.equal(DD.asProposal(bad), null, JSON.stringify(bad));
   const conv = [{ request: "a", proposal: { summary: "A", program: "(a)" } }, { request: "oops", error: "x" }, { request: "b", proposal: { summary: "B", skill: "s" } }];
-  assert.deepEqual(DD.earlierTurns(conv), [{ request: "a", summary: "A", program: "(a)" }, { request: "b", summary: "B", program: "" }]);
+  assert.deepEqual(DD.earlierTurns(conv), [{ request: "a", summary: "A", program: "(a)", memory: [] }, { request: "b", summary: "B", program: "", memory: [] }]);
   assert.equal(DD.earlierTurns(Array.from({ length: 12 }, (_, i) => ({ request: String(i), proposal: { summary: "s" } }))).length, 10);
   assert.equal(DD.localDay(new Date(2026, 10, 4, 23, 30)), "2026-11-04");
   assert.equal(DD.asReadiness({ needs: [], ready: true }).ready, true);
@@ -803,7 +803,23 @@ test("memory: the page's answer, the card's suggestions and its used line (roadm
   const m = { id: "m0123456789ab", text: "<b>Vegetarian</b>.", added: "2026-11-05T09:00:00Z" };
   const v = DD.asMemory({ memories: [m, { ...m, id: "m0123456789ac", used: "2026-11-05T10:00:00Z" }], version: "abc", file: "/home/me/.heedle/memory.json" });
   assert.deepEqual(v.memories.map((x) => [x.id, x.text, x.used]), [["m0123456789ab", "<b>Vegetarian</b>.", ""], ["m0123456789ac", "<b>Vegetarian</b>.", "2026-11-05T10:00:00Z"]]);
-  assert.deepEqual(DD.asMemory({ memories: [], version: "", file: "" }), { memories: [], version: "", file: "" });
+  assert.deepEqual(DD.asMemory({ memories: [], version: "", file: "" }), { memories: [], version: "", file: "", problem: "" });
+  // Review 47: a memory edited by hand into one heedle won't send says why.
+  const hand = DD.asMemory({ memories: [m], version: "v", file: "f", problems: { m0123456789ab: "that looks like a password", "": "too many" } });
+  assert.deepEqual([hand.memories[0].problem, hand.problem], ["that looks like a password", "too many"]);
+  assert.equal(DD.asMemory({ memories: [m], version: "v", file: "f", problems: ["x"] }), null);
+  // Turns carry the memories they were made with, and forgetting one drops
+  // the turns made with it from the tab's conversation.
+  const plan0 = { nodes: [] };
+  const turns = JSON.stringify([{ request: "a", proposal: { summary: "A, no peanuts.", program: "(echo)", plan: plan0, memory: ["m0123456789ab"] } },
+    { request: "b", proposal: { summary: "B.", program: "(echo)", plan: plan0, memory: ["m0123456789ac"] } }, { request: "c", error: "no" }]);
+  assert.deepEqual(DD.forgetInConversation(turns, ["m0123456789ab"]).map((t) => t.request), ["b", "c"]);
+  assert.deepEqual(DD.earlierTurns(DD.restoreConversation(turns))[0].memory, ["m0123456789ab"]);
+  assert.deepEqual(DD.notNow(null), []);
+  assert.deepEqual(DD.notNow("not json"), []);
+  assert.deepEqual(DD.notNow('[1, "a", null]'), ["a"]);
+  assert.deepEqual(DD.notNow('["a", "b"]', "a"), ["b", "a"]);
+  assert.equal(DD.notNow(JSON.stringify(Array.from({ length: 60 }, (_, i) => String(i))), "x").length, 50);
   for (const bad of [null, {}, { memories: [m] }, { memories: "x", version: "", file: "" }, { memories: [{ ...m, id: "1" }], version: "", file: "" },
     { memories: [{ ...m, text: 3 }], version: "", file: "" }, { memories: [{ ...m, added: "soon" }], version: "", file: "" }, { memories: [{ ...m, used: "never" }], version: "", file: "" }])
     assert.equal(DD.asMemory(bad), null, JSON.stringify(bad));
