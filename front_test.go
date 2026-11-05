@@ -158,4 +158,23 @@ func TestInv_ActRunsOnlyWhereShown(t *testing.T) {
 	if code, _, body := w.call("POST", "/api/runs", map[string]any{"program": free, "actHosts": both, "actSendsFreely": both}); code != 202 || len(tc.got) != 1 {
 		t.Errorf("sending freely, shown: %d %s", code, body)
 	}
+	// Roadmap 9.8: the details a step may use run only where they were
+	// shown too.
+	uses := `(act "Join as me" "https://forms.example.org/" :uses "email name")`
+	_, got, _ = w.call("POST", "/api/compile", map[string]any{"program": uses})
+	if u, _ := got["actUses"].([]any); len(u) != 2 || u[0] != "name" {
+		t.Errorf("compile, uses: %v", got)
+	}
+	tc.got = nil
+	for _, shown := range [][]string{nil, {"name"}, {"email", "name"}} {
+		if code, got, body := w.call("POST", "/api/runs", map[string]any{"program": uses, "actHosts": []string{"forms.example.org"}, "actUses": shown}); code != 422 || got["actUses"] == nil || !strings.Contains(body, "may use your name, email") {
+			t.Errorf("uses, shown %v: %d %s", shown, code, body)
+		}
+	}
+	if len(tc.got) != 0 {
+		t.Fatalf("a run using details started unannounced: %v", tc.got)
+	}
+	if code, _, body := w.call("POST", "/api/runs", map[string]any{"program": uses, "actHosts": []string{"forms.example.org"}, "actUses": []string{"name", "email"}}); code != 202 || len(tc.got) != 1 {
+		t.Errorf("uses, shown: %d %s", code, body)
+	}
 }
