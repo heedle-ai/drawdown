@@ -164,6 +164,10 @@ type Server struct {
 	Browsers bool // has a browser image for browse steps
 	// BrowserAgents: has a browser-agent image for act steps (roadmap 9.5).
 	BrowserAgents bool
+	// MemoryFile, if set, is what heedle remembers about you (loom's
+	// ReadMemory), which the worker sends to Claude with each request to
+	// the front door: the memory page shows and changes it (roadmap 10.1).
+	MemoryFile string
 	// MCPRegistry is the MCP Registry the page adds connectors from
 	// (DefaultMCPRegistry if empty); RegistryClient, if set, reaches it.
 	MCPRegistry    string
@@ -221,6 +225,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/schedules", s.createSchedule)
 	mux.HandleFunc("POST /api/schedules/{name}/{action}", s.scheduleAction)
 	mux.HandleFunc("GET /api/connectors", s.connectors)
+	mux.HandleFunc("GET /api/memory", s.memory)
+	mux.HandleFunc("POST /api/memory/{op}", s.changeMemory)
 	mux.HandleFunc("POST /api/secrets", s.setSecret)
 	mux.HandleFunc("POST /api/secrets/delete", s.setSecret)
 	mux.HandleFunc("POST /api/connectors/catalog", s.connectorCatalog)

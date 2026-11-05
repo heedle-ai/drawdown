@@ -34,6 +34,7 @@ const GOOD = {
   "/api/runs": { runs: [] },
   "/api/beliefs": { beliefs: [] },
   "/api/skills": { skills: [skill], pending: [waiting], problems: [] },
+  "/api/memory": { memories: [], version: "", file: "/home/me/.heedle/memory.json" },
   [`/api/skills/${waiting.name}/review`]: { skill: waiting, files: [{ path: "SKILL.md", size: 120 }], diff: "", binary: [] },
   // Paused by a failed run (Temporal's two notes), by heedle, and running:
   // two need you.
@@ -123,11 +124,11 @@ const bar = (page) => page.evaluate(() => {
 
 const SECTION_OF = { "": "Runs", "#/": "Runs", "#/run/wf/run1": "Runs", "#/step/wf/run1/n0": "Runs", "#/diff/a/b": "Runs", "#/agent/refs%2Floom%2Fmain": "Runs",
   "#/skills": "Skills", "#/skill/summarise": "Skills", [`#/skill/summarise/${HEX("a")}`]: "Skills", [`#/review/${waiting.name}`]: "Skills",
-  "#/schedules": "Schedules", "#/connectors": "Connectors", "#/system": "System", "#/nowhere": "Runs", "#/constructor": "Runs", "#/skills/extra": "Runs",
+  "#/schedules": "Schedules", "#/connectors": "Connectors", "#/memory": "Memory", "#/memory/extra": "Runs", "#/system": "System", "#/nowhere": "Runs", "#/constructor": "Runs", "#/skills/extra": "Runs",
   // Review 37: these blanked the page, or put an agent's header over the
   // home page.
   "#/agent": "Runs", "#/agent/refs%2Floom%2Fmain/extra": "Runs" };
-const HOME_ROUTES = ["", "#/", "#/nowhere", "#/constructor", "#/skills/extra", "#/agent", "#/agent/refs%2Floom%2Fmain/extra"];
+const HOME_ROUTES = ["", "#/", "#/nowhere", "#/constructor", "#/skills/extra", "#/memory/extra", "#/agent", "#/agent/refs%2Floom%2Fmain/extra"];
 const LONG_AGENT = "#/agent/refs%2Floom%2Fa-very-long-agent-branch-name-for-the-quarterly-report";
 
 async function main() {
@@ -163,11 +164,11 @@ async function main() {
       await page.waitForFunction(() => document.querySelectorAll("header .need").length === 3, null, { timeout: 15000 });
       if (hash.startsWith("#/review/")) await page.waitForSelector("main .step-hero");
       const b = await bar(page);
-      assert.deepEqual(b.items.map((i) => i.text), ["Runs", "Skills", "Schedules", "Connectors", "System", "Temporal"], where);
-      assert.deepEqual(b.items.slice(0, 5).map((i) => i.href), ["#/", "#/skills", "#/schedules", "#/connectors", "#/system"], where);
-      for (const i of b.items.slice(0, 5)) assert.equal(i.need || "", COUNTS[i.text] || "", `${where}: ${i.text}'s count`);
+      assert.deepEqual(b.items.map((i) => i.text), ["Runs", "Skills", "Schedules", "Connectors", "Memory", "System", "Temporal"], where);
+      assert.deepEqual(b.items.slice(0, 6).map((i) => i.href), ["#/", "#/skills", "#/schedules", "#/connectors", "#/memory", "#/system"], where);
+      for (const i of b.items.slice(0, 6)) assert.equal(i.need || "", COUNTS[i.text] || "", `${where}: ${i.text}'s count`);
       // Each count is read once, with what it counts (review 37: twice).
-      for (const name of ["Runs", "Skills (1 waiting for review)", "Schedules (2 paused after a failed or timed-out run)", "Connectors (2 keys to set)", "System"]) {
+      for (const name of ["Runs", "Skills (1 waiting for review)", "Schedules (2 paused after a failed or timed-out run)", "Connectors (2 keys to set)", "Memory", "System"]) {
         assert.equal(await page.getByRole("link", { name, exact: true }).count(), 1, `${where}: no link named "${name}"`);
       }
       const t = b.items[5];
@@ -190,7 +191,7 @@ async function main() {
         });
         if (f) { assert.ok(f.ring, `${where}: ${f.text} has no visible focus`); reached.push(f.text); }
       }
-      assert.deepEqual(reached, ["Runs", "Skills", "Schedules", "Connectors", "System", "Temporal"], `${where}: keyboard order`);
+      assert.deepEqual(reached, ["Runs", "Skills", "Schedules", "Connectors", "Memory", "System", "Temporal"], `${where}: keyboard order`);
       assert.deepEqual(errors, [], `${where}: page errors`);
       if (shots) {
         await page.evaluate(() => document.activeElement && document.activeElement.blur());
