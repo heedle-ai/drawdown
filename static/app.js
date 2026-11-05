@@ -1870,7 +1870,7 @@ function MemoryPage() {
   return html`
     <h2>Memory</h2>
     <p class="lede">What heedle remembers about you. It goes to Claude with every request to <strong>Ask heedle</strong>, word for word as below, as facts about you, never as instructions, and each proposal says how many it used. Nothing is remembered until you say so. <strong>Forget</strong> takes it out of ${file ? html`<span class="mono memory-file">${file}</span>` : "heedle's memory file"}, the only place heedle keeps it, and later requests send nothing of it. What you asked before, and what heedle proposed with it, stay in Temporal's history, and runs you started stay in their records.</p>
-    <p class="muted">Claude sees everything here, so details for forms, such as your address or a card, don't belong in it: they'll belong in your profile, which Claude never sees, once heedle has one. heedle refuses anything that looks like a key, a card number or a password.</p>
+    <p class="muted">Claude sees everything here, so details for forms, such as your address or a card, don't belong in it: they belong under You on the Connectors page, which Claude never sees. heedle refuses anything that looks like a key, a card number or a password.</p>
     ${data.v.problem && html`<p class="error" role="alert">heedle sends nothing to Claude until this is fixed: ${data.v.problem}.</p>`}
     ${err && html`<p class="error" role="alert">${err}</p>`}
     ${file ? html`<form class="row memory-add" onSubmit=${add}>
