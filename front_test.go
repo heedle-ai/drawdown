@@ -113,7 +113,7 @@ func TestInv_ActRunsOnlyWhereShown(t *testing.T) {
 		t.Errorf("compile: %v", got)
 	}
 	for _, shown := range [][]string{nil, {"forms.example.org"}, {"forms.example.org", "cdn.example.org"}, {"cdn.example.org", "forms.example.org", "x.example.org"}} {
-		if code, got, body := w.call("POST", "/api/runs", map[string]any{"program": prog, "actHosts": shown}); code != 422 || got["actHosts"] == nil || !strings.Contains(body, "without asking again") {
+		if code, got, body := w.call("POST", "/api/runs", map[string]any{"program": prog, "actHosts": shown}); code != 422 || got["actHosts"] == nil || !strings.Contains(body, "stop before sending and ask you") {
 			t.Errorf("run, shown %v: %d %s", shown, code, body)
 		}
 		if code, _, body := w.call("POST", "/api/schedules", map[string]any{"name": "act", "program": prog, "every": "24h", "actHosts": shown}); code != 422 {
@@ -128,5 +128,34 @@ func TestInv_ActRunsOnlyWhereShown(t *testing.T) {
 	}
 	if code, _, body := w.call("POST", "/api/runs", map[string]any{"program": `(echo "hi")`}); code != 202 {
 		t.Errorf("no act step: %d %s", code, body)
+	}
+	// Roadmap 9.7: act steps stop before sending and ask, and the page says
+	// so; one that sends without asking runs only where that was shown too.
+	both := []string{"cdn.example.org", "forms.example.org"}
+	if _, _, body := w.call("POST", "/api/runs", map[string]any{"program": prog}); !strings.Contains(body, "stop before sending and ask you") {
+		t.Errorf("an asking step's refusal: %s", body)
+	}
+	if code, _, body := w.call("POST", "/api/runs", map[string]any{"program": prog, "actHosts": both, "actSendsFreely": both}); code != 422 {
+		t.Errorf("shown as sending freely, but it asks: %d %s", code, body)
+	}
+	free := `(act "Join as Ada" "https://forms.example.org/" "cdn.example.org" :send-without-asking)`
+	_, got, _ = w.call("POST", "/api/compile", map[string]any{"program": free})
+	if f, _ := got["actSendsFreely"].([]any); len(f) != 2 {
+		t.Errorf("compile, sending freely: %v", got)
+	}
+	tc.got = nil
+	for _, shown := range [][]string{nil, {"forms.example.org"}} {
+		if code, got, body := w.call("POST", "/api/runs", map[string]any{"program": free, "actHosts": both, "actSendsFreely": shown}); code != 422 || got["actSendsFreely"] == nil || !strings.Contains(body, "without asking again") {
+			t.Errorf("sending freely, shown %v: %d %s", shown, code, body)
+		}
+		if code, _, body := w.call("POST", "/api/schedules", map[string]any{"name": "act", "program": free, "every": "24h", "actHosts": both, "actSendsFreely": shown}); code != 422 {
+			t.Errorf("schedule sending freely, shown %v: %d %s", shown, code, body)
+		}
+	}
+	if len(tc.got) != 0 {
+		t.Fatalf("a run that sends without asking started unannounced: %v", tc.got)
+	}
+	if code, _, body := w.call("POST", "/api/runs", map[string]any{"program": free, "actHosts": both, "actSendsFreely": both}); code != 202 || len(tc.got) != 1 {
+		t.Errorf("sending freely, shown: %d %s", code, body)
 	}
 }

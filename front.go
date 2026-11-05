@@ -31,9 +31,9 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), loom.AskTimeout+90*time.Second)
 	defer cancel()
 	out, err := s.Temporal.Ask(ctx, req)
-	var hosts []string
+	var hosts, freely []string
 	if out.Plan != nil {
-		hosts = loom.ActHosts(*out.Plan)
+		hosts, freely = loom.ActHosts(*out.Plan), loom.ActSendsFreely(*out.Plan)
 	}
 	switch {
 	case errors.Is(err, warp.ErrInvalid) || errors.Is(err, pirn.ErrInvalid) || errors.Is(err, loom.ErrNoProgram):
@@ -41,16 +41,18 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
 	default:
-		writeJSON(w, http.StatusOK, proposal{Proposal: out, ActHosts: hosts})
+		writeJSON(w, http.StatusOK, proposal{Proposal: out, ActHosts: hosts, ActSendsFreely: freely})
 	}
 }
 
 // proposal is a proposal as the page gets it: with the hosts its act steps
-// may click, type and submit forms on without asking again (loom.ActHosts),
-// for the card to disclose before Run (roadmap 9.5).
+// may click and type on (loom.ActHosts), and those where they send forms
+// without asking (loom.ActSendsFreely), for the card to disclose before
+// Run (roadmap 9.5, 9.7).
 type proposal struct {
 	loom.Proposal
-	ActHosts []string `json:"actHosts,omitempty"`
+	ActHosts       []string `json:"actHosts,omitempty"`
+	ActSendsFreely []string `json:"actSendsFreely,omitempty"`
 }
 
 // ready says whether a program can run now, as loom.CheckReady does on a

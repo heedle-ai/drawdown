@@ -74,6 +74,9 @@ type Temporal interface {
 	// DecideWrite approves or declines one that waits (loom.DecideWrite).
 	Writes(ctx context.Context, workflowID string) ([]loom.WriteOutcome, error)
 	DecideWrite(ctx context.Context, workflowID string, d loom.WriteDecision) error
+	// DecideForm sends or cancels a form an act step waits to send
+	// (loom.DecideForm; roadmap 9.7): only one waiting now.
+	DecideForm(ctx context.Context, workflowID string, d loom.FormDecision) error
 	// WriteProgram has a worker's Claude write a program for a task
 	// (loom.WriteProgram); nothing runs.
 	WriteProgram(ctx context.Context, description string) (loom.Written, error)
@@ -97,6 +100,9 @@ type LiveFrame struct {
 	Attempt  int32  `json:"attempt"`
 	URL      string `json:"url"`
 	Image    string `json:"image"` // data:image/jpeg;base64,…
+	// Pending is the form an act step waits to send, filled as Image
+	// shows it, for a person to send or cancel (roadmap 9.7).
+	Pending *pirn.ActPending `json:"pending,omitempty"`
 }
 
 // History is the read-only part of a warp store that the UI uses. A
@@ -205,6 +211,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills/{name}/review", s.skillReview)
 	mux.HandleFunc("GET /api/writes/{workflow...}", s.writes)
 	mux.HandleFunc("POST /api/writes/{workflow...}", s.decideWrite)
+	mux.HandleFunc("POST /api/forms/{workflow...}", s.decideForm)
 	mux.HandleFunc("POST /api/write", s.writeProgram)
 	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.HandleFunc("POST /api/ready", s.ready)
@@ -317,20 +324,29 @@ type programRequest struct {
 	// the program's act steps may act on: a run with act steps starts only
 	// if they are exactly loom.ActHosts of its plan (review 39).
 	ActHosts []string `json:"actHosts,omitempty"`
+	// ActSendsFreely (submit only) are the hosts the page showed, in red,
+	// whose act steps send forms without asking (loom.ActSendsFreely;
+	// roadmap 9.7).
+	ActSendsFreely []string `json:"actSendsFreely,omitempty"`
 }
 
 // actShown says whether the person was shown where p's act steps may
-// act (loom.ActHosts, exactly), answering 422 with those hosts if not:
-// every way to run or schedule a program goes through it, not only the
-// front door's card (review 39).
-func actShown(w http.ResponseWriter, p plan.Plan, shown []string) bool {
-	hosts := loom.ActHosts(p)
-	if len(hosts) == 0 || slices.Equal(hosts, shown) {
+// act (loom.ActHosts, exactly) and where they send forms without asking
+// (loom.ActSendsFreely, exactly), answering 422 with both if not: every
+// way to run or schedule a program goes through it, not only the front
+// door's card (review 39, roadmap 9.7).
+func actShown(w http.ResponseWriter, p plan.Plan, shown, shownFreely []string) bool {
+	hosts, freely := loom.ActHosts(p), loom.ActSendsFreely(p)
+	if slices.Equal(hosts, shown) && slices.Equal(freely, shownFreely) || len(hosts) == 0 && len(freely) == 0 {
 		return true
 	}
+	msg := "This program's act steps can click and type on " + strings.Join(hosts, ", ") + ", and stop before sending and ask you."
+	if len(freely) > 0 {
+		msg = "This program's act steps can click, type and submit forms on " + strings.Join(freely, ", ") + " without asking again."
+	}
 	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-		"error":    "This program's act steps can click, type and submit forms on " + strings.Join(hosts, ", ") + " without asking again. Run it where the page says so.",
-		"actHosts": hosts,
+		"error":    msg + " Run it where the page says so.",
+		"actHosts": hosts, "actSendsFreely": freely,
 	})
 	return false
 }
@@ -433,7 +449,7 @@ func (s *Server) compile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ce)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p), "actHosts": loom.ActHosts(p)})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p), "actHosts": loom.ActHosts(p), "actSendsFreely": loom.ActSendsFreely(p)})
 }
 
 // shapeOf is a program's composition (draft.Composition), for drawing its
@@ -532,7 +548,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
 		return
 	}
-	if !actShown(w, p, req.ActHosts) {
+	if !actShown(w, p, req.ActHosts, req.ActSendsFreely) {
 		return
 	}
 	ref, err := s.ref(r.Context(), req.Ref)
