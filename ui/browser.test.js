@@ -426,7 +426,9 @@ test("a run page shows a filled form waiting, with Send and Cancel", async () =>
     r.fulfill({ response: res, json: d });
   });
   let decided = null;
-  await ctx.route("**/api/live/*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames: [decided ? { ...frame, pending: undefined } : frame] }) }));
+  // The heartbeat lags the decision (review 41): the form still shows as
+  // waiting after it's decided.
+  await ctx.route("**/api/live/*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames: [frame] }) }));
   await ctx.route("**/api/forms/*", (r) => { decided = r.request().postDataJSON(); r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames: [{ ...frame, pending: undefined }] }) }); });
   await p.goto(BASE + "/#/run/" + [sub.workflowId, sub.runId].map(encodeURIComponent).join("/"));
   const form = p.getByRole("group", { name: "A form waiting to be sent" });
@@ -440,6 +442,8 @@ test("a run page shows a filled form waiting, with Send and Cancel", async () =>
   await send.click();
   await form.waitFor({ state: "detached" });
   assert.deepEqual(decided, { id: "f00d", send: true });
+  await p.waitForTimeout(4500); // two more polls, still showing it waiting
+  assert.equal(await form.count(), 0, "a decided form came back");
   assert.deepEqual(errors, []);
   await ctx.close();
 });

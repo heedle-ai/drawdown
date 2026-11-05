@@ -165,7 +165,7 @@ A program can let a step send without asking, with `:send-without-asking` after 
 
 [[/images/act-card-freely.png|alt=A proposal card with a red note: its act steps can click, type and submit forms on cdn.example.org and forms.example.org without asking again]]
 
-**A filled form waits for you.** When an act step is about to send, the run's live view shows the filled form's screenshot with Claude's summary of what it would send, and **Send** and **Cancel**, which look like a write's **Approve** and **Decline**. Send signals the run (`POST /api/forms`), and the step sends; Cancel, or 30 minutes without an answer, ends the step with nothing sent. Only a form waiting now can be decided, so you decide on the form you saw. `heedle up` also tells you ("heedle: a form is ready to send"), and `loom forms` decides at the terminal.
+**A filled form waits for you.** When an act step is about to send, the run's live view shows the filled form's screenshot with Claude's summary of what it would send, and **Send** and **Cancel**, which look like a write's **Approve** and **Decline**. Send signals the run (`POST /api/forms`), and the step sends; Cancel, or 30 minutes without an answer, ends the step with nothing sent. Only a form waiting now, and not decided already, can be decided, so you decide on the form you saw; once you have, it stays decided on the page, though the run's heartbeat may show it waiting for up to a minute. `heedle up` also tells you ("heedle: a form is ready to send"), and `loom forms` decides at the terminal.
 
 [[/images/act-pending.png|alt=A run's live view: a form filled and waiting, with Claude's summary, the page address, and Send and Cancel buttons above the screenshot of the filled form]]
 
