@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
-	"regexp"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -244,6 +247,11 @@ type schedulesOnly struct {
 	actions []string
 }
 
+func (s *schedulesOnly) SetBudget(ctx context.Context, name string, b loom.Budget) error {
+	s.actions = append(s.actions, name+" budget")
+	return s.submitsOnly.SetBudget(ctx, name, b)
+}
+
 func (s *schedulesOnly) ScheduleAction(ctx context.Context, name, action string) error {
 	s.actions = append(s.actions, name+" "+action)
 	if action == "run" {
@@ -317,6 +325,10 @@ func TestInv_EveryRunStartIsHere(t *testing.T) {
 				t.Errorf("%s, %s: %d", a, name, code)
 			}
 		}
+		// A new budget can resume a schedule its budget paused.
+		if code := call("/api/schedules/signed/budget", map[string]any{"usd": 5}, h...); code != 403 {
+			t.Errorf("budget, %s: %d", name, code)
+		}
 	}
 	if len(tc.got) != 0 || len(tc.actions) != 0 {
 		t.Fatalf("started from elsewhere: runs %v, actions %v", tc.got, tc.actions)
@@ -334,26 +346,53 @@ func TestInv_EveryRunStartIsHere(t *testing.T) {
 	if want := []string{"plain run", "signed run", "plain resume", "signed resume"}; !slices.Equal(tc.actions, want) {
 		t.Errorf("actions %v, want %v", tc.actions, want)
 	}
-	// The handlers that can start a run are these three, and no others.
-	starts := regexp.MustCompile(`s\.Temporal\.(Submit|CreateSchedule|ScheduleAction)\(`)
-	fn := regexp.MustCompile(`(?m)^func \(s \*Server\) (\w+)\(`)
-	files, _ := filepath.Glob("*.go")
+	if code := call("/api/schedules/plain/budget", map[string]any{"usd": 5}, "X-Forwarded-For", "100.64.0.7"); code != 200 {
+		t.Errorf("plain budget through a proxy: %d", code)
+	}
+	// Every method of Temporal (and Budgeter) is classed as starting a run
+	// of the person's program or not, so one added later fails here until
+	// it's classed (review 53, round 3).
+	starts := map[string]bool{"Submit": true, "CreateSchedule": true, "ScheduleAction": true, "SetBudget": true}
+	others := map[string]bool{"List": true, "Describe": true, "Steps": true, "Live": true, "ChangeSkills": true, "Writes": true, "DecideWrite": true, "DecideForm": true, "WriteProgram": true, "Ask": true, "ListSkills": true, "Schedules": true}
+	for _, it := range []reflect.Type{reflect.TypeFor[drawdown.Temporal](), reflect.TypeFor[drawdown.Budgeter]()} {
+		for i := range it.NumMethod() {
+			if m := it.Method(i).Name; !starts[m] && !others[m] {
+				t.Errorf("%s.%s: class it as starting runs or not", it.Name(), m)
+			}
+		}
+	}
+	// Whatever the receiver or alias, only these handlers call a method
+	// that starts runs, and each checks signedInShown or mayStartSchedule.
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var found []string
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, m := range starts.FindAllIndex(src, -1) {
-			fs := fn.FindAllSubmatch(src[:m[0]], -1)
-			found = append(found, string(fs[len(fs)-1][1]))
+	for _, f := range pkgs["drawdown"].Files {
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Body == nil {
+				continue
+			}
+			// TemporalClient is the interface's own adapter onto loom.
+			if fd.Recv != nil {
+				if id, ok := fd.Recv.List[0].Type.(*ast.Ident); ok && id.Name == "TemporalClient" {
+					continue
+				}
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				if c, ok := n.(*ast.CallExpr); ok {
+					if sel, ok := c.Fun.(*ast.SelectorExpr); ok && starts[sel.Sel.Name] {
+						found = append(found, fd.Name.Name)
+					}
+				}
+				return true
+			})
 		}
 	}
 	slices.Sort(found)
-	if want := []string{"createSchedule", "scheduleAction", "submit"}; !slices.Equal(found, want) {
-		t.Errorf("handlers that start runs: %v, want %v; check each with signedInShown", found, want)
+	if want := []string{"createSchedule", "scheduleAction", "setBudget", "submit"}; !slices.Equal(found, want) {
+		t.Errorf("functions that start runs: %v, want %v; check each with signedInShown or mayStartSchedule", found, want)
 	}
 }

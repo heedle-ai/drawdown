@@ -123,7 +123,9 @@ func (s *Server) scheduleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
 	defer cancel()
-	if (action == "run" || action == "resume") && !s.mayStartSchedule(ctx, r, name) {
+	// Every action but pause and delete may start a run (review 53, round
+	// 3: an allow-list, so an action added later fails closed).
+	if action != "pause" && action != "delete" && !s.mayStartSchedule(ctx, r, name) {
 		writeJSON(w, http.StatusForbidden, apiError{Error: "A program whose act steps start signed in as you runs only from this machine."})
 		return
 	}
@@ -139,8 +141,8 @@ func (s *Server) scheduleAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "done": action})
 }
 
-// mayStartSchedule says whether this request may run or resume the
-// schedule named name: always from this machine; from elsewhere only if
+// mayStartSchedule says whether this request may run, resume or rebudget
+// (which can resume it) the schedule named name: always from this machine; from elsewhere only if
 // its program's act steps don't start signed in as the person
 // (signedInShown's rule for submit and createSchedule, review 53). A
 // schedule that can't be found or compiled counts as signed in, so it
