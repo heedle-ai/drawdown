@@ -634,6 +634,13 @@ test("the Costs page shows this month by model, with the price table's date", as
     assert.deepEqual(kinds, ["Front door", "Retries", "Failed runs"]);
     const requests = await p.locator(".panel.costs.extras tbody td:nth-child(2)").allTextContents();
     assert.deepEqual(requests, ["2", "1", "1"]);
+    // Every estimate is on screen, at phone width too (review 56: the
+    // last column was cut off inside its panel).
+    const cut = await p.evaluate(() => [...document.querySelectorAll(".panel.costs table")].flatMap((tb) => {
+      const panel = tb.closest(".panel").getBoundingClientRect();
+      return [...tb.querySelectorAll("tr")].map((tr) => tr.lastElementChild.getBoundingClientRect()).filter((r) => r.right > panel.right + 0.5 || r.right > window.innerWidth);
+    }).length);
+    assert.equal(cut, 0, `${width}px: estimates cut off`);
     assert.match(await p.locator("h2 + .lede").textContent(), /prices as of 2026-11-05/);
     assert.equal(await p.locator("a[aria-current=page]").first().textContent(), "Costs");
     const over = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

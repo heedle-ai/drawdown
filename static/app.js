@@ -3011,29 +3011,29 @@ function CostsPage() {
       <h3 style=${{ marginTop: 0 }}>${monthName(now.month)}: ${DD.estimate(now)}</h3>
       ${now.byModel.length === 0 ? html`<p class="muted">No run asked Claude this month.</p>` : html`
       <table class="list costs">
-        <thead><tr><th>Model</th><th class="num">Runs</th><th class="num">Input</th><th class="num">Output</th><th class="num">Estimate</th></tr></thead>
+        <thead><tr><th>Model</th><th class="num wide">Runs</th><th class="num">Input</th><th class="num wide">Output</th><th class="num">Estimate</th></tr></thead>
         <tbody>${now.byModel.map((m) => html`<tr key=${m.model}>
-          <td class="mono">${m.model || html`<span class="muted">no counts recorded</span>`}</td><td class="num">${m.runs}</td>
-          <td class="num">${DD.count(m.tokens.input)}</td><td class="num">${DD.count(m.tokens.output)}</td><td class="num">${m.model ? DD.estimate(m) : "–"}</td></tr>`)}</tbody>
+          <td class="mono">${m.model || html`<span class="muted">no counts recorded</span>`}</td><td class="num wide">${m.runs}</td>
+          <td class="num">${DD.count(m.tokens.input)}</td><td class="num wide">${DD.count(m.tokens.output)}</td><td class="num">${m.model ? DD.estimate(m) : "–"}</td></tr>`)}</tbody>
       </table>`}
       ${now.replayed > 0 && html`<p class="muted replayed-note">${now.replayed} act step${now.replayed === 1 ? "" : "s"} replayed an earlier run without asking Claude: no tokens, so ${now.replayed === 1 ? "it isn't" : "they aren't"} counted by model.</p>`}
     </div>
     <h3>Calls no record holds</h3>
     <div class="panel costs extras">
       <table class="list costs">
-        <thead><tr><th>Calls</th><th class="num">Requests</th><th class="num">Input</th><th class="num">Output</th><th class="num">Estimate</th></tr></thead>
+        <thead><tr><th>Calls</th><th class="num wide">Requests</th><th class="num">Input</th><th class="num wide">Output</th><th class="num">Estimate</th></tr></thead>
         <tbody>${v.kinds.map((k) => html`<tr key=${k.kind}>
-          <td>${KIND_LABELS[k.kind]}</td><td class="num">${DD.count(k.calls)}</td>
-          <td class="num">${DD.count(k.tokens.input)}</td><td class="num">${DD.count(k.tokens.output)}</td><td class="num">${k.calls ? DD.estimate(k) : "–"}</td></tr>`)}</tbody>
+          <td>${KIND_LABELS[k.kind]}</td><td class="num wide">${DD.count(k.calls)}</td>
+          <td class="num">${DD.count(k.tokens.input)}</td><td class="num wide">${DD.count(k.tokens.output)}</td><td class="num">${k.calls ? DD.estimate(k) : "–"}</td></tr>`)}</tbody>
       </table>
       <p class="muted">Front door: proposing what to do. Retries: attempts that failed and were tried again. Failed runs: calls of runs with no record. All are in the month's total above; a run's own page shows only what its record holds.</p>
     </div>
     <h3>The six months before</h3>
     <div class="panel costs">
       <table class="list costs">
-        <thead><tr><th>Month</th><th class="num">Runs</th><th class="num">Input</th><th class="num">Output</th><th class="num">Estimate</th></tr></thead>
-        <tbody>${before.map((m) => html`<tr key=${m.month}><td>${monthName(m.month)}</td><td class="num">${m.runs}</td>
-          <td class="num">${DD.count(m.tokens.input)}</td><td class="num">${DD.count(m.tokens.output)}</td><td class="num">${m.runs ? DD.estimate(m) : "–"}</td></tr>`)}</tbody>
+        <thead><tr><th>Month</th><th class="num wide">Runs</th><th class="num">Input</th><th class="num wide">Output</th><th class="num">Estimate</th></tr></thead>
+        <tbody>${before.map((m) => html`<tr key=${m.month}><td>${monthName(m.month)}</td><td class="num wide">${m.runs}</td>
+          <td class="num">${DD.count(m.tokens.input)}</td><td class="num wide">${DD.count(m.tokens.output)}</td><td class="num">${m.runs ? DD.estimate(m) : "–"}</td></tr>`)}</tbody>
       </table>
     </div>
     <h3>Costliest this month</h3>

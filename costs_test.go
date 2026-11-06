@@ -480,7 +480,7 @@ func TestInv_ScheduleSpendCountsEveryCall(t *testing.T) {
 	}
 	at := time.Now().UTC().Add(-time.Minute)
 	w.ledger(loom.LedgerEntry{Kind: loom.LedgerRun, At: at, Workflow: "loom-failed", Run: "r", Schedule: "news"},
-		loom.LedgerEntry{Kind: loom.LedgerAttempt, At: at, Workflow: "loom-failed/plan", Run: "p", Activity: "1", Node: "n0", Step: "ask", Attempt: 1, Failed: true,
+		loom.LedgerEntry{Kind: loom.LedgerAttempt, At: at, Workflow: "loom-failed/plan", Run: "p", Activity: "1", Node: "n0", Step: "ask", Attempt: 1, Failed: true, Schedule: "news",
 			Calls: []pirn.Call{{Model: "claude-sonnet-5-5", Input: 10000, Output: 1000}}})
 	_, m, raw := w.call("GET", "/api/schedules", nil)
 	var v struct {
@@ -493,5 +493,32 @@ func TestInv_ScheduleSpendCountsEveryCall(t *testing.T) {
 	json.Unmarshal(b, &v)
 	if s := v.Spend["news"]["last30"]; s.Tokens != (loom.Tokens{Input: 10000, Output: 1000}) || s.USD == nil || *s.USD < 0.03-1e-9 {
 		t.Errorf("spend %s", raw)
+	}
+}
+
+// TestInv_UnreadableLedgerEntriesShowEverywhere: an entry of the usage
+// ledger that can't be read shows on the Costs page and in every
+// schedule's spend as a step with no counts, never as nothing, as a
+// budget counts it (DRAW-323, review 56).
+func TestInv_UnreadableLedgerEntriesShowEverywhere(t *testing.T) {
+	w := newWorld(t)
+	if code, _, raw := w.call("POST", "/api/schedules", map[string]string{"name": "news", "program": `(echo "a")`, "every": "1h"}); code != 201 {
+		t.Fatalf("%d %s", code, raw)
+	}
+	ctx := context.Background()
+	at := time.Now().UTC()
+	blob, _ := w.store.PutBlob(ctx, []byte("not an entry"))
+	tree, _ := w.store.PutTree(ctx, []warp.Entry{{Name: "entry.json", Kind: warp.KindBlob, ID: blob}})
+	commit, _ := w.store.Commit(ctx, warp.CommitSpec{Tree: tree, Message: "usage: ?", Author: warp.Signature{Name: "x", Email: "x@y", When: at}})
+	if err := w.store.Advance(ctx, loom.LedgerPrefix+at.Format("2006-01")+"/"+strings.Repeat("b", 40)+"/"+string(blob), "", commit); err != nil {
+		t.Fatal(err)
+	}
+	_, _, raw := w.call("GET", "/api/schedules", nil)
+	if !strings.Contains(raw, "can't be read") {
+		t.Errorf("schedule spend doesn't show the unreadable entry: %s", raw)
+	}
+	_, _, raw = w.call("GET", "/api/costs?tz=UTC", nil)
+	if !strings.Contains(raw, "can't be read") {
+		t.Errorf("the Costs page doesn't show the unreadable entry: %s", raw)
 	}
 }

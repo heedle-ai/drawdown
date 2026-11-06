@@ -110,13 +110,14 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	if *runWorker {
 		// Every container a step starts says this store's home, so two
 		// heedle homes running at once each tidy only their own (roadmap
-		// 9.2.1, DRAW-520).
-		w := worker.New(c, *queue, reed.WorkerOptions(worker.Options{BackgroundActivityContext: loom.WorkerContext(*store)}))
+		// 9.2.1, DRAW-520); a stopping worker lets steps finish and note
+		// their calls (roadmap 10.4.1, DRAW-324).
+		w := worker.New(c, *queue, reed.WorkerOptions(worker.Options{BackgroundActivityContext: loom.WorkerContext(*store), WorkerStopTimeout: loom.WorkerStopTimeout}))
 		// Every step's containers are labelled with its run and step
 		// (roadmap 9.2, DRAW-505).
 		// and every attempt of a Claude step is counted in the usage
 		// ledger (roadmap 10.4.1, DRAW-320).
-		steps := loom.Counted(loom.Labelled(w), s)
+		steps := loom.Labelled(loom.Counted(w, s))
 		if err := reed.Register(reg, steps, browser); err != nil {
 			return err
 		}
