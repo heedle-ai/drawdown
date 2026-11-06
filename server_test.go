@@ -18,6 +18,7 @@ import (
 
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
@@ -80,23 +81,29 @@ func (s fakeSchedules) Pause(_ context.Context, name, note string) error {
 }
 
 // standInClaude answers ask, agent and act steps as Claude would, without
-// Claude: each a pirn result whose tokens depend on its arguments.
-func standInClaude(env *testsuite.TestWorkflowEnvironment) {
+// Claude: each a pirn result whose tokens depend on its arguments, noted
+// on the step's meter as pirn notes what Claude answers, so a worker
+// that counts its steps (loom.Counted) counts them.
+func standInClaude(env loom.Activities) {
 	answer := func(in plan.Input) pirn.Answer {
 		n := int64(len(strings.Join(in.Args, " ")))
 		return pirn.Answer{Pirn: 1, Model: "claude-sonnet-5-5", Text: "A stand-in answer.", StopReason: "end_turn", InputTokens: 1200 + 40*n, OutputTokens: 300 + 3*n}
 	}
-	reply := func(v any) (string, error) { b, err := json.Marshal(v); return string(b), err }
-	env.RegisterActivityWithOptions(func(_ context.Context, in plan.Input) (string, error) { return reply(answer(in)) }, activity.RegisterOptions{Name: pirn.ActivityName})
-	env.RegisterActivityWithOptions(func(_ context.Context, in plan.Input) (string, error) {
+	reply := func(ctx context.Context, a pirn.Answer, v any) (string, error) {
+		pirn.MeterFrom(ctx).Add(pirn.Call{Model: a.Model, Input: a.InputTokens, Output: a.OutputTokens})
+		b, err := json.Marshal(v)
+		return string(b), err
+	}
+	env.RegisterActivityWithOptions(func(ctx context.Context, in plan.Input) (string, error) { a := answer(in); return reply(ctx, a, a) }, activity.RegisterOptions{Name: pirn.ActivityName})
+	env.RegisterActivityWithOptions(func(ctx context.Context, in plan.Input) (string, error) {
 		a := answer(in)
 		a.InputTokens, a.OutputTokens = a.InputTokens*6, a.OutputTokens*4
-		return reply(pirn.AgentResult{Answer: a, Agent: 1, Turns: 6, Inputs: map[string]string{}})
+		return reply(ctx, a, pirn.AgentResult{Answer: a, Agent: 1, Turns: 6, Inputs: map[string]string{}})
 	}, activity.RegisterOptions{Name: pirn.AgentActivityName})
-	env.RegisterActivityWithOptions(func(_ context.Context, in plan.Input) (string, error) {
+	env.RegisterActivityWithOptions(func(ctx context.Context, in plan.Input) (string, error) {
 		a := answer(in)
 		a.InputTokens, a.OutputTokens = a.InputTokens*3, a.OutputTokens*2
-		return reply(pirn.ActResult{Answer: a, Act: 1, Turns: 3, Ended: "done"})
+		return reply(ctx, a, pirn.ActResult{Answer: a, Act: 1, Turns: 3, Ended: "done"})
 	}, activity.RegisterOptions{Name: pirn.ActActivityName})
 }
 
@@ -201,9 +208,12 @@ func (f *fakeTemporal) start(ctx context.Context, in loom.RunInput, suffix, sche
 	}
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
+	// The plan's workflow, as RunWorkflow names it; its Claude steps
+	// counted in the usage ledger, as loom's worker counts them.
+	env.SetStartWorkflowOptions(client.StartWorkflowOptions{ID: wf + "/plan"})
 	plan.Register(env)
 	shipment.RegisterCommands(env, f.sources)
-	standInClaude(env)
+	standInClaude(loom.Counted(env, f.store))
 	env.ExecuteWorkflow(plan.WorkflowName, in.Plan)
 	if err := env.GetWorkflowError(); err != nil {
 		return "", "", err
@@ -292,6 +302,10 @@ func (f *fakeTemporal) Ask(ctx context.Context, in loom.AskRequest) (loom.Propos
 	}
 	if f.writer == nil {
 		return loom.Proposal{}, errors.New("no writer")
+	}
+	if f.writer.Ledger != nil {
+		// What a worker runs for AskWorkflow: its calls in the ledger.
+		return f.writer.AskActivity(ctx, in)
 	}
 	return f.writer.Ask(ctx, in)
 }

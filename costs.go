@@ -192,10 +192,9 @@ func (s *Server) costs(w http.ResponseWriter, r *http.Request) {
 	// runs), this month's by kind, and in their schedule's spend.
 	kinds := map[string]loom.Usage{}
 	kindRuns := map[string]map[string]bool{}
-	for _, x := range extras {
-		i := monthsBetween(x.At.In(loc), start)
+	add := func(i int, x loom.Extra) {
 		if i < 0 || i >= CostMonths {
-			continue
+			return
 		}
 		usages[i] = usages[i].Add(x.Usage)
 		for _, st := range x.Usage.Steps {
@@ -209,6 +208,20 @@ func (s *Server) costs(w http.ResponseWriter, r *http.Request) {
 			kindRuns[x.Kind][x.Workflow] = true
 			if x.Schedule != "" {
 				scheduled[x.Schedule] = scheduled[x.Schedule].Add(x.Usage)
+			}
+		}
+	}
+	for _, x := range extras {
+		if !x.Unreadable {
+			add(monthsBetween(x.At.In(loc), start), x)
+			continue
+		}
+		// It may have been made any time before x.Until: it is in every
+		// month here that overlaps, in this time zone (review 56 round 2).
+		for i := range months {
+			ms := start.AddDate(0, -i, 0)
+			if x.At.Before(ms.AddDate(0, 1, 0)) && x.Until.After(ms) {
+				add(i, x)
 			}
 		}
 	}
@@ -361,11 +374,16 @@ func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time
 				if !ok || n == "" {
 					continue
 				}
-				w := windows[n]
-				if !x.At.Before(w.month) {
+				// An unreadable entry may have been made any time before
+				// x.Until (review 56 round 2).
+				w, end := windows[n], x.At
+				if x.Unreadable {
+					end = x.Until
+				}
+				if end.After(w.month) || !x.At.Before(w.month) {
 					a.month = a.month.Add(x.Usage)
 				}
-				if !x.At.Before(w.last30) {
+				if end.After(w.last30) || !x.At.Before(w.last30) {
 					a.last30 = a.last30.Add(x.Usage)
 				}
 			}

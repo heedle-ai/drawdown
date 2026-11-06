@@ -329,6 +329,9 @@ func TestInv_SchedulesReadEachRefOnce(t *testing.T) {
 		}
 	}
 	w.claudeRun(`(ask "the news")`, map[string]any{"n0": pirn.Answer{Pirn: 1, Model: "claude-sonnet-5-5", InputTokens: 1, OutputTokens: 1}}, time.Now().UTC(), "b")
+	// And calls in the usage ledger, which add none of the records' walks
+	// (review 56 round 2: they added one per ref).
+	w.ledger(loom.LedgerEntry{Kind: loom.LedgerAttempt, At: time.Now().UTC(), Workflow: "loom-claude-b/plan", Run: "p", Activity: "1", Node: "n0", Step: "ask", Attempt: 1, Failed: true, Schedule: "b", Calls: call100})
 	cs := &countingStore{History: w.store}
 	s := &drawdown.Server{Store: cs, Ref: loom.DefaultRef, Registry: shipment.Registry(), Temporal: w.fake}
 	srv := httptest.NewServer(s.Handler())
@@ -501,24 +504,96 @@ func TestInv_ScheduleSpendCountsEveryCall(t *testing.T) {
 // schedule's spend as a step with no counts, never as nothing, as a
 // budget counts it (DRAW-323, review 56).
 func TestInv_UnreadableLedgerEntriesShowEverywhere(t *testing.T) {
-	w := newWorld(t)
-	if code, _, raw := w.call("POST", "/api/schedules", map[string]string{"name": "news", "program": `(echo "a")`, "every": "1h"}); code != 201 {
-		t.Fatalf("%d %s", code, raw)
+	// In UTC, and west of it, where a month starts hours after UTC's
+	// (review 56 round 2: there it was dropped).
+	for _, zone := range []string{"UTC", "America/Los_Angeles"} {
+		w := newWorld(t)
+		if code, _, raw := w.call("POST", "/api/schedules", map[string]string{"name": "news", "program": `(echo "a")`, "every": "1h"}); code != 201 {
+			t.Fatalf("%d %s", code, raw)
+		}
+		w.fake.sched["news"].Spec.TimeZone = zone
+		ctx := context.Background()
+		at := time.Now().UTC()
+		blob, _ := w.store.PutBlob(ctx, []byte("not an entry"))
+		tree, _ := w.store.PutTree(ctx, []warp.Entry{{Name: "entry.json", Kind: warp.KindBlob, ID: blob}})
+		commit, _ := w.store.Commit(ctx, warp.CommitSpec{Tree: tree, Message: "usage: ?", Author: warp.Signature{Name: "x", Email: "x@y", When: at}})
+		if err := w.store.Advance(ctx, loom.LedgerPrefix+at.Format("2006-01")+"/"+strings.Repeat("b", 40)+"/"+string(blob), "", commit); err != nil {
+			t.Fatal(err)
+		}
+		_, m, raw := w.call("GET", "/api/schedules", nil)
+		month, _ := json.Marshal(m["spend"].(map[string]any)["news"].(map[string]any)["month"])
+		if !strings.Contains(string(month), "can't be read") {
+			t.Errorf("%s: the schedule's month doesn't show the unreadable entry: %s", zone, raw)
+		}
+		_, m, raw = w.call("GET", "/api/costs?tz="+zone, nil)
+		this, _ := json.Marshal(m["months"].([]any)[0])
+		if !strings.Contains(string(this), "can't be read") {
+			t.Errorf("%s: this month on the Costs page doesn't show the unreadable entry: %s", zone, raw)
+		}
 	}
-	ctx := context.Background()
-	at := time.Now().UTC()
-	blob, _ := w.store.PutBlob(ctx, []byte("not an entry"))
-	tree, _ := w.store.PutTree(ctx, []warp.Entry{{Name: "entry.json", Kind: warp.KindBlob, ID: blob}})
-	commit, _ := w.store.Commit(ctx, warp.CommitSpec{Tree: tree, Message: "usage: ?", Author: warp.Signature{Name: "x", Email: "x@y", When: at}})
-	if err := w.store.Advance(ctx, loom.LedgerPrefix+at.Format("2006-01")+"/"+strings.Repeat("b", 40)+"/"+string(blob), "", commit); err != nil {
-		t.Fatal(err)
+}
+
+// meteredClaude is a stand-in front door that notes each call it answers
+// (1000 input, 100 output tokens) on the meter, as pirn does.
+type meteredClaude string
+
+func (c meteredClaude) Ask(ctx context.Context, _ pirn.Question) (pirn.Answer, error) {
+	pirn.MeterFrom(ctx).Add(pirn.Call{Model: "claude-sonnet-5-5", Input: 1000, Output: 100})
+	return pirn.Answer{Pirn: 1, Model: "claude-sonnet-5-5", Text: string(c), InputTokens: 1000, OutputTokens: 100}, nil
+}
+
+// TestInv_AProposalRunFromThePageIsCountedOnce: asking the front door,
+// then running what it proposed the way the card's Run button does
+// (POST /api/runs), counts every call once on the Costs page: the ask
+// from the ledger, the run's step from its record (its attempt in the
+// ledger set aside), and the proposal's own usage in no record
+// (DRAW-325, review 56 round 2).
+func TestInv_AProposalRunFromThePageIsCountedOnce(t *testing.T) {
+	w := newWorldWith(t, newWorld(t), "")
+	w.fake.realTime = true
+	w.fake.writer = &loom.Writer{Asker: meteredClaude("```json\n{\"summary\": \"The news.\", \"program\": \"(ask \\\"the news\\\")\"}\n```"), Ledger: w.store,
+		Commands: func(context.Context) (*registry.Registry, []loom.Command, error) {
+			reg := claudeCommands()
+			return reg, loom.Commands(reg, loom.BuiltinCommands), nil
+		}}
+	from := time.Now().UTC().Add(-time.Minute)
+	code, p, raw := w.call("POST", "/api/ask", map[string]any{"request": "the news"})
+	if code != 200 || p["usage"] == nil {
+		t.Fatalf("ask: %d %s", code, raw)
 	}
-	_, _, raw := w.call("GET", "/api/schedules", nil)
-	if !strings.Contains(raw, "can't be read") {
-		t.Errorf("schedule spend doesn't show the unreadable entry: %s", raw)
+	// What the card's Run button sends (app.js).
+	code, ran, raw := w.call("POST", "/api/runs", map[string]any{"program": p["program"], "ref": "", "actHosts": p["actHosts"], "actSendsFreely": p["actSendsFreely"], "actUses": p["actUses"]})
+	if code != 202 {
+		t.Fatalf("run: %d %s", code, raw)
 	}
-	_, _, raw = w.call("GET", "/api/costs?tz=UTC", nil)
-	if !strings.Contains(raw, "can't be read") {
-		t.Errorf("the Costs page doesn't show the unreadable entry: %s", raw)
+	if es := must(loom.ReadLedger(context.Background(), w.store, from, time.Now().UTC().Add(time.Minute))); len(es) != 2 {
+		t.Fatalf("the ledger has the ask and the run's attempt: %+v", es)
+	}
+	_, m, raw := w.call("GET", "/api/costs?tz=UTC", nil)
+	var v struct {
+		Months []struct{ Tokens loom.Tokens }
+		Runs   []struct {
+			WorkflowID string
+			Tokens     loom.Tokens
+		}
+		Kinds []struct {
+			Kind   string
+			Calls  int
+			Tokens loom.Tokens
+		}
+	}
+	b, _ := json.Marshal(m)
+	json.Unmarshal(b, &v)
+	step := loom.Tokens{Input: 1200 + 40*int64(len("the news")), Output: 300 + 3*int64(len("the news"))}
+	if v.Months[0].Tokens != step.Add(loom.Tokens{Input: 1000, Output: 100}) {
+		t.Errorf("this month: %+v, want the ask's and the step's once: %s", v.Months[0].Tokens, raw)
+	}
+	if len(v.Runs) != 1 || v.Runs[0].WorkflowID != ran["workflowId"] || v.Runs[0].Tokens != step {
+		t.Errorf("the run's record holds more than its step: %+v", v.Runs)
+	}
+	for _, k := range v.Kinds {
+		if want := map[string]int{loom.ExtraFrontDoor: 1}[k.Kind]; k.Calls != want {
+			t.Errorf("%s: %d calls, want %d", k.Kind, k.Calls, want)
+		}
 	}
 }
