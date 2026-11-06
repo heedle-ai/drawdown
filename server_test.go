@@ -208,12 +208,18 @@ func (f *fakeTemporal) start(ctx context.Context, in loom.RunInput, suffix, sche
 	}
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
-	// The plan's workflow, as RunWorkflow names it; its Claude steps
-	// counted in the usage ledger, as loom's worker counts them.
+	// The plan's workflow, as RunWorkflow names it; with realTime, its
+	// Claude steps counted in the usage ledger, as loom's worker counts
+	// them (their attempts are on the real clock, so only a run recorded
+	// on it is recorded after them, as every real run is).
 	env.SetStartWorkflowOptions(client.StartWorkflowOptions{ID: wf + "/plan"})
 	plan.Register(env)
 	shipment.RegisterCommands(env, f.sources)
-	standInClaude(loom.Counted(env, f.store))
+	if f.realTime {
+		standInClaude(loom.Counted(env, f.store))
+	} else {
+		standInClaude(env)
+	}
 	env.ExecuteWorkflow(plan.WorkflowName, in.Plan)
 	if err := env.GetWorkflowError(); err != nil {
 		return "", "", err
