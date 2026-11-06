@@ -52,6 +52,7 @@ type fakeTemporal struct {
 	listed  []treadle.Source
 	sched   map[string]*loom.Schedule
 	schedIn map[string]loom.RunInput
+	inputs  map[string]loom.RunInput // each run's input, by workflow ID
 	// realTime records runs at the time they run, not at fixed times.
 	realTime bool
 }
@@ -184,6 +185,10 @@ func (f *fakeTemporal) start(ctx context.Context, in loom.RunInput, suffix, sche
 		return "", "", err
 	}
 	wf += suffix
+	if f.inputs == nil {
+		f.inputs = map[string]loom.RunInput{}
+	}
+	f.inputs[wf] = in
 	run := fmt.Sprintf("run-%d", len(f.execs)+1)
 	start := time.Unix(1761900000+int64(len(f.execs))*60, 0).UTC()
 	if f.realTime {
@@ -248,6 +253,17 @@ func (f *fakeTemporal) DecideWrite(_ context.Context, wf string, d loom.WriteDec
 
 // DecideForm decides a form an act step waits to send, as loom.DecideForm
 // does: only one waiting now (on a live frame), which then stops waiting.
+// Input is what the run wf was started with.
+func (f *fakeTemporal) Input(_ context.Context, wf string) (loom.RunInput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	in, ok := f.inputs[wf]
+	if !ok {
+		return loom.RunInput{}, serviceerror.NewNotFound("workflow not found")
+	}
+	return in, nil
+}
+
 func (f *fakeTemporal) DecideForm(_ context.Context, wf string, d loom.FormDecision) error {
 	if f.down {
 		return errors.New("connection refused")

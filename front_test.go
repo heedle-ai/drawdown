@@ -349,50 +349,130 @@ func TestInv_EveryRunStartIsHere(t *testing.T) {
 	if code := call("/api/schedules/plain/budget", map[string]any{"usd": 5}, "X-Forwarded-For", "100.64.0.7"); code != 200 {
 		t.Errorf("plain budget through a proxy: %d", code)
 	}
-	// Every method of Temporal (and Budgeter) is classed as starting a run
-	// of the person's program or not, so one added later fails here until
-	// it's classed (review 53, round 3).
-	starts := map[string]bool{"Submit": true, "CreateSchedule": true, "ScheduleAction": true, "SetBudget": true}
-	others := map[string]bool{"List": true, "Describe": true, "Steps": true, "Live": true, "ChangeSkills": true, "Writes": true, "DecideWrite": true, "DecideForm": true, "WriteProgram": true, "Ask": true, "ListSkills": true, "Schedules": true}
+	// A form a signed-in step waits to send is sent only from here; a
+	// plain run's from anywhere; a run whose program can't be read counts
+	// as signed in (review 53, round 4).
+	formRun := func(program string) string {
+		p, err := loom.Compile(context.Background(), commands(), program)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in := loom.RunInput{Program: program, Plan: p, Ref: loom.DefaultRef}
+		wf, _ := loom.WorkflowID(context.Background(), in)
+		w.fake.mu.Lock()
+		if w.fake.inputs == nil {
+			w.fake.inputs = map[string]loom.RunInput{}
+		}
+		if w.fake.live == nil {
+			w.fake.live = map[string][]drawdown.LiveFrame{}
+		}
+		w.fake.inputs[wf] = in
+		w.fake.live[wf] = []drawdown.LiveFrame{{Activity: "n0", Kind: "act", Pending: &pirn.ActPending{ID: "f1", Summary: "Join", URL: "https://forms.example.org/"}}}
+		w.fake.mu.Unlock()
+		return wf
+	}
+	sw, pw := formRun(signed), formRun(plain)
+	for name, h := range elsewhere {
+		for _, wf := range []string{sw, "loom-0123456789abcdef0123456789abcdef01234567"} {
+			if code := call("/api/forms/"+wf, map[string]any{"id": "f1", "send": true}, h...); code != 403 {
+				t.Errorf("form of %s, %s: %d", wf, name, code)
+			}
+		}
+	}
+	if len(w.fake.forms) != 0 {
+		t.Fatalf("a form was decided from elsewhere: %v", w.fake.forms)
+	}
+	if code := call("/api/forms/"+pw, map[string]any{"id": "f1", "send": true}, "X-Forwarded-For", "100.64.0.7"); code != 200 || len(w.fake.forms) != 1 {
+		t.Errorf("a plain run's form through a proxy: %d", code)
+	}
+	if code := call("/api/forms/"+sw, map[string]any{"id": "f1", "send": true}); code != 200 || len(w.fake.forms) != 2 {
+		t.Errorf("a signed-in run's form from here: %d", code)
+	}
+	// An action that isn't one is refused before anything is asked.
+	if code := call("/api/schedules/signed/trigger", map[string]any{}, "X-Forwarded-For", "100.64.0.7"); code != 404 {
+		t.Errorf("an unknown action: %d", code)
+	}
+	// Every method of Temporal (and Budgeter) is classed: starting a run
+	// of the person's program, acting as them in one, or neither; so one
+	// added later fails here until it's classed (review 53, round 3).
+	starts := map[string]bool{"Submit": true, "CreateSchedule": true, "ScheduleAction": true, "SetBudget": true, "DecideForm": true}
+	others := map[string]bool{"List": true, "Describe": true, "Input": true, "Steps": true, "Live": true, "ChangeSkills": true, "Writes": true, "DecideWrite": true, "WriteProgram": true, "Ask": true, "ListSkills": true, "Schedules": true}
 	for _, it := range []reflect.Type{reflect.TypeFor[drawdown.Temporal](), reflect.TypeFor[drawdown.Budgeter]()} {
 		for i := range it.NumMethod() {
 			if m := it.Method(i).Name; !starts[m] && !others[m] {
-				t.Errorf("%s.%s: class it as starting runs or not", it.Name(), m)
+				t.Errorf("%s.%s: class it as starting runs, acting as you, or neither", it.Name(), m)
 			}
 		}
 	}
-	// Whatever the receiver or alias, only these handlers call a method
-	// that starts runs, and each checks signedInShown or mayStartSchedule.
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var found []string
-	for _, f := range pkgs["drawdown"].Files {
-		for _, d := range f.Decls {
-			fd, ok := d.(*ast.FuncDecl)
-			if !ok || fd.Body == nil {
-				continue
-			}
-			// TemporalClient is the interface's own adapter onto loom.
-			if fd.Recv != nil {
-				if id, ok := fd.Recv.List[0].Type.(*ast.Ident); ok && id.Name == "TemporalClient" {
-					continue
-				}
-			}
-			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				if c, ok := n.(*ast.CallExpr); ok {
-					if sel, ok := c.Fun.(*ast.SelectorExpr); ok && starts[sel.Sel.Name] {
-						found = append(found, fd.Name.Name)
+	// In drawdown and its app, whatever the receiver or alias, only these
+	// handlers call one of those methods, each after its gate; none takes
+	// one as a value, and none hands Temporal to another function
+	// (review 53, rounds 3 and 4).
+	gates := map[string]string{"submit": "signedInShown", "createSchedule": "signedInShown", "scheduleAction": "mayStartSchedule", "setBudget": "mayStartSchedule", "decideForm": "mayDecideForm"}
+	found := map[string]bool{}
+	for _, dir := range []string{".", "app"} {
+		fset := token.NewFileSet()
+		pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, pkg := range pkgs {
+			for _, f := range pkg.Files {
+				for _, d := range f.Decls {
+					name := "package level"
+					if fd, ok := d.(*ast.FuncDecl); ok {
+						// TemporalClient is the interface's own adapter onto loom.
+						if fd.Recv != nil {
+							if id, ok := fd.Recv.List[0].Type.(*ast.Ident); ok && id.Name == "TemporalClient" {
+								continue
+							}
+						}
+						name = fd.Name.Name
+					}
+					called := map[ast.Expr]bool{}
+					ast.Inspect(d, func(n ast.Node) bool {
+						if c, ok := n.(*ast.CallExpr); ok {
+							called[c.Fun] = true
+							for _, a := range c.Args {
+								// System's own client goes only to loom.Containers and
+								// loom.Cancel, which list and stop runs.
+								if sel, ok := a.(*ast.SelectorExpr); ok && sel.Sel.Name == "Temporal" && !(dir == "." && (name == "Containers" || name == "Cancel")) {
+									t.Errorf("%s/%s hands Temporal to another function", dir, name)
+								}
+							}
+						}
+						return true
+					})
+					gated := false
+					ast.Inspect(d, func(n ast.Node) bool {
+						sel, ok := n.(*ast.SelectorExpr)
+						if !ok {
+							return true
+						}
+						if starts[sel.Sel.Name] {
+							if !called[sel] {
+								t.Errorf("%s/%s takes %s as a value", dir, name, sel.Sel.Name)
+							}
+							found[name] = true
+						}
+						if g, ok := gates[name]; ok && sel.Sel.Name == g {
+							gated = true
+						}
+						return true
+					})
+					if g, ok := gates[name]; ok && found[name] && !gated {
+						t.Errorf("%s calls a run-starting method without %s", name, g)
 					}
 				}
-				return true
-			})
+			}
 		}
 	}
-	slices.Sort(found)
-	if want := []string{"createSchedule", "scheduleAction", "setBudget", "submit"}; !slices.Equal(found, want) {
-		t.Errorf("functions that start runs: %v, want %v; check each with signedInShown or mayStartSchedule", found, want)
+	var names []string
+	for n := range found {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	if want := []string{"createSchedule", "decideForm", "scheduleAction", "setBudget", "submit"}; !slices.Equal(names, want) {
+		t.Errorf("functions that start runs or act as you: %v, want %v", names, want)
 	}
 }

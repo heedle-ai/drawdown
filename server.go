@@ -66,6 +66,9 @@ type Temporal interface {
 	Submit(ctx context.Context, in loom.RunInput) (workflowID, runID string, err error)
 	List(ctx context.Context) ([]Execution, error)
 	Describe(ctx context.Context, workflowID, runID string) (Execution, error)
+	// Input is what a run was started with (loom.RunInputOf): its program
+	// and plan.
+	Input(ctx context.Context, workflowID string) (loom.RunInput, error)
 	// Steps is each activity of a run as Temporal's history records it.
 	Steps(ctx context.Context, workflowID, runID string) ([]Step, error)
 	// Live returns the latest live frame of each browsing step a run is
