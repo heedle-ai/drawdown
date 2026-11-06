@@ -81,6 +81,10 @@ func (s *Server) decideForm(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
 	defer cancel()
+	if !s.mayDecideForm(ctx, r, wf) {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "A form a step signed in as you would send is decided only on this machine."})
+		return
+	}
 	switch err := s.Temporal.DecideForm(ctx, wf, d); {
 	case errors.Is(err, pirn.ErrInvalid):
 		writeJSON(w, http.StatusConflict, apiError{Error: "That form isn't waiting to be sent any more."})
@@ -90,4 +94,17 @@ func (s *Server) decideForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.live(w, r)
+}
+
+// mayDecideForm says whether this request may send or cancel a form of
+// the run wf: sending one a step signed in as the person would send is
+// acting as them, so only from this machine; from elsewhere only if the
+// run's program has no act step signed in, and a run whose program can't
+// be read counts as signed in (review 53, round 4).
+func (s *Server) mayDecideForm(ctx context.Context, r *http.Request, wf string) bool {
+	if fromThisMachine(r, s.Hosts) && r.Header.Get("Sec-Fetch-Site") != "cross-site" {
+		return true
+	}
+	in, err := s.Temporal.Input(ctx, wf)
+	return err == nil && len(loom.ActSignedIn(in.Plan)) == 0
 }

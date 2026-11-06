@@ -91,6 +91,11 @@ func (t TemporalClient) List(ctx context.Context) ([]Execution, error) {
 }
 
 // Describe returns one execution's status and times.
+// Input is what the run workflowID was started with.
+func (t TemporalClient) Input(ctx context.Context, workflowID string) (loom.RunInput, error) {
+	return loom.RunInputOf(ctx, t.Client, workflowID)
+}
+
 func (t TemporalClient) Describe(ctx context.Context, workflowID, runID string) (Execution, error) {
 	d, err := t.Client.DescribeWorkflowExecution(ctx, workflowID, runID)
 	if err != nil {
