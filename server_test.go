@@ -636,6 +636,15 @@ func TestServeForBrowser(t *testing.T) {
 	}
 	ui := &drawdown.Server{Skills: &treadle.Library{Store: w.store}, Commands: commands, Store: w.store, Ref: loom.DefaultRef, Registry: commands(),
 		Temporal: w.fake, TemporalUI: "http://localhost:8233", Examples: map[string]string{"shipment": shipment.Program}, MemoryFile: w.memory, StoreDir: w.store.Dir()}
+	// Calls no record holds, as loom's worker counts them in the usage
+	// ledger (roadmap 10.4.1): a front-door ask, a retried attempt and a
+	// run that failed, for the Costs page.
+	now := time.Now().UTC()
+	w.ledger(
+		loom.LedgerEntry{Kind: loom.LedgerFrontDoor, At: now, Workflow: "ask-browser", Run: "a", Activity: "1", Calls: []pirn.Call{{Model: "claude-sonnet-5-5", Input: 2400, Output: 310}, {Model: "claude-sonnet-5-5", Input: 2600, Output: 280}}},
+		loom.LedgerEntry{Kind: loom.LedgerAttempt, At: now, Workflow: "loom-browser/plan", Run: "p", Activity: "1", Node: "n0", Step: "agent", Attempt: 1, Failed: true, Calls: []pirn.Call{{Model: "claude-sonnet-5-5", Input: 18000, Output: 1200}}},
+		loom.LedgerEntry{Kind: loom.LedgerAttempt, At: now, Workflow: "loom-browser/plan", Run: "p", Activity: "2", Node: "n0", Step: "agent", Attempt: 2, Failed: true, Calls: []pirn.Call{{Model: "claude-sonnet-5-5", Input: 21000, Output: 1500}}},
+	)
 	s := &http.Server{Addr: addr, Handler: ui.Handler()}
 	go s.ListenAndServe()
 	defer s.Close()
