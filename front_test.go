@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -404,65 +406,136 @@ func TestInv_EveryRunStartIsHere(t *testing.T) {
 			}
 		}
 	}
-	// In drawdown and its app, whatever the receiver or alias, only these
-	// handlers call one of those methods, each after its gate; none takes
-	// one as a value, and none hands Temporal to another function
-	// (review 53, rounds 3 and 4).
+	// In drawdown and its app, type-checked, whatever the receiver or
+	// alias: only these handlers call a method that starts runs or acts as
+	// you, each after its gate; none takes one as a value; Temporal's own
+	// client is handed only from each adapter to its loom function, and
+	// its run-starting calls appear nowhere; no value of type Temporal or
+	// Budgeter is handed on (review 53, rounds 3 to 5).
 	gates := map[string]string{"submit": "signedInShown", "createSchedule": "signedInShown", "scheduleAction": "mayStartSchedule", "setBudget": "mayStartSchedule", "decideForm": "mayDecideForm"}
+	adapters := map[string]string{ // receiver.method: the loom function it may hand the client to
+		"TemporalClient.Submit": "Submit", "TemporalClient.ChangeSkills": "ChangeSkills", "TemporalClient.ListSkills": "ListSkills",
+		"TemporalClient.Writes": "Writes", "TemporalClient.DecideWrite": "DecideWrite", "TemporalClient.DecideForm": "DecideForm",
+		"TemporalClient.Ask": "Ask", "TemporalClient.WriteProgram": "WriteProgram", "TemporalClient.Input": "RunInputOf",
+		"TemporalClient.CreateSchedule": "CreateSchedule", "TemporalClient.Schedules": "Schedules", "TemporalClient.ScheduleAction": "ScheduleAction",
+		"TemporalClient.SetBudget": "SetBudget", "PodmanSystem.Containers": "Containers", "PodmanSystem.Cancel": "Cancel",
+	}
+	rawStarts := map[string]bool{"ExecuteWorkflow": true, "SignalWorkflow": true, "SignalWithStartWorkflow": true, "UpdateWorkflow": true, "Create": true, "Trigger": true, "Unpause": true, "Update": true, "Backfill": true}
+	const sdkClient = "go.temporal.io/sdk/client"
 	found := map[string]bool{}
+	fset := token.NewFileSet()
+	imp := importer.ForCompiler(fset, "source", nil)
+	var ddTemporal, ddBudgeter *types.Interface
 	for _, dir := range []string{".", "app"} {
-		fset := token.NewFileSet()
 		pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, pkg := range pkgs {
+		var files []*ast.File
+		var name string
+		for n, pkg := range pkgs {
+			name = n
 			for _, f := range pkg.Files {
-				for _, d := range f.Decls {
-					name := "package level"
-					if fd, ok := d.(*ast.FuncDecl); ok {
-						// TemporalClient is the interface's own adapter onto loom.
-						if fd.Recv != nil {
-							if id, ok := fd.Recv.List[0].Type.(*ast.Ident); ok && id.Name == "TemporalClient" {
-								continue
+				files = append(files, f)
+			}
+		}
+		info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Selections: map[*ast.SelectorExpr]*types.Selection{}, Uses: map[*ast.Ident]types.Object{}}
+		tp, err := (&types.Config{Importer: imp}).Check("github.com/heedle-ai/"+map[string]string{".": "drawdown", "app": "drawdown/app"}[dir], fset, files, info)
+		if err != nil {
+			t.Fatalf("type-checking %s (%s): %v", dir, name, err)
+		}
+		if dir == "." {
+			ddTemporal = tp.Scope().Lookup("Temporal").Type().Underlying().(*types.Interface)
+			ddBudgeter = tp.Scope().Lookup("Budgeter").Type().Underlying().(*types.Interface)
+		}
+		isDD := func(tv types.Type) bool {
+			if tv == nil {
+				return false
+			}
+			if _, ok := tv.Underlying().(*types.Interface); !ok {
+				return false // a concrete type implementing it is its adapter, checked below
+			}
+			return types.Implements(tv, ddTemporal) || types.Implements(tv, ddBudgeter)
+		}
+		isClient := func(tv types.Type) bool {
+			n, ok := tv.(*types.Named)
+			return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == sdkClient
+		}
+		for _, f := range files {
+			for _, d := range f.Decls {
+				fn, recv := "package level", ""
+				if fd, ok := d.(*ast.FuncDecl); ok {
+					fn = fd.Name.Name
+					if fd.Recv != nil {
+						switch rt := fd.Recv.List[0].Type.(type) {
+						case *ast.Ident:
+							recv = rt.Name
+						case *ast.StarExpr:
+							if id, ok := rt.X.(*ast.Ident); ok {
+								recv = id.Name
 							}
 						}
-						name = fd.Name.Name
 					}
-					called := map[ast.Expr]bool{}
-					ast.Inspect(d, func(n ast.Node) bool {
-						if c, ok := n.(*ast.CallExpr); ok {
-							called[c.Fun] = true
-							for _, a := range c.Args {
-								// System's own client goes only to loom.Containers and
-								// loom.Cancel, which list and stop runs.
-								if sel, ok := a.(*ast.SelectorExpr); ok && sel.Sel.Name == "Temporal" && !(dir == "." && (name == "Containers" || name == "Cancel")) {
-									t.Errorf("%s/%s hands Temporal to another function", dir, name)
+				}
+				where := dir + "/" + recv + "." + fn
+				called := map[ast.Expr]bool{}
+				var startAt, gateAt token.Pos
+				ast.Inspect(d, func(n ast.Node) bool {
+					switch x := n.(type) {
+					case *ast.CallExpr:
+						called[x.Fun] = true
+						for _, a := range x.Args {
+							at := info.Types[a].Type
+							if isDD(at) {
+								t.Errorf("%s hands a %s on", where, at)
+							}
+							if at != nil && isClient(at) {
+								callee := ""
+								if sel, ok := x.Fun.(*ast.SelectorExpr); ok {
+									if id, ok := sel.X.(*ast.Ident); ok {
+										callee = id.Name + "." + sel.Sel.Name
+									}
+								}
+								// The app's worker takes the client to run, to wait
+								// on form decisions, to find scripts, and to resume
+								// what a budget paused at a new month.
+								worker := dir == "app" && fn == "Run" && map[string]bool{"worker.New": true, "loom.Confirmer": true, "loom.Scripts": true, "loom.ResumeBudgetsEvery": true}[callee]
+								if want, ok := adapters[recv+"."+fn]; !worker && (!ok || callee != "loom."+want) {
+									t.Errorf("%s hands Temporal's client to %s", where, callee)
 								}
 							}
 						}
-						return true
-					})
-					gated := false
-					ast.Inspect(d, func(n ast.Node) bool {
-						sel, ok := n.(*ast.SelectorExpr)
-						if !ok {
-							return true
-						}
-						if starts[sel.Sel.Name] {
-							if !called[sel] {
-								t.Errorf("%s/%s takes %s as a value", dir, name, sel.Sel.Name)
+					case *ast.SelectorExpr:
+						s := info.Selections[x]
+						if s != nil && rawStarts[x.Sel.Name] {
+							if r := s.Recv(); r != nil && (isClient(r) || strings.Contains(r.String(), sdkClient)) {
+								t.Errorf("%s calls Temporal's %s itself", where, x.Sel.Name)
 							}
-							found[name] = true
 						}
-						if g, ok := gates[name]; ok && sel.Sel.Name == g {
-							gated = true
-						}
-						return true
-					})
-					if g, ok := gates[name]; ok && found[name] && !gated {
-						t.Errorf("%s calls a run-starting method without %s", name, g)
 					}
+					return true
+				})
+				ast.Inspect(d, func(n ast.Node) bool {
+					x, ok := n.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					if s := info.Selections[x]; s != nil && starts[x.Sel.Name] && s.Kind() == types.MethodVal && isDD(s.Recv()) {
+						if !called[x] {
+							t.Errorf("%s takes %s as a value", where, x.Sel.Name)
+						}
+						found[fn] = true
+						if startAt == 0 {
+							startAt = x.Pos()
+						}
+					}
+					if g, ok := gates[fn]; ok && x.Sel.Name == g && gateAt == 0 {
+						gateAt = x.Pos()
+					}
+					return true
+				})
+				if g, ok := gates[fn]; ok && startAt != 0 && (gateAt == 0 || gateAt > startAt) {
+					t.Errorf("%s calls a run-starting method before %s", fn, g)
 				}
 			}
 		}
