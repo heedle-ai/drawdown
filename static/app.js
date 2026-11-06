@@ -652,15 +652,17 @@ function LiveView({ workflow }) {
   const [decided, setDecided] = useState(() => new Set());
   const waiting = (f) => { const p = DD.pendingForm(f); return p && !decided.has(p.id) ? p : null; };
   if (!data || !data.frames || data.frames.length === 0) return null;
-  return html`${data.frames.map((f) => html`
-    <div class="panel live" key=${f.activity} style=${{ marginTop: "12px" }}>
+  // Side by side, as the steps run: a step waiting for you takes the
+  // whole row, to be read and driven.
+  return html`<div class="lives">${data.frames.map((f) => html`
+    <div class=${"panel live" + (waiting(f) || DD.wheelOf(f) ? " wide" : "")} key=${f.activity}>
       ${waiting(f) && html`<${PendingForm} workflow=${workflow} form=${waiting(f)} onDone=${() => setDecided((d) => new Set(d).add(waiting(f).id))} />`}
       <div class="pills"><${StatusPill} status="Running" /> <${KindPill} kind=${f.kind === "act" ? "act" : "browse"}>${f.kind === "act" ? "Claude in a browser" : "live browser"}<//>
         <span class="mono">${f.url}</span>
         <${Pill} cls="k-other" plain>attempt ${f.attempt}<//><span class="muted">${DD.wheelOf(f) ? "waiting for you" : "view only, updates every few seconds"}</span></div>
       ${DD.wheelOf(f) ? html`<${TakeTheWheel} wheel=${DD.wheelOf(f)} />`
         : f.image.startsWith("data:image/jpeg;base64,") && html`<img src=${f.image} alt=${"Live view of " + f.url} />`}
-    </div>`)}`;
+    </div>`)}</div>`;
 }
 
 function AgentPage({ agent, refs, heads, info }) {
