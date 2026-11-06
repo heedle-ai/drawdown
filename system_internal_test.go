@@ -207,7 +207,7 @@ func TestInv_EveryStepIsLabelledHere(t *testing.T) {
 			t.Errorf("app.go: %s registers with %s, not steps", m[0], m[1])
 		}
 	}
-	if !strings.Contains(string(src), "steps := loom.Counted(loom.Labelled(w), s)") {
+	if !strings.Contains(string(src), "steps := loom.Labelled(loom.Counted(w, s))") {
 		t.Error("app.go doesn't make steps with loom.Labelled")
 	}
 	if !strings.Contains(string(src), `Pins: kept(*keepImages), Kept: kept("", *browserImage, *agentImage, *browserAgentImage)`) {
@@ -252,7 +252,7 @@ func TestInv_TheUIsWorkerSaysItsHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(src), "worker.New(") != 1 || !strings.Contains(string(src), "worker.New(c, *queue, reed.WorkerOptions(worker.Options{BackgroundActivityContext: loom.WorkerContext(*store)}))") {
+	if strings.Count(string(src), "worker.New(") != 1 || !strings.Contains(string(src), "worker.New(c, *queue, reed.WorkerOptions(worker.Options{BackgroundActivityContext: loom.WorkerContext(*store), WorkerStopTimeout: loom.WorkerStopTimeout}))") {
 		t.Error("app.go's worker doesn't start its activities from loom.WorkerContext(*store)")
 	}
 }
@@ -282,5 +282,22 @@ func TestInv_NoPruneWhileAnotherHomeRuns(t *testing.T) {
 	}
 	if !strings.Contains(string(src), "Homes: *homes, Home: bobbin.HomeOf(*store)}") {
 		t.Error("app.go doesn't give the System page the homes folder and its own home")
+	}
+}
+
+// TestInv_TheUIsWorkerCounts: the UI's worker registers its commands and
+// skills counted in the usage ledger (loom.Counted), its front door
+// writes there, and it gives its steps loom.WorkerStopTimeout to finish,
+// and note their calls, when it stops (DRAW-324, roadmap 10.4.1, review
+// 56).
+func TestInv_TheUIsWorkerCounts(t *testing.T) {
+	src, err := os.ReadFile("app/app.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"steps := loom.Labelled(loom.Counted(w, s))", "loom.Writer{Asker: claude, Ledger: s,", "WorkerStopTimeout: loom.WorkerStopTimeout"} {
+		if !strings.Contains(string(src), want) {
+			t.Errorf("app.go doesn't say %q", want)
+		}
 	}
 }

@@ -107,7 +107,7 @@ func (s *Server) costs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
 		return
 	}
-	extras, err := loom.ExtrasBetween(ctx, s.Store, first, end, runs, "")
+	extras, err := loom.ExtrasBetween(ctx, s.Store, first, end, "")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
 		return
@@ -306,7 +306,6 @@ func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time
 	}
 	sums := map[string]*acc{}
 	var problems []string
-	var all []loom.RunUsage
 	earliest := now
 	for ref, names := range byRef {
 		// A schedule on a ref that can't be read gets no spend, never $0.
@@ -324,7 +323,6 @@ func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time
 		for _, n := range names {
 			sums[n] = &acc{}
 		}
-		all = append(all, runs...)
 		if from[ref].Before(earliest) {
 			earliest = from[ref]
 		}
@@ -344,21 +342,32 @@ func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time
 	// And each schedule's calls no record holds, from the ledger (roadmap
 	// 10.4.1), as its budget counts them.
 	if len(sums) > 0 {
-		extras, err := loom.ExtrasBetween(ctx, s.Store, earliest, now.Add(time.Minute), all, "")
+		extras, err := loom.ExtrasBetween(ctx, s.Store, earliest, now.Add(time.Minute), "")
 		if err != nil {
 			problems = append(problems, "the usage ledger: "+err.Error())
 		}
 		for _, x := range extras {
-			a, ok := sums[x.Schedule]
-			if !ok || x.Schedule == "" {
-				continue
+			names := []string{x.Schedule}
+			if x.Unreadable {
+				// An entry that can't be read may be any schedule's: each
+				// shows a step with no counts, as its budget would.
+				names = names[:0]
+				for n := range sums {
+					names = append(names, n)
+				}
 			}
-			w := windows[x.Schedule]
-			if !x.At.Before(w.month) {
-				a.month = a.month.Add(x.Usage)
-			}
-			if !x.At.Before(w.last30) {
-				a.last30 = a.last30.Add(x.Usage)
+			for _, n := range names {
+				a, ok := sums[n]
+				if !ok || n == "" {
+					continue
+				}
+				w := windows[n]
+				if !x.At.Before(w.month) {
+					a.month = a.month.Add(x.Usage)
+				}
+				if !x.At.Before(w.last30) {
+					a.last30 = a.last30.Add(x.Usage)
+				}
 			}
 		}
 	}
