@@ -329,6 +329,12 @@ func (s *Server) setBudget(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
 	defer cancel()
+	// A new budget can resume a schedule its budget paused (loom.SetBudget),
+	// so it starts runs as resume does (review 53, round 3).
+	if !s.mayStartSchedule(ctx, r, name) {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "A program whose act steps start signed in as you runs only from this machine."})
+		return
+	}
 	if err := bt.SetBudget(ctx, name, loom.Budget{USD: b, ResumeNextMonth: req.ResumeNextMonth}); err != nil {
 		var nf *serviceerror.NotFound
 		if errors.As(err, &nf) || errors.Is(err, loom.ErrNoSchedule) {
