@@ -22,7 +22,7 @@ type Wheel interface {
 	Frame() reed.Frame
 	// HandBack gives it back; with keep, the person keeps the sign-in of
 	// the site it's on (roadmap 9.11).
-	HandBack(keep bool)
+	HandBack(keep bool, host string)
 }
 
 // Wheels finds the steps of this process waiting for a person.
@@ -131,11 +131,12 @@ func (s *Server) wheelHandBack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Keep bool `json:"keep"`
+		Keep bool   `json:"keep"`
+		Host string `json:"host"` // the site the person saw (review 53)
 	}
 	if !readJSONUpTo(w, r, &in, 1<<10) {
 		return
 	}
-	wh.HandBack(in.Keep)
+	wh.HandBack(in.Keep, in.Host)
 	w.WriteHeader(http.StatusNoContent)
 }

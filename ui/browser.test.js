@@ -844,16 +844,16 @@ test("a step waiting for you can be driven here, and handed back", async () => {
 // you, and the run carries it; hand back can keep the sign-in; Saved
 // sign-ins lists them under You, each with Forget.
 test("signed in as you: the card says so, hand back keeps it, You forgets it", async () => {
-  const program = '(act "Change my address" "https://forms.example.org/account")';
-  const plan = { nodes: [{ id: "n0", activity: "Act", args: ["Change my address", "https://forms.example.org/account"] }] };
+  const program = '(act "Change my address" "https://forms.example.org/account" "cdn.example.org" :signed-in "forms.example.org")';
+  const plan = { nodes: [{ id: "n0", activity: "Act", args: ["Change my address", "https://forms.example.org/account", "cdn.example.org", ":signed-in", "forms.example.org"] }] };
   for (const scheme of ["light", "dark"]) {
-    const { p, ctx, errors } = await page({ scheme, ask: { summary: "I'll change it.", program, plan, actHosts: ["forms.example.org"], actSignedIn: ["forms.example.org"], ready: { needs: [], ready: true } } });
+    const { p, ctx, errors } = await page({ scheme, ask: { summary: "I'll change it.", program, plan, actHosts: ["cdn.example.org", "forms.example.org"], actSignedIn: ["forms.example.org"], ready: { needs: [], ready: true } } });
     await ctx.route("**/api/ready", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ needs: [], ready: true }) }));
     await p.locator(".front-row input").fill("Change my address");
     await p.getByRole("button", { name: "Ask", exact: true }).click();
     const note = p.locator(".proposal .acts", { hasText: "signed in as you" });
     await note.waitFor();
-    assert.equal(await note.textContent(), "They start signed in as you on forms.example.org, with the sign-in you kept (You), and always stop before sending and ask you.");
+    assert.equal(await note.textContent(), "They start signed in as you on forms.example.org, with a sign-in you kept there (You), and stop before sending and ask you. Their other sites, cdn.example.org, can see the pages they reach signed in.");
     assert.equal(await note.locator("strong").count(), 1, "not in red");
     if (process.env.DRAWDOWN_SHOTS) await p.locator(".proposal").screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `signed-in-card-${scheme}.png`) });
     let sent = null;
@@ -896,7 +896,7 @@ test("signed in as you: the card says so, hand back keeps it, You forgets it", a
   await keep.check();
   await p.getByRole("button", { name: "Hand back" }).click();
   await p.getByText("Handed back").waitFor();
-  assert.deepEqual(body, { keep: true });
+  assert.deepEqual(body, { keep: true, host: "forms.example.org" });
   assert.deepEqual(errors.filter((e) => !/404/.test(e)), []);
   await ctx.unrouteAll({ behavior: "ignoreErrors" });
   await ctx.close();

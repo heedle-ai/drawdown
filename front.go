@@ -44,7 +44,7 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
 	default:
-		writeJSON(w, http.StatusOK, proposal{Proposal: out, ActHosts: hosts, ActSendsFreely: freely, ActUses: uses, ActSignedIn: s.signedIn(ctx, hosts)})
+		writeJSON(w, http.StatusOK, proposal{Proposal: out, ActHosts: hosts, ActSendsFreely: freely, ActUses: uses, ActSignedIn: loom.ActSignedIn(*out.Plan)})
 	}
 }
 

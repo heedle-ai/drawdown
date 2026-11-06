@@ -189,10 +189,11 @@ func (m sessionKeys) Lookup(_ context.Context, n string) (string, bool, error) {
 func (m sessionKeys) Store(_ context.Context, n, v string) error { m[n] = v; return nil }
 func (m sessionKeys) Delete(_ context.Context, n string) error   { delete(m, n); return nil }
 
-// TestInv_SignedInRunsOnlyWhereShown: a program whose act steps would
-// start signed in as you (a kept sign-in on one of their hosts) runs or is
-// scheduled only when the request carries exactly those hosts, as the
-// card showed them in red; /api/compile gives them (roadmap 9.11).
+// TestInv_SignedInRunsOnlyWhereShown: a program whose act steps start
+// signed in as you (:signed-in) runs or is scheduled only when the request
+// carries exactly those hosts, as the card showed them in red;
+// /api/compile gives them, from the program alone (roadmap 9.11, review
+// 53).
 func TestInv_SignedInRunsOnlyWhereShown(t *testing.T) {
 	w := newWorld(t)
 	commands := func() *registry.Registry {
@@ -208,7 +209,7 @@ func TestInv_SignedInRunsOnlyWhereShown(t *testing.T) {
 	ui := &drawdown.Server{Skills: &treadle.Library{Store: w.store}, Commands: commands, Store: w.store, Ref: loom.DefaultRef, Registry: commands(), Temporal: tc, Sessions: ss}
 	w.srv = httptest.NewServer(ui.Handler())
 	t.Cleanup(w.srv.Close)
-	prog := `(act "Change my address" "https://forms.example.org/" "cdn.example.org")`
+	prog := `(act "Change my address" "https://forms.example.org/" "cdn.example.org" :signed-in "forms.example.org")`
 	hosts := []string{"cdn.example.org", "forms.example.org"}
 	_, got, _ := w.call("POST", "/api/compile", map[string]any{"program": prog})
 	if in, _ := got["actSignedIn"].([]any); len(in) != 1 || in[0] != "forms.example.org" {

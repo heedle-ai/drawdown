@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net/http"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/heedle-ai/loom"
@@ -17,16 +16,26 @@ import (
 	"github.com/heedle-ai/shuttle/plan"
 )
 
-// signedInShown says whether the person was shown, exactly, the hosts
-// where p's act steps would start signed in as them now, answering 422
-// with them if not: no run starts signed in unannounced (roadmap 9.11).
-func (s *Server) signedInShown(w http.ResponseWriter, ctx context.Context, p plan.Plan, shown []string) bool {
-	in := s.signedIn(ctx, loom.ActHosts(p))
-	if slices.Equal(in, shown) || len(in) == 0 && len(shown) == 0 {
+// signedInShown lets a program whose act steps start signed in as the
+// person (:signed-in, loom.ActSignedIn) run or be scheduled only from this
+// machine (403 elsewhere: a run signed in as you shows the pages it saw to
+// whoever started it; review 53), and only if the page showed those hosts,
+// exactly (422). It reads the program alone, never which sign-ins are
+// kept, so it tells no one which sites you have one on.
+func (s *Server) signedInShown(w http.ResponseWriter, r *http.Request, p plan.Plan, shown []string) bool {
+	in := loom.ActSignedIn(p)
+	if len(in) == 0 {
+		return true
+	}
+	if !fromThisMachine(r, s.Hosts) || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "A program whose act steps start signed in as you runs only from this machine."})
+		return false
+	}
+	if slices.Equal(in, shown) {
 		return true
 	}
 	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-		"error":       "This program's act steps would start signed in as you on " + strings.Join(in, ", ") + ". Run it where the page says so.",
+		"error":       "This program's act steps start signed in as you on " + strings.Join(in, ", ") + ". Run it where the page says so.",
 		"actSignedIn": in,
 	})
 	return false
@@ -37,30 +46,6 @@ func (s *Server) signedInShown(w http.ResponseWriter, ctx context.Context, p pla
 type Sessions interface {
 	List(ctx context.Context) ([]pirn.SessionInfo, error)
 	Forget(ctx context.Context, host string) error
-}
-
-// signedIn are the hosts of hosts with a saved sign-in, sorted: where a
-// program's act steps would start signed in as you.
-func (s *Server) signedIn(ctx context.Context, hosts []string) []string {
-	if s.Sessions == nil || len(hosts) == 0 {
-		return nil
-	}
-	list, err := s.Sessions.List(ctx)
-	if err != nil {
-		return nil
-	}
-	kept := map[string]bool{}
-	for _, l := range list {
-		kept[l.Host] = true
-	}
-	var out []string
-	for _, h := range hosts {
-		if kept[h] {
-			out = append(out, h)
-		}
-	}
-	sort.Strings(out)
-	return out
 }
 
 // listSessions lists the saved sign-ins, to this machine only.
@@ -75,7 +60,7 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.Sessions.List(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "Your saved sign-ins couldn't be read."}) // never the keychain's words (review 53)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": list})
@@ -101,7 +86,7 @@ func (s *Server) forgetSession(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, pirn.ErrInvalid):
 		writeJSON(w, http.StatusBadRequest, apiError{Error: err.Error()})
 	case err != nil:
-		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "That sign-in couldn't be forgotten."}) // never the keychain's words (review 53)
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}

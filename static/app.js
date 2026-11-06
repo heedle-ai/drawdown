@@ -617,7 +617,7 @@ function ActNote({ hosts, freely, uses, signedIn }) {
     ${asking.length > 0 && html`<p class="acts asks" role="note">Its act steps can click and type on ${list(asking)}, and stop before sending and ask you.</p>`}
     ${freely && freely.length > 0 && html`<p class="acts" role="note"><strong>Its act steps can click, type and submit forms on ${list(freely)} without asking again.</strong></p>`}
     ${DD.usesOf(uses) && uses.length > 0 && html`<p class="acts asks" role="note">They may use your ${DD.usesWords(uses)}, from <a href="#/connectors">You</a>. Claude never sees them.</p>`}
-    ${signedIn && signedIn.length > 0 && html`<p class="acts" role="note"><strong>They start signed in as you on ${list(signedIn)}</strong>, with the sign-in you kept (<a href="#/connectors">You</a>), and always stop before sending and ask you.</p>`}`;
+    ${signedIn && signedIn.length > 0 && html`<p class="acts" role="note"><strong>They start signed in as you on ${list(signedIn)}</strong>, with a sign-in you kept there (<a href="#/connectors">You</a>), and stop before sending and ask you.${hosts.some((h) => !signedIn.includes(h)) ? html` Their other sites, ${list(hosts.filter((h) => !signedIn.includes(h)))}, can see the pages they reach signed in.` : ""}</p>`}`;
 }
 
 // PendingForm is a form an act step filled and waits to send: Claude's
@@ -3293,7 +3293,7 @@ function TakeTheWheel({ wheel }) {
   };
   const handBack = async () => {
     setBusy(true);
-    const r = await api(`/api/wheel/${wheel.id}/handback`, { keep });
+    const r = await api(`/api/wheel/${wheel.id}/handback`, keep ? { keep, host: hostOf(wheel.url) } : { keep });
     setBusy(false);
     if (r.ok || r.status === 409) setHanded(true);
     else setError((r.data && r.data.error) || String(r.data));
