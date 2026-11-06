@@ -1291,7 +1291,7 @@ function SavedSignIns() {
   return html`
     <div class="panel connector" id="sign-ins">
       <div class="pills"><strong>Saved sign-ins</strong><${Pill} cls="k-act" plain>act steps on that site<//></div>
-      <p class="muted">Kept when you sign in while driving a step and tick "Keep me signed in". Encrypted on this machine with a key in its keychain, loaded only into act steps allowed on that very site, which always stop before sending and ask you. One unused for 30 days is forgotten.</p>
+      <p class="muted">Kept when you sign in while driving a step and tick "Keep me signed in". Encrypted on this machine with a key in its keychain, loaded only into act steps whose program names that very site (<code>:signed-in</code>), which always stop before sending and ask you. One unused for 30 days is forgotten.</p>
       ${list.length === 0 ? html`<p class="muted">None kept.</p>` : list.map((x) => html`
         <div class="key-row" key=${x.host} style=${{ flexDirection: "row", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
           <span class="mono">${x.host}</span>

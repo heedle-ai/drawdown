@@ -870,6 +870,10 @@ test("signed in as you: the card says so, hand back keeps it, You forgets it", a
     await p.goto(BASE + "/#/connectors");
     const panel = p.locator("#sign-ins");
     await panel.getByText("forms.example.org").waitFor();
+    // It says what loads a sign-in: a program naming the site, not any
+    // step allowed there (review 53: the panel still said the latter).
+    const says = await panel.textContent();
+    assert.ok(says.includes("whose program names that very site (:signed-in)") && !says.includes("allowed on that very site"), says);
     if (process.env.DRAWDOWN_SHOTS) await panel.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `sign-ins-${scheme}.png`) });
     await panel.getByRole("button", { name: "Forget" }).click();
     await panel.getByText("None kept.").waitFor();
