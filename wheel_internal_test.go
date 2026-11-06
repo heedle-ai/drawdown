@@ -17,6 +17,7 @@ type fakeWheel struct {
 	keys    []string
 	clicks  [][2]int
 	handed  bool
+	keep    bool
 	waiting bool
 }
 
@@ -43,7 +44,7 @@ func (f *fakeWheel) Key(k string) error {
 func (f *fakeWheel) Frame() reed.Frame {
 	return reed.Frame{URL: "https://forms.example.org/x", JPEG: []byte{0xff, 0xd8, 0xff}}
 }
-func (f *fakeWheel) HandBack() { f.handed, f.waiting = true, false }
+func (f *fakeWheel) HandBack(keep bool) { f.handed, f.keep, f.waiting = true, keep, false }
 
 type fakeWheels map[string]*fakeWheel
 
@@ -145,7 +146,7 @@ func TestInv_WheelOnlyFromHereWhileWaiting(t *testing.T) {
 	if code := call("POST", "/api/wheel/"+strings.Repeat("f", 32)+"/input", `{"key":"a"}`, here); code != 409 {
 		t.Errorf("a step not waiting: %d", code)
 	}
-	if code := call("POST", "/api/wheel/"+id+"/handback", "", here); code != 204 || !fw.handed {
+	if code := call("POST", "/api/wheel/"+id+"/handback", `{"keep":true}`, here); code != 204 || !fw.handed || !fw.keep {
 		t.Errorf("hand back: %d", code)
 	}
 	if code := call("POST", in, `{"key":"x"}`, here); code != 409 {

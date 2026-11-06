@@ -1004,3 +1004,15 @@ test("taking the wheel: what a frame says, keys and clicks", () => {
   assert.equal(DD.wheelPoint(640, 0, 640, 400, [1280, 800]), null);
   assert.equal(DD.wheelPoint(10, 10, 0, 400, [1280, 800]), null);
 });
+
+// Roadmap 9.11: the saved sign-ins are read only when well formed, and
+// only by host and times.
+test("saved sign-ins: hosts and times, nothing else", () => {
+  const t = "2026-11-06T10:00:00Z";
+  assert.deepEqual(DD.asSessions({ sessions: [{ host: "forms.example.org", saved: t, used: t, state: "x" }] }), [{ host: "forms.example.org", saved: t, used: t }]);
+  assert.deepEqual(DD.asSessions({ sessions: [] }), []);
+  for (const bad of [null, {}, { sessions: [{ host: "a b", saved: t, used: t }] }, { sessions: [{ host: "x.example", saved: "soon", used: t }] }]) assert.equal(DD.asSessions(bad), null);
+  const p = { summary: "s", program: "(act \"x\" \"https://forms.example.org/\")", plan: { nodes: [] }, actHosts: ["forms.example.org"] };
+  assert.deepEqual(DD.asProposal({ ...p, actSignedIn: ["forms.example.org"] }).actSignedIn, ["forms.example.org"]);
+  assert.equal(DD.asProposal({ ...p, actSignedIn: ["other.example.org"] }), null);
+});

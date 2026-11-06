@@ -840,6 +840,68 @@ test("a step waiting for you can be driven here, and handed back", async () => {
   await ctx.close();
 });
 
+// Roadmap 9.11: the card says, in red, where act steps start signed in as
+// you, and the run carries it; hand back can keep the sign-in; Saved
+// sign-ins lists them under You, each with Forget.
+test("signed in as you: the card says so, hand back keeps it, You forgets it", async () => {
+  const program = '(act "Change my address" "https://forms.example.org/account")';
+  const plan = { nodes: [{ id: "n0", activity: "Act", args: ["Change my address", "https://forms.example.org/account"] }] };
+  for (const scheme of ["light", "dark"]) {
+    const { p, ctx, errors } = await page({ scheme, ask: { summary: "I'll change it.", program, plan, actHosts: ["forms.example.org"], actSignedIn: ["forms.example.org"], ready: { needs: [], ready: true } } });
+    await ctx.route("**/api/ready", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ needs: [], ready: true }) }));
+    await p.locator(".front-row input").fill("Change my address");
+    await p.getByRole("button", { name: "Ask", exact: true }).click();
+    const note = p.locator(".proposal .acts", { hasText: "signed in as you" });
+    await note.waitFor();
+    assert.equal(await note.textContent(), "They start signed in as you on forms.example.org, with the sign-in you kept (You), and always stop before sending and ask you.");
+    assert.equal(await note.locator("strong").count(), 1, "not in red");
+    if (process.env.DRAWDOWN_SHOTS) await p.locator(".proposal").screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `signed-in-card-${scheme}.png`) });
+    let sent = null;
+    await ctx.route("**/api/runs", (r) => { sent = r.request().postDataJSON(); r.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: "not here" }) }); });
+    await p.getByRole("button", { name: "Run it now" }).click();
+    await p.getByText("not here").waitFor();
+    assert.deepEqual(sent.actSignedIn, ["forms.example.org"]);
+    // Saved sign-ins, under You.
+    let kept = [{ host: "forms.example.org", saved: "2026-11-01T10:00:00Z", used: "2026-11-05T10:00:00Z" }];
+    let forgot = null;
+    await ctx.route("**/api/profile", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ fields: [] }) }));
+    await ctx.route("**/api/sessions", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ sessions: kept }) }));
+    await ctx.route("**/api/sessions/forget", (r) => { forgot = r.request().postDataJSON(); kept = []; r.fulfill({ status: 204 }); });
+    await p.goto(BASE + "/#/connectors");
+    const panel = p.locator("#sign-ins");
+    await panel.getByText("forms.example.org").waitFor();
+    if (process.env.DRAWDOWN_SHOTS) await panel.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `sign-ins-${scheme}.png`) });
+    await panel.getByRole("button", { name: "Forget" }).click();
+    await panel.getByText("None kept.").waitFor();
+    assert.deepEqual(forgot, { host: "forms.example.org" });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // Hand back, keeping the sign-in.
+  const sub = await (await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program: '(echo "keep")' }) })).json();
+  const id = "fedcba9876543210fedcba9876543210";
+  const frame = { activity: "3", kind: "act", attempt: 1, url: "https://forms.example.org/account", wheel: { id, node: "n0", reason: "Sign in, please.", url: "https://forms.example.org/account" }, here: true, viewport: [1280, 800] };
+  const { p, ctx, errors } = await page({});
+  await ctx.route(new RegExp(`/api/runs/${encodeURIComponent(sub.workflowId)}/`), async (r) => {
+    const res = await r.fetch(), d = await res.json();
+    d.execution = { ...(d.execution || {}), status: "Running" }; delete d.record;
+    r.fulfill({ response: res, json: d });
+  });
+  let body = null;
+  await ctx.route("**/api/live/*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames: [frame] }) }));
+  await ctx.route(`**/api/wheel/${id}/frame*`, (r) => r.fulfill({ status: 404 }));
+  await ctx.route(`**/api/wheel/${id}/handback`, (r) => { body = r.request().postDataJSON(); r.fulfill({ status: 204 }); });
+  await p.goto(BASE + "/#/run/" + [sub.workflowId, sub.runId].map(encodeURIComponent).join("/"));
+  const keep = p.getByLabel("Keep me signed in on forms.example.org");
+  await keep.check();
+  await p.getByRole("button", { name: "Hand back" }).click();
+  await p.getByText("Handed back").waitFor();
+  assert.deepEqual(body, { keep: true });
+  assert.deepEqual(errors.filter((e) => !/404/.test(e)), []);
+  await ctx.unrouteAll({ behavior: "ignoreErrors" });
+  await ctx.close();
+});
+
 // Roadmap 9.8: the card names the details act steps may use, and the
 // Connectors page keeps them under You, shown only here.
 test("the card names the details act steps may use, and You keeps them", async () => {

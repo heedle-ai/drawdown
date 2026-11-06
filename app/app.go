@@ -69,9 +69,14 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	keepImages := fs.String("keep-images", "", "the images heedle's release pins, comma-separated (heedle up gives them): the System page never removes them or the worker's own, and removes none without them")
 	pricesFile := fs.String("prices", "", "your prices file, overriding the built-in prices model by model (USD per million tokens; default: prices.json beside -connectors, else ~/.heedle/prices.json)")
 	agentRegistry := fs.String("agent-registry", "", "OCI repository (such as ghcr.io/acme/heedle-files) for agent files too big for the record, pushed with oras")
+	sessionsDir := fs.String("sessions", "", "the folder of the sign-ins act steps keep, encrypted, each with its key in the keychain (default: sessions beside the -connectors file, if given; roadmap 9.11)")
 	memoryFile := fs.String("memory", "", "the file of what heedle remembers about you, sent to Claude with every request to the front door (default: memory.json beside the -connectors file, if given)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *sessionsDir == "" && *connectorsFile != "" {
+		// heedle up's sign-ins are ~/.heedle/sessions (roadmap 9.11).
+		*sessionsDir = filepath.Join(filepath.Dir(*connectorsFile), "sessions")
 	}
 	if *memoryFile == "" && *connectorsFile != "" {
 		// heedle up gives -connectors ~/.heedle/connectors.json, so its
@@ -110,6 +115,14 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	// A person may take the wheel of an act step here (roadmap 9.10): the
 	// UI drives the steps this process's worker runs, and only those.
 	wheels := &pirn.Wheels{}
+	// The sign-ins people chose to keep (roadmap 9.11): act steps start
+	// with them, and You lists and forgets them.
+	var sessions *pirn.Sessions
+	var signIns drawdown.Sessions
+	if *sessionsDir != "" {
+		sessions = &pirn.Sessions{Dir: *sessionsDir, Vault: vault}
+		signIns = sessions
+	}
 	if *runWorker {
 		// Every container a step starts says this store's home, so two
 		// heedle homes running at once each tidy only their own (roadmap
@@ -154,7 +167,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if err := pirn.RegisterAgent(reg, steps, agent); err != nil {
 			return err
 		}
-		act := pirn.Act{Wheels: wheels, Confirm: loom.Confirmer(c), Profile: pirn.ProfileFrom(vault), Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage,
+		act := pirn.Act{Wheels: wheels, Sessions: sessions, Confirm: loom.Confirmer(c), Profile: pirn.ProfileFrom(vault), Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage,
 			Script: loom.Scripts(c, s)} // the program's last script, replayed without Claude (roadmap 9.9)
 		if err := pirn.RegisterAct(reg, steps, act); err != nil {
 			return err
@@ -233,6 +246,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	}
 	srv := &drawdown.Server{
 		Wheels:         drawdown.PirnWheels{Wheels: wheels},
+		Sessions:       signIns,
 		Connectors:     func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) },
 		ConnectorsFile: *connectorsFile,
 		MemoryFile:     *memoryFile,

@@ -3,6 +3,7 @@ package drawdown_test
 import (
 	"context"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -176,5 +177,56 @@ func TestInv_ActRunsOnlyWhereShown(t *testing.T) {
 	}
 	if code, _, body := w.call("POST", "/api/runs", map[string]any{"program": uses, "actHosts": []string{"forms.example.org"}, "actUses": []string{"name", "email"}}); code != 202 || len(tc.got) != 1 {
 		t.Errorf("uses, shown: %d %s", code, body)
+	}
+}
+
+type sessionKeys map[string]string
+
+func (m sessionKeys) Lookup(_ context.Context, n string) (string, bool, error) {
+	v, ok := m[n]
+	return v, ok, nil
+}
+func (m sessionKeys) Store(_ context.Context, n, v string) error { m[n] = v; return nil }
+func (m sessionKeys) Delete(_ context.Context, n string) error   { delete(m, n); return nil }
+
+// TestInv_SignedInRunsOnlyWhereShown: a program whose act steps would
+// start signed in as you (a kept sign-in on one of their hosts) runs or is
+// scheduled only when the request carries exactly those hosts, as the
+// card showed them in red; /api/compile gives them (roadmap 9.11).
+func TestInv_SignedInRunsOnlyWhereShown(t *testing.T) {
+	w := newWorld(t)
+	commands := func() *registry.Registry {
+		reg := shipment.Registry()
+		reg.MustRegister(pirn.ActBuiltinSpec())
+		return reg
+	}
+	ss := &pirn.Sessions{Dir: filepath.Join(t.TempDir(), "sessions"), Vault: sessionKeys{}}
+	if err := ss.Save(context.Background(), "forms.example.org", []byte(`{"cookies":[{"name":"sid","value":"v","domain":"forms.example.org"}],"origins":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	tc := &submitsOnly{fakeTemporal: w.fake}
+	ui := &drawdown.Server{Skills: &treadle.Library{Store: w.store}, Commands: commands, Store: w.store, Ref: loom.DefaultRef, Registry: commands(), Temporal: tc, Sessions: ss}
+	w.srv = httptest.NewServer(ui.Handler())
+	t.Cleanup(w.srv.Close)
+	prog := `(act "Change my address" "https://forms.example.org/" "cdn.example.org")`
+	hosts := []string{"cdn.example.org", "forms.example.org"}
+	_, got, _ := w.call("POST", "/api/compile", map[string]any{"program": prog})
+	if in, _ := got["actSignedIn"].([]any); len(in) != 1 || in[0] != "forms.example.org" {
+		t.Errorf("compile: %v", got)
+	}
+	for _, shown := range [][]string{nil, {"cdn.example.org"}, hosts} {
+		if code, got, body := w.call("POST", "/api/runs", map[string]any{"program": prog, "actHosts": hosts, "actSignedIn": shown}); code != 422 || got["actSignedIn"] == nil || !strings.Contains(body, "signed in as you on forms.example.org") {
+			t.Errorf("run, shown %v: %d %s", shown, code, body)
+		}
+		if code, _, body := w.call("POST", "/api/schedules", map[string]any{"name": "act", "program": prog, "every": "24h", "actHosts": hosts, "actSignedIn": shown}); code != 422 {
+			t.Errorf("schedule, shown %v: %d %s", shown, code, body)
+		}
+	}
+	if len(tc.got) != 0 {
+		t.Fatalf("a run started: %v", tc.got)
+	}
+	w.call("POST", "/api/runs", map[string]any{"program": prog, "actHosts": hosts, "actSignedIn": []string{"forms.example.org"}})
+	if len(tc.got) != 1 {
+		t.Errorf("shown, it didn't start: %v", tc.got)
 	}
 }

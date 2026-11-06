@@ -939,8 +939,18 @@ const DD = (() => {
     if (!opt(v.actSendsFreely, (h) => strs(h) && h.every((x) => (v.actHosts || []).includes(x)))) return null;
     // Roadmap 9.8: the person's details they may use, by name.
     if (!opt(v.actUses, usesOf) || (v.actUses && v.actUses.length && !program)) return null;
+    // Roadmap 9.11: the hosts where they start signed in as you, each one
+    // of actHosts.
+    if (!opt(v.actSignedIn, (h) => strs(h) && h.every((x) => (v.actHosts || []).includes(x)))) return null;
     return { summary: v.summary, program, plan: program ? v.plan : null, schedule: sp || null, name: sp ? v.name : "", skill, ready: v.ready ? { ...v.ready, needs: v.ready.needs || [] } : null,
-      actHosts: v.actHosts || [], actSendsFreely: v.actSendsFreely || [], actUses: v.actUses || [], remember, memory: v.memory || [], usage: asStepUsages(v.usage) };
+      actHosts: v.actHosts || [], actSendsFreely: v.actSendsFreely || [], actUses: v.actUses || [], actSignedIn: v.actSignedIn || [], remember, memory: v.memory || [], usage: asStepUsages(v.usage) };
+  }
+
+  // asSessions is /api/sessions' answer, if well formed: each kept sign-in's
+  // host and times, never what it holds (roadmap 9.11); else null.
+  function asSessions(v) {
+    if (!v || !objs(v.sessions, (x) => str(x.host) && ACT_HOST.test(x.host) && isTime(x.saved) && isTime(x.used))) return null;
+    return v.sessions.map((x) => ({ host: x.host, saved: x.saved, used: x.used }));
   }
 
   // === Memory (roadmap 10.1) ===============================================
@@ -1302,6 +1312,6 @@ const DD = (() => {
     return `https://github.com/${m[1]}/${m[2]}/tree/${b}/skills/${name}`;
   }
 
-  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, actEndingOf, replayedAll, replayWords, locatorText, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand, wheelOf, wheelKey, wheelPoint };
+  return { asSessions, asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, actEndingOf, replayedAll, replayWords, locatorText, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand, wheelOf, wheelKey, wheelPoint };
 })();
 if (typeof module !== "undefined") module.exports = DD;
