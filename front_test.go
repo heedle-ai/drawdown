@@ -1,9 +1,15 @@
 package drawdown_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -229,5 +235,125 @@ func TestInv_SignedInRunsOnlyWhereShown(t *testing.T) {
 	w.call("POST", "/api/runs", map[string]any{"program": prog, "actHosts": hosts, "actSignedIn": []string{"forms.example.org"}})
 	if len(tc.got) != 1 {
 		t.Errorf("shown, it didn't start: %v", tc.got)
+	}
+}
+
+// schedulesOnly records schedule actions and never starts a run.
+type schedulesOnly struct {
+	*submitsOnly
+	actions []string
+}
+
+func (s *schedulesOnly) ScheduleAction(ctx context.Context, name, action string) error {
+	s.actions = append(s.actions, name+" "+action)
+	if action == "run" {
+		return nil
+	}
+	return s.submitsOnly.ScheduleAction(ctx, name, action)
+}
+
+// TestInv_EveryRunStartIsHere: every drawdown path that starts a run
+// (a run, a schedule, a schedule's run-now or resume) refuses a program
+// whose act steps start signed in as you unless the request comes from
+// this machine; from another host, through a proxy, another site,
+// another origin, another port or a rebound name it starts nothing. No
+// other handler reaches Temporal's ways of starting a run (review 53,
+// round 2).
+func TestInv_EveryRunStartIsHere(t *testing.T) {
+	w := newWorld(t)
+	commands := func() *registry.Registry {
+		reg := shipment.Registry()
+		reg.MustRegister(pirn.ActBuiltinSpec())
+		return reg
+	}
+	tc := &schedulesOnly{submitsOnly: &submitsOnly{fakeTemporal: w.fake}}
+	ui := &drawdown.Server{Skills: &treadle.Library{Store: w.store}, Commands: commands, Store: w.store, Ref: loom.DefaultRef, Registry: commands(), Temporal: tc}
+	w.srv = httptest.NewServer(ui.Handler())
+	t.Cleanup(w.srv.Close)
+	signed := `(act "Change my address" "https://forms.example.org/" :signed-in "forms.example.org")`
+	plain := `(act "Join as Ada" "https://forms.example.org/")`
+	hosts := []string{"forms.example.org"}
+	if code, _, body := w.call("POST", "/api/schedules", map[string]any{"name": "signed", "program": signed, "every": "24h", "actHosts": hosts, "actSignedIn": hosts}); code != 201 {
+		t.Fatalf("schedule from here: %d %s", code, body)
+	}
+	if code, _, body := w.call("POST", "/api/schedules", map[string]any{"name": "plain", "program": plain, "every": "24h", "actHosts": hosts}); code != 201 {
+		t.Fatalf("schedule from here: %d %s", code, body)
+	}
+	call := func(path string, body any, headers ...string) int {
+		b, _ := json.Marshal(body)
+		req, _ := http.NewRequest("POST", w.srv.URL+path, bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		for i := 0; i+1 < len(headers); i += 2 {
+			if headers[i] == "Host" {
+				req.Host = headers[i+1]
+			}
+			req.Header.Set(headers[i], headers[i+1])
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	port := strings.TrimPrefix(w.srv.URL, "http://127.0.0.1")
+	elsewhere := map[string][]string{
+		"through a proxy": {"X-Forwarded-For", "100.64.0.7"},
+		"forwarded":       {"Forwarded", "for=100.64.0.7"},
+		"another site":    {"Sec-Fetch-Site", "cross-site"},
+		"another origin":  {"Origin", "https://evil.example"},
+		"another port":    {"Origin", "http://127.0.0.1:9999", "Sec-Fetch-Site", "same-site"},
+		"a rebound name":  {"Host", "evil.example" + port},
+	}
+	for name, h := range elsewhere {
+		if code := call("/api/runs", map[string]any{"program": signed, "actHosts": hosts, "actSignedIn": hosts}, h...); code < 400 {
+			t.Errorf("run, %s: %d", name, code)
+		}
+		if code := call("/api/schedules", map[string]any{"name": "again", "program": signed, "every": "24h", "actHosts": hosts, "actSignedIn": hosts}, h...); code < 400 {
+			t.Errorf("schedule, %s: %d", name, code)
+		}
+		for _, a := range []string{"run", "resume"} {
+			if code := call("/api/schedules/signed/"+a, map[string]any{}, h...); code != 403 {
+				t.Errorf("%s, %s: %d", a, name, code)
+			}
+		}
+	}
+	if len(tc.got) != 0 || len(tc.actions) != 0 {
+		t.Fatalf("started from elsewhere: runs %v, actions %v", tc.got, tc.actions)
+	}
+	// A program not signed in runs or resumes from another host; from
+	// here, a signed-in one does.
+	for _, a := range []string{"run", "resume"} {
+		if code := call("/api/schedules/plain/"+a, map[string]any{}, "X-Forwarded-For", "100.64.0.7"); code != 200 {
+			t.Errorf("plain %s through a proxy: %d", a, code)
+		}
+		if code := call("/api/schedules/signed/"+a, map[string]any{}); code != 200 {
+			t.Errorf("signed %s from here: %d", a, code)
+		}
+	}
+	if want := []string{"plain run", "signed run", "plain resume", "signed resume"}; !slices.Equal(tc.actions, want) {
+		t.Errorf("actions %v, want %v", tc.actions, want)
+	}
+	// The handlers that can start a run are these three, and no others.
+	starts := regexp.MustCompile(`s\.Temporal\.(Submit|CreateSchedule|ScheduleAction)\(`)
+	fn := regexp.MustCompile(`(?m)^func \(s \*Server\) (\w+)\(`)
+	files, _ := filepath.Glob("*.go")
+	var found []string
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range starts.FindAllIndex(src, -1) {
+			fs := fn.FindAllSubmatch(src[:m[0]], -1)
+			found = append(found, string(fs[len(fs)-1][1]))
+		}
+	}
+	slices.Sort(found)
+	if want := []string{"createSchedule", "scheduleAction", "submit"}; !slices.Equal(found, want) {
+		t.Errorf("handlers that start runs: %v, want %v; check each with signedInShown", found, want)
 	}
 }

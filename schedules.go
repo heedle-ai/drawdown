@@ -123,6 +123,10 @@ func (s *Server) scheduleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), temporalTimeout)
 	defer cancel()
+	if (action == "run" || action == "resume") && !s.mayStartSchedule(ctx, r, name) {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "A program whose act steps start signed in as you runs only from this machine."})
+		return
+	}
 	if err := s.Temporal.ScheduleAction(ctx, name, action); err != nil {
 		var nf *serviceerror.NotFound
 		if errors.As(err, &nf) {
@@ -133,4 +137,28 @@ func (s *Server) scheduleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "done": action})
+}
+
+// mayStartSchedule says whether this request may run or resume the
+// schedule named name: always from this machine; from elsewhere only if
+// its program's act steps don't start signed in as the person
+// (signedInShown's rule for submit and createSchedule, review 53). A
+// schedule that can't be found or compiled counts as signed in, so it
+// fails closed; the action itself then reports a missing schedule.
+func (s *Server) mayStartSchedule(ctx context.Context, r *http.Request, name string) bool {
+	if fromThisMachine(r, s.Hosts) && r.Header.Get("Sec-Fetch-Site") != "cross-site" {
+		return true
+	}
+	list, err := s.Temporal.Schedules(ctx)
+	if err != nil {
+		return false
+	}
+	for _, sc := range list {
+		if sc.Name != name {
+			continue
+		}
+		p, ce := s.compileProgram(ctx, sc.Program)
+		return ce == nil && len(loom.ActSignedIn(p)) == 0
+	}
+	return false
 }
