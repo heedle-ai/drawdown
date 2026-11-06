@@ -162,6 +162,9 @@ type Server struct {
 	// it, so a skill added or approved is usable at once. Without it,
 	// Registry is used as it is.
 	Commands func() *registry.Registry
+	// Sessions, if set, are the saved sign-ins act steps start with
+	// (roadmap 9.11), for You and the card.
+	Sessions Sessions
 	// Wheels, if set, are the act steps of this process waiting for a
 	// person to take the wheel (roadmap 9.10): the worker's.
 	Wheels Wheels
@@ -241,6 +244,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/wheel/{id}/frame", s.wheelFrame)
 	mux.HandleFunc("POST /api/wheel/{id}/input", s.wheelInput)
 	mux.HandleFunc("POST /api/wheel/{id}/handback", s.wheelHandBack)
+	mux.HandleFunc("GET /api/sessions", s.listSessions)
+	mux.HandleFunc("POST /api/sessions/forget", s.forgetSession)
 	mux.HandleFunc("POST /api/write", s.writeProgram)
 	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.HandleFunc("POST /api/ready", s.ready)
@@ -370,6 +375,9 @@ type programRequest struct {
 	// ActUses (submit only) are the person's details the page showed the
 	// program's act steps may use (loom.ActUses; roadmap 9.8).
 	ActUses []string `json:"actUses,omitempty"`
+	// ActSignedIn (submit only) are the hosts the page showed, in red,
+	// where act steps start signed in as you (roadmap 9.11).
+	ActSignedIn []string `json:"actSignedIn,omitempty"`
 }
 
 // actShown says whether the person was shown where p's act steps may
@@ -498,7 +506,7 @@ func (s *Server) compile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ce)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p), "actHosts": loom.ActHosts(p), "actSendsFreely": loom.ActSendsFreely(p), "actUses": loom.ActUses(p)})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p), "actHosts": loom.ActHosts(p), "actSendsFreely": loom.ActSendsFreely(p), "actUses": loom.ActUses(p), "actSignedIn": s.signedIn(r.Context(), loom.ActHosts(p))})
 }
 
 // shapeOf is a program's composition (draft.Composition), for drawing its
@@ -597,7 +605,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
 		return
 	}
-	if !actShown(w, p, req.ActHosts, req.ActSendsFreely, req.ActUses) {
+	if !actShown(w, p, req.ActHosts, req.ActSendsFreely, req.ActUses) || !s.signedInShown(w, r.Context(), p, req.ActSignedIn) {
 		return
 	}
 	ref, err := s.ref(r.Context(), req.Ref)

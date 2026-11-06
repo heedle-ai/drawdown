@@ -609,14 +609,15 @@ function AgentTree({ refs, heads, current }) {
 // ActNote says, above Run, what a program's act steps may do (roadmap
 // 9.5, 9.7): click and type on their hosts, and stop before sending and
 // ask; any that send without asking, in red.
-function ActNote({ hosts, freely, uses }) {
+function ActNote({ hosts, freely, uses, signedIn }) {
   if (!hosts || hosts.length === 0) return null;
   const list = (hs) => hs.map((h, i) => html`${i ? ", " : ""}<span class="mono" key=${h}>${h}</span>`);
   const asking = hosts.filter((h) => !(freely || []).includes(h));
   return html`
     ${asking.length > 0 && html`<p class="acts asks" role="note">Its act steps can click and type on ${list(asking)}, and stop before sending and ask you.</p>`}
     ${freely && freely.length > 0 && html`<p class="acts" role="note"><strong>Its act steps can click, type and submit forms on ${list(freely)} without asking again.</strong></p>`}
-    ${DD.usesOf(uses) && uses.length > 0 && html`<p class="acts asks" role="note">They may use your ${DD.usesWords(uses)}, from <a href="#/connectors">You</a>. Claude never sees them.</p>`}`;
+    ${DD.usesOf(uses) && uses.length > 0 && html`<p class="acts asks" role="note">They may use your ${DD.usesWords(uses)}, from <a href="#/connectors">You</a>. Claude never sees them.</p>`}
+    ${signedIn && signedIn.length > 0 && html`<p class="acts" role="note"><strong>They start signed in as you on ${list(signedIn)}</strong>, with the sign-in you kept (<a href="#/connectors">You</a>), and always stop before sending and ask you.</p>`}`;
 }
 
 // PendingForm is a form an act step filled and waits to send: Claude's
@@ -1121,7 +1122,7 @@ function nodeCard(n, step, output) {
 const localZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } };
 const EVERY = [["1h", "every hour"], ["6h", "every 6 hours"], ["24h", "every day"], ["168h", "every week"]];
 
-function ScheduleForm({ program, history, actHosts, actSendsFreely, actUses, onDone }) {
+function ScheduleForm({ program, history, actHosts, actSendsFreely, actUses, actSignedIn, onDone }) {
   const [name, setName] = useState("");
   const [how, setHow] = useState("every");
   const [every, setEvery] = useState("24h");
@@ -1132,7 +1133,7 @@ function ScheduleForm({ program, history, actHosts, actSendsFreely, actUses, onD
   const [made, setMade] = useState("");
   const make = async () => {
     setBusy(true); setErr("");
-    const body = { name, program, ref: history, actHosts, actSendsFreely, actUses, ...(how === "every" ? { every } : { cron, timeZone: zone }) };
+    const body = { name, program, ref: history, actHosts, actSendsFreely, actUses, actSignedIn, ...(how === "every" ? { every } : { cron, timeZone: zone }) };
     const r = await api("/api/schedules", body);
     setBusy(false);
     if (!r.ok) { setErr((r.data && r.data.error) || String(r.data)); return; }
@@ -1262,6 +1263,42 @@ function You() {
       <div class="pills"><strong>You</strong><${Pill} cls="k-act" plain>act steps that name them<//></div>
       <p class="muted">Kept in this machine's keychain and shown only here. A step uses only the details its program names, such as <span class="mono">:uses "name email"</span>; Claude types a placeholder and never sees them, and frames hide them.</p>
       ${fields.map((f) => html`<${DetailRow} key=${f.field} f=${f} onDone=${() => setTick((t) => t + 1)} />`)}
+    </div>`;
+}
+
+// === Saved sign-ins (roadmap 9.11) ==========================================
+
+// SavedSignIns are the sign-ins you kept after taking the wheel: the act
+// steps on that site start signed in as you. Listed and forgotten only
+// here; Forget removes the file and its key.
+function SavedSignIns() {
+  const [data, setData] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  useEffect(() => { api("/api/sessions").then(setData); }, [tick]);
+  if (!data) return null;
+  const list = data.ok && DD.asSessions(data.data);
+  if (!list) return html`<div class="panel connector" id="sign-ins"><div class="pills"><strong>Saved sign-ins</strong></div><p class="muted">${(data.data && data.data.error) || "Your saved sign-ins can't be shown here."}</p></div>`;
+  const forget = async (host) => {
+    setBusy(host); setErr("");
+    const r = await api("/api/sessions/forget", { host });
+    setBusy("");
+    if (!r.ok) setErr((r.data && r.data.error) || String(r.data));
+    setTick((t) => t + 1);
+  };
+  const day = (t) => new Date(t).toLocaleDateString();
+  return html`
+    <div class="panel connector" id="sign-ins">
+      <div class="pills"><strong>Saved sign-ins</strong><${Pill} cls="k-act" plain>act steps on that site<//></div>
+      <p class="muted">Kept when you sign in while driving a step and tick "Keep me signed in". Encrypted on this machine with a key in its keychain, loaded only into act steps allowed on that very site, which always stop before sending and ask you. One unused for 30 days is forgotten.</p>
+      ${list.length === 0 ? html`<p class="muted">None kept.</p>` : list.map((x) => html`
+        <div class="key-row" key=${x.host} style=${{ flexDirection: "row", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          <span class="mono">${x.host}</span>
+          <span class="muted">kept ${day(x.saved)}, last used ${day(x.used)}</span>
+          <button type="button" style=${{ marginLeft: "auto" }} disabled=${busy === x.host} onClick=${() => forget(x.host)}>${busy === x.host ? "Forgetting…" : "Forget"}</button>
+        </div>`)}
+      ${err && html`<p class="error" role="alert">${err}</p>`}
     </div>`;
 }
 
@@ -1454,6 +1491,7 @@ function ConnectorsPage() {
       <${KeyRow} k=${v.anthropic} onDone=${refresh} />
     </div>
     <${You} />
+    <${SavedSignIns} />
     ${v.error && html`<p class="error mono" role="alert">${v.file}: ${v.error}. No connector is used until it's fixed.</p>`}
     ${v.unreadable > 0 && html`<p class="error" role="alert">${v.unreadable} connector${v.unreadable === 1 ? "" : "s"} couldn't be shown.</p>`}
     ${v.connectors.length === 0 && !v.error && html`<div class="panel muted" style=${{ marginTop: "12px" }}>
@@ -2046,7 +2084,7 @@ function ProposalCard({ p, history, latest }) {
   }, [p.name, latest]);
   const run = async () => {
     setBusy("run"); setNote(null);
-    const r = await api("/api/runs", { program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely, actUses: p.actUses });
+    const r = await api("/api/runs", { program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely, actUses: p.actUses, actSignedIn: p.actSignedIn });
     setBusy("");
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setNote({ error: (r.data && r.data.error) || String(r.data) });
@@ -2054,7 +2092,7 @@ function ProposalCard({ p, history, latest }) {
   const schedule = async () => {
     setBusy("schedule"); setNote(null);
     const sp = p.schedule;
-    const body = { name, program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely, actUses: p.actUses, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
+    const body = { name, program: p.program, ref: history, actHosts: p.actHosts, actSendsFreely: p.actSendsFreely, actUses: p.actUses, actSignedIn: p.actSignedIn, ...(sp.every ? { every: DD.goDuration(sp.every) } : { cron: sp.cron, timeZone: sp.timeZone || "" }) };
     const r = await api("/api/schedules", body);
     setBusy("");
     setNote(r.ok ? { ok: html`Scheduled <a href="#/schedules" class="mono">${name}</a>, ${DD.when(sp)}. Each run is recorded like any other.` }
@@ -2100,7 +2138,7 @@ function ProposalCard({ p, history, latest }) {
             ${!l.ok && l.href && html`<a class="btn" href=${l.href}>Connect</a>`}
           </li>`)}
         </ul>`}
-        <${ActNote} hosts=${p.actHosts} freely=${p.actSendsFreely} uses=${p.actUses} />
+        <${ActNote} hosts=${p.actHosts} freely=${p.actSendsFreely} uses=${p.actUses} signedIn=${p.actSignedIn} />
         ${!ready ? html`<p><button class="link-btn" onClick=${check}>Check whether it can run</button></p>`
           : !ready.ready && html`<p><button class="link-btn" onClick=${check}>Check again</button></p>`}
         ${shape && html`<${CompositionGraph} plan=${shape.plan} shape=${shape.shape} />`}
@@ -2191,7 +2229,7 @@ function NewRun({ info, history: ref }) {
 
   const run = async () => {
     setBusy(true); setSubmitError("");
-    const r = await api("/api/runs", { program, ref, actHosts, actSendsFreely, actUses });
+    const r = await api("/api/runs", { program, ref, actHosts, actSendsFreely, actUses, actSignedIn });
     setBusy(false);
     if (r.ok) go("run", r.data.workflowId, r.data.runId);
     else setSubmitError(r.data.error || String(r.data));
@@ -2212,18 +2250,19 @@ function NewRun({ info, history: ref }) {
   const actHosts = plan && DD.strsOf(result.data.actHosts);
   const actSendsFreely = plan && DD.strsOf(result.data.actSendsFreely);
   const actUses = plan && DD.usesOf(result.data.actUses) ? result.data.actUses : [];
+  const actSignedIn = plan && DD.strsOf(result.data.actSignedIn);
   return html`
     <${Describe} program=${program} onProgram=${setProgram} />
     <div class="panel">
       <${ProgramEditor} value=${program} onChange=${setProgram} handle=${editor} placeholder='(pipe (par (echo "a") (echo "b")) echo)' />
-      <${ActNote} hosts=${actHosts} freely=${actSendsFreely} uses=${actUses} />
+      <${ActNote} hosts=${actHosts} freely=${actSendsFreely} uses=${actUses} signedIn=${actSignedIn} />
       <div class="row">
         <button class="primary" disabled=${!plan || busy} onClick=${run}>${busy ? "Starting…" : "Run"}</button>
         <button disabled=${!plan || busy} onClick=${() => setScheduling((x) => !x)} aria-expanded=${scheduling}>Schedule…</button>
         ${Object.entries(info.examples || {}).map(([name, src]) => html`
           <button key=${name} onClick=${() => setProgram(src)}>Example: ${name}</button>`)}
       </div>
-      ${scheduling && plan && html`<${ScheduleForm} program=${program} history=${ref} actHosts=${actHosts} actSendsFreely=${actSendsFreely} actUses=${actUses} onDone=${() => setScheduling(false)} />`}
+      ${scheduling && plan && html`<${ScheduleForm} program=${program} history=${ref} actHosts=${actHosts} actSendsFreely=${actSendsFreely} actUses=${actUses} actSignedIn=${actSignedIn} onDone=${() => setScheduling(false)} />`}
       <div class="row">
         <span class="muted">Insert a command:</span>
         ${(info.commands || []).map((c) => {
@@ -3222,11 +3261,15 @@ function ActScript({ script }) {
 // what you type isn't kept anywhere, and fields you type into, and
 // password fields, are masked in every frame. Hand back gives Claude the
 // page as you left it.
+// hostOf is a URL's host, in words if it has none.
+const hostOf = (u) => { try { return new URL(u).hostname || "this site"; } catch { return "this site"; } };
+
 function TakeTheWheel({ wheel }) {
   const [n, setN] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [handed, setHanded] = useState(false);
+  const [keep, setKeep] = useState(false);
   useEffect(() => {
     if (!wheel.here || handed) return;
     const t = setInterval(() => setN((x) => x + 1), 700);
@@ -3250,7 +3293,7 @@ function TakeTheWheel({ wheel }) {
   };
   const handBack = async () => {
     setBusy(true);
-    const r = await api(`/api/wheel/${wheel.id}/handback`, {});
+    const r = await api(`/api/wheel/${wheel.id}/handback`, { keep });
     setBusy(false);
     if (r.ok || r.status === 409) setHanded(true);
     else setError((r.data && r.data.error) || String(r.data));
@@ -3266,6 +3309,7 @@ function TakeTheWheel({ wheel }) {
           <img src=${`/api/wheel/${wheel.id}/frame?n=${n}`} alt=${"The page on " + wheel.url} onClick=${click} draggable="false" />
         </div>
         <div class="cmd-line"><span class="mono muted">${wheel.url}</span>
+          <label class="keep" title="Act steps on this site start signed in as you, until you forget it under You or 30 days pass unused"><input type="checkbox" checked=${keep} onChange=${(e) => setKeep(e.target.checked)} /> Keep me signed in on <span class="mono">${hostOf(wheel.url)}</span></label>
           <span style=${{ marginLeft: "auto" }}><button class="primary" disabled=${busy} onClick=${handBack}>${busy ? "Handing back…" : "Hand back"}</button></span></div>`}
       ${error && html`<p class="error">${error}</p>`}
     </div>`;

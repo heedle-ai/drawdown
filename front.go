@@ -44,7 +44,7 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeJSON(w, http.StatusBadGateway, apiError{Error: "Temporal: " + err.Error()})
 	default:
-		writeJSON(w, http.StatusOK, proposal{Proposal: out, ActHosts: hosts, ActSendsFreely: freely, ActUses: uses})
+		writeJSON(w, http.StatusOK, proposal{Proposal: out, ActHosts: hosts, ActSendsFreely: freely, ActUses: uses, ActSignedIn: s.signedIn(ctx, hosts)})
 	}
 }
 
@@ -57,6 +57,9 @@ type proposal struct {
 	ActHosts       []string `json:"actHosts,omitempty"`
 	ActSendsFreely []string `json:"actSendsFreely,omitempty"`
 	ActUses        []string `json:"actUses,omitempty"` // the person's details they may use (roadmap 9.8)
+	// ActSignedIn are its hosts where act steps would start signed in as
+	// you, with a saved sign-in (roadmap 9.11).
+	ActSignedIn []string `json:"actSignedIn,omitempty"`
 }
 
 // ready says whether a program can run now, as loom.CheckReady does on a

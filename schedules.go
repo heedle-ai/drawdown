@@ -54,6 +54,7 @@ type scheduleRequest struct {
 	ActHosts       []string `json:"actHosts,omitempty"`
 	ActSendsFreely []string `json:"actSendsFreely,omitempty"`
 	ActUses        []string `json:"actUses,omitempty"`
+	ActSignedIn    []string `json:"actSignedIn,omitempty"`
 }
 
 // createSchedule compiles the program as a run would be, and has Temporal
@@ -77,7 +78,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
 		return
 	}
-	if !actShown(w, p, req.ActHosts, req.ActSendsFreely, req.ActUses) {
+	if !actShown(w, p, req.ActHosts, req.ActSendsFreely, req.ActUses) || !s.signedInShown(w, r.Context(), p, req.ActSignedIn) {
 		return
 	}
 	ref, err := s.ref(r.Context(), req.Ref)
