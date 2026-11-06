@@ -122,7 +122,7 @@ func (t TemporalClient) Live(ctx context.Context, workflowID string) ([]LiveFram
 		lf := liveFrame(a.GetActivityId(), a.GetAttempt(), f.Frame)
 		lf.Kind = kind
 		if kind == "act" {
-			lf.Pending = f.Pending
+			lf.Pending, lf.Wheel = f.Pending, f.Wheel
 		}
 		out = append(out, lf)
 	}
