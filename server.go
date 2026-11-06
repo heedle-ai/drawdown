@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/heedle-ai/pirn"
+	"github.com/heedle-ai/reed"
 	"io/fs"
 	"mime"
 	"net"
@@ -106,6 +107,12 @@ type LiveFrame struct {
 	// Pending is the form an act step waits to send, filled as Image
 	// shows it, for a person to send or cancel (roadmap 9.7).
 	Pending *pirn.ActPending `json:"pending,omitempty"`
+	// Wheel is the act step waiting for a person to take the wheel, and
+	// Here whether this UI can drive it (its worker is this process's),
+	// with the page's size for clicks (roadmap 9.10).
+	Wheel    *pirn.ActWheel `json:"wheel,omitempty"`
+	Here     bool           `json:"here,omitempty"`
+	Viewport [2]int         `json:"viewport,omitempty"`
 }
 
 // History is the read-only part of a warp store that the UI uses. A
@@ -155,6 +162,9 @@ type Server struct {
 	// it, so a skill added or approved is usable at once. Without it,
 	// Registry is used as it is.
 	Commands func() *registry.Registry
+	// Wheels, if set, are the act steps of this process waiting for a
+	// person to take the wheel (roadmap 9.10): the worker's.
+	Wheels Wheels
 	// Hosts are the Host header values the server answers to, besides
 	// localhost and loopback addresses. Requests for any other host are
 	// refused, which defeats DNS rebinding.
@@ -228,6 +238,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/writes/{workflow...}", s.writes)
 	mux.HandleFunc("POST /api/writes/{workflow...}", s.decideWrite)
 	mux.HandleFunc("POST /api/forms/{workflow...}", s.decideForm)
+	mux.HandleFunc("GET /api/wheel/{id}/frame", s.wheelFrame)
+	mux.HandleFunc("POST /api/wheel/{id}/input", s.wheelInput)
+	mux.HandleFunc("POST /api/wheel/{id}/handback", s.wheelHandBack)
 	mux.HandleFunc("POST /api/write", s.writeProgram)
 	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.HandleFunc("POST /api/ready", s.ready)
@@ -940,6 +953,12 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 	frames, err := s.Temporal.Live(ctx, r.PathValue("workflow"))
 	if frames == nil {
 		frames = []LiveFrame{}
+	}
+	for i := range frames {
+		if h := frames[i].Wheel; h != nil && s.Wheels != nil {
+			_, frames[i].Here = s.Wheels.Wheel(h.ID)
+			frames[i].Viewport = [2]int{reed.Width, reed.Height}
+		}
 	}
 	resp := map[string]any{"frames": frames}
 	if err != nil {

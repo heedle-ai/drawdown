@@ -58,6 +58,8 @@ const DD = (() => {
     if (!v.calls.every((c) => opt(c.replayed, bool)) || !opt(v.scriptInputs, str) || !opt(v.replay, isReplay)) return null;
     if (!opt(v.script, (s) => objs(s, (st) => str(st.tool) && str(st.input) && str(st.outline) && str(st.outlineSha256) && opt(st.replayed, bool) &&
       opt(st.targets, (ts) => objs(ts, (l) => str(l.role) && str(l.name) && opt(l.nth, num)))))) return null;
+    // Roadmap 9.10: what a person sent while they drove.
+    if (!opt(v.sentByYou, strs)) return null;
     return v;
   }
   const isReplay = (r) => r && typeof r === "object" && num(r.steps) && num(r.replayed) && opt(r.from, str) && opt(r.record, str) && opt(r.handedOver, bool) && opt(r.at, num) && opt(r.why, str);
@@ -870,6 +872,36 @@ const DD = (() => {
     return p && typeof p === "object" && str(p.id) && /^[0-9a-f]{1,64}$/.test(p.id) && str(p.summary) && opt(p.node, str) && str(p.url) ? p : null;
   }
 
+  // wheelOf is the step a live frame says waits for a person to take the
+  // wheel (roadmap 9.10), with whether this UI can drive it and the page's
+  // size; else null.
+  function wheelOf(f) {
+    const w = f && f.kind === "act" && f.wheel;
+    if (!w || typeof w !== "object" || !str(w.id) || !/^[0-9a-f]{32}$/.test(w.id) || !str(w.reason) || !opt(w.node, str) || !str(w.url)) return null;
+    const vp = Array.isArray(f.viewport) && f.viewport.length === 2 && f.viewport.every((n) => num(n) && n > 0) ? f.viewport : [1280, 800];
+    return { ...w, here: f.here === true, viewport: vp };
+  }
+
+  // wheelKey is the key a keydown sends a step's browser, or null: one
+  // printable character, or a named key the browser takes. Option (Alt)
+  // with a character is that character: Mac layouts type @, [ and € so
+  // (review 52); with Control or Command it's a shortcut, refused.
+  const WHEEL_KEYS = ["Enter", "Tab", "Backspace", "Delete", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"];
+  function wheelKey(e) {
+    if (e.ctrlKey || e.metaKey) return null;
+    if (e.altKey) return [...e.key].length === 1 ? e.key : null;
+    if (e.key === "Tab" && e.shiftKey) return "Shift+Tab";
+    if (WHEEL_KEYS.includes(e.key)) return e.key;
+    return [...e.key].length === 1 ? e.key : null;
+  }
+
+  // wheelPoint is where a click on the shown frame lands on the page.
+  function wheelPoint(offsetX, offsetY, shownW, shownH, viewport) {
+    if (!(shownW > 0) || !(shownH > 0)) return null;
+    const x = Math.floor(offsetX * viewport[0] / shownW), y = Math.floor(offsetY * viewport[1] / shownH);
+    return x >= 0 && y >= 0 && x < viewport[0] && y < viewport[1] ? { x, y } : null;
+  }
+
   // PROFILE are the person's details act steps may use (roadmap 9.8), in
   // words; usesOf says whether v names some of them, each once.
   const PROFILE = { name: "name", email: "email", phone: "phone number", address: "address", birthdate: "date of birth" };
@@ -1275,6 +1307,6 @@ const DD = (() => {
     return `https://github.com/${m[1]}/${m[2]}/tree/${b}/skills/${name}`;
   }
 
-  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, actEndingOf, replayedAll, replayWords, locatorText, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand, COST_KINDS };
+  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, actEndingOf, replayedAll, replayWords, locatorText, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand, COST_KINDS, wheelOf, wheelKey, wheelPoint };
 })();
 if (typeof module !== "undefined") module.exports = DD;

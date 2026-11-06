@@ -987,3 +987,25 @@ test("act replays are read strictly and said in words", () => {
   assert.deepEqual(DD.asStepUsages({ steps: [{ ...u, replayed: "all" }] }).length, 1);
   assert.deepEqual(DD.asStepUsages({ steps: [{ ...u, replayed: "most" }] }), []);
 });
+
+// Roadmap 9.10: a step waiting for a person is read strictly; keys are
+// one character or a named key, never a shortcut; a click lands where it
+// was made on the page.
+test("taking the wheel: what a frame says, keys and clicks", () => {
+  const id = "0123456789abcdef0123456789abcdef";
+  const f = { kind: "act", wheel: { id, reason: "Sign in.", url: "https://x.example/" }, here: true, viewport: [1280, 800] };
+  assert.deepEqual(DD.wheelOf(f), { id, reason: "Sign in.", url: "https://x.example/", here: true, viewport: [1280, 800] });
+  assert.equal(DD.wheelOf({ ...f, here: "yes" }).here, false);
+  for (const bad of [{ ...f, kind: "browse" }, { ...f, wheel: { ...f.wheel, id: "f00d" } }, { ...f, wheel: { ...f.wheel, reason: 3 } }, { ...f, wheel: null }]) assert.equal(DD.wheelOf(bad), null);
+  const k = (key, more = {}) => DD.wheelKey({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...more });
+  assert.deepEqual(["a", "Z", "é", " ", "Enter", "Tab", "Backspace"].map((x) => k(x)), ["a", "Z", "é", " ", "Enter", "Tab", "Backspace"]);
+  assert.equal(k("Tab", { shiftKey: true }), "Shift+Tab");
+  for (const [key, more] of [["a", { ctrlKey: true }], ["v", { metaKey: true }], ["F5", {}], ["Shift", {}], ["Dead", {}], ["ArrowLeft", { altKey: true }], ["@", { altKey: true, metaKey: true }]]) assert.equal(k(key, more), null, key);
+  // Review 52: Option types @, [ and € on Mac layouts.
+  assert.deepEqual(["@", "[", "€"].map((x) => k(x, { altKey: true })), ["@", "[", "€"]);
+  assert.deepEqual(DD.parse(actJSON({ sentByYou: ["POST https://x.example/signin"] })).act.sentByYou, ["POST https://x.example/signin"]);
+  assert.deepEqual(DD.parse(actJSON({ sentByYou: "x" })), { text: actJSON({ sentByYou: "x" }) });
+  assert.deepEqual(DD.wheelPoint(320, 200, 640, 400, [1280, 800]), { x: 640, y: 400 });
+  assert.equal(DD.wheelPoint(640, 0, 640, 400, [1280, 800]), null);
+  assert.equal(DD.wheelPoint(10, 10, 0, 400, [1280, 800]), null);
+});
