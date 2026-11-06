@@ -506,7 +506,7 @@ func (s *Server) compile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ce)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p), "actHosts": loom.ActHosts(p), "actSendsFreely": loom.ActSendsFreely(p), "actUses": loom.ActUses(p), "actSignedIn": s.signedIn(r.Context(), loom.ActHosts(p))})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": p, "shape": shapeWith(r.Context(), reg, req.Program, p), "actHosts": loom.ActHosts(p), "actSendsFreely": loom.ActSendsFreely(p), "actUses": loom.ActUses(p), "actSignedIn": loom.ActSignedIn(p)})
 }
 
 // shapeOf is a program's composition (draft.Composition), for drawing its
@@ -605,7 +605,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
 		return
 	}
-	if !actShown(w, p, req.ActHosts, req.ActSendsFreely, req.ActUses) || !s.signedInShown(w, r.Context(), p, req.ActSignedIn) {
+	if !actShown(w, p, req.ActHosts, req.ActSendsFreely, req.ActUses) || !s.signedInShown(w, r, p, req.ActSignedIn) {
 		return
 	}
 	ref, err := s.ref(r.Context(), req.Ref)

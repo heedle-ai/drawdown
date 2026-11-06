@@ -78,7 +78,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, ce)
 		return
 	}
-	if !actShown(w, p, req.ActHosts, req.ActSendsFreely, req.ActUses) || !s.signedInShown(w, r.Context(), p, req.ActSignedIn) {
+	if !actShown(w, p, req.ActHosts, req.ActSendsFreely, req.ActUses) || !s.signedInShown(w, r, p, req.ActSignedIn) {
 		return
 	}
 	ref, err := s.ref(r.Context(), req.Ref)
