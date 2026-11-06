@@ -978,7 +978,7 @@ test("act replays are read strictly and said in words", () => {
   assert.equal(DD.replayedAll(cut), false);
   assert.equal(DD.actEndingOf({ ended: "finished", replay: { steps: 2, replayed: 2 } }), "finished, as the run it replayed did");
   assert.equal(DD.actEndingOf({ ended: "finished", replay: { steps: 2, replayed: 1, handedOver: true, at: 2 } }), "Claude said it finished");
-  assert.ok(DD.asCosts({ asOf: "x", source: "y", zone: "UTC", months: [], runs: [], schedules: [] }));
+  assert.ok(DD.asCosts({ asOf: "x", source: "y", zone: "UTC", months: [], runs: [], schedules: [], kinds: [] }));
   assert.deepEqual(DD.decisions("act", actJSON({ replay: { steps: 2, replayed: 2 } })).find((r) => r[0] === "Replay"), ["Replay", "replayed all 2 actions, without Claude"]);
   assert.equal(DD.locatorText({ role: "button", name: 'Say "hi"', nth: 1 }), 'getByRole("button", { name: "Say \\"hi\\"", exact: true }).nth(1)');
   for (const bad of [actJSON({ replay: { steps: "4", replayed: 1 } }), actJSON({ script: [{ tool: 1 }] }), actJSON({ script: [{ ...script[0], targets: [{ role: 1, name: "x" }] }] }),
