@@ -742,6 +742,45 @@ test("picking several skills from a repository's catalog imports each at the com
   await ctx.close();
 });
 
+// Several browsers running at once show side by side, two to a row on a
+// wide screen and one on a phone, so a run's parallel steps can be watched
+// together; a step waiting for you takes the whole row.
+test("a run's live browsers show side by side", async () => {
+  const sub = await (await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program: '(echo "side by side")' }) })).json();
+  const shotPage = await browser.newPage({ viewport: { width: 640, height: 400 } });
+  await shotPage.setContent('<body style="margin:0;background:#f4f1e8;font:20px serif"><h1 style="padding:20px">A guide</h1></body>');
+  const jpeg = "data:image/jpeg;base64," + (await shotPage.screenshot({ type: "jpeg", quality: 40 })).toString("base64");
+  await shotPage.close();
+  const frames = ["tiles", "food", "views", "weather"].map((h, i) => ({ activity: String(5 + i), kind: "browse", attempt: 1, url: `http://${h}.lisbon.example/`, image: jpeg }));
+  frames.push({ ...frames[0], activity: "9", kind: "act", url: "https://forms.example.org/x",
+    pending: { id: "beef", node: "n5", summary: "Sends the form.", url: "https://forms.example.org/x" } });
+  for (const width of [1600, 375]) {
+    const { p, ctx, errors } = await page({ width });
+    await ctx.route(new RegExp(`/api/runs/${encodeURIComponent(sub.workflowId)}/`), async (r) => {
+      const res = await r.fetch(), d = await res.json();
+      d.execution = { ...(d.execution || {}), status: "Running" }; delete d.record;
+      r.fulfill({ response: res, json: d });
+    });
+    await ctx.route("**/api/live/*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames }) }));
+    await p.goto(BASE + "/#/run/" + [sub.workflowId, sub.runId].map(encodeURIComponent).join("/"));
+    await p.locator(".live img").nth(3).waitFor();
+    const boxes = await p.locator(".lives > .panel.live").evaluateAll((els) => els.map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width)]; }));
+    assert.equal(boxes.length, 5);
+    if (width === 1600) {
+      assert.equal(boxes[0][1], boxes[1][1], "the first two browsers aren't side by side");
+      assert.ok(boxes[1][0] > boxes[0][0] + boxes[0][2] - 1, "the second browser isn't beside the first");
+      assert.equal(boxes[2][1], boxes[3][1], "the next two browsers aren't side by side");
+      assert.ok(boxes[4][2] > boxes[0][2] * 1.8, "a form waiting for you doesn't take the whole row");
+    } else {
+      for (let i = 1; i < 5; i++) assert.ok(boxes[i][1] > boxes[i - 1][1], "on a phone the browsers aren't one under another");
+      assert.ok(await p.locator(".lives").evaluate((e) => e.getBoundingClientRect().right <= window.innerWidth + 1), "the browsers run off a phone's screen");
+    }
+    if (process.env.DRAWDOWN_SHOTS) await p.screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `live-grid-${width}.png`) });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
 // Roadmap 9.7: a form an act step filled waits on the run page, with its
 // screenshot, for Send or Cancel, which look like a write's Approve and
 // Decline; deciding signals the run through /api/forms.

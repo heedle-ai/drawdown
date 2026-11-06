@@ -111,7 +111,7 @@ Every ref under `refs/loom/` is an **agent**. Its sub-agents are the refs that e
 An agent's tab (`#/agent/<ref>`) shows:
 
 - **Drawdown:** this agent's recent runs, woven, as on the home page.
-- **Running now:** for each running run, the live view of its browsing steps: the latest frame of each [reed](https://github.com/heedle-ai/reed/wiki) browser, from Temporal, refreshed every 2 seconds. It's view only.
+- **Running now:** for each running run, the live view of its browsing steps: the latest frame of each [reed](https://github.com/heedle-ai/reed/wiki) browser, from Temporal, refreshed every 2 seconds. It's view only. Steps running at once show side by side, two to a row on a wide screen and one under another on a phone; a form waiting for you, or a step waiting for you to take the wheel, takes the whole row.
 - **Beliefs, Runs and New run,** for this agent's history. A run submitted here is recorded on this agent.
 - **Family:** its parent and sub-agents, each a link to its own tab.
 

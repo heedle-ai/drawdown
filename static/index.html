@@ -308,6 +308,11 @@
   .key-row input.detail { font:14px var(--sans); padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--sunk); color:var(--ink); flex:1 1 260px; min-width:0; }
   .pending-form { margin:0 0 8px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; }
   .pending-form p { margin:0 0 8px; }
+  .lives { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap:12px; margin-top:12px; }
+  .lives .panel.live { margin:0; min-width:0; }
+  .lives .panel.live.wide { grid-column:1 / -1; }
+  .live .pills { flex-wrap:wrap; }
+  .live .pills .mono { overflow-wrap:anywhere; }
   .live img { width:100%; max-width:960px; border:1px solid var(--line); border-radius:8px; margin-top:8px; }
   .take-wheel { margin:0 0 8px; padding:10px 12px; border:1px solid var(--act); border-radius:8px; }
   .take-wheel p { margin:0 0 8px; }
