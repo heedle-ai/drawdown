@@ -107,6 +107,9 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	// connector's token; the front door's ready check reads them the
 	// same way (review 33).
 	stepKeys := &drawdown.OAuthVault{Keys: vault}
+	// A person may take the wheel of an act step here (roadmap 9.10): the
+	// UI drives the steps this process's worker runs, and only those.
+	wheels := &pirn.Wheels{}
 	if *runWorker {
 		// Every container a step starts says this store's home, so two
 		// heedle homes running at once each tidy only their own (roadmap
@@ -151,7 +154,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if err := pirn.RegisterAgent(reg, steps, agent); err != nil {
 			return err
 		}
-		act := pirn.Act{Confirm: loom.Confirmer(c), Profile: pirn.ProfileFrom(vault), Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage,
+		act := pirn.Act{Wheels: wheels, Confirm: loom.Confirmer(c), Profile: pirn.ProfileFrom(vault), Claude: claude, Browser: pirn.ReedBrowser{Browser: reed.Browser{Image: *browserAgentImage, Network: *browserNetwork}}, Image: *browserAgentImage,
 			Script: loom.Scripts(c, s)} // the program's last script, replayed without Claude (roadmap 9.9)
 		if err := pirn.RegisterAct(reg, steps, act); err != nil {
 			return err
@@ -229,6 +232,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		}
 	}
 	srv := &drawdown.Server{
+		Wheels:         drawdown.PirnWheels{Wheels: wheels},
 		Connectors:     func() (pirn.Connectors, error) { return readConnectors(*connectorsFile) },
 		ConnectorsFile: *connectorsFile,
 		MemoryFile:     *memoryFile,

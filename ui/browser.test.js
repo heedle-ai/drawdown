@@ -770,6 +770,76 @@ test("a run page shows a filled form waiting, with Send and Cancel", async () =>
   await ctx.close();
 });
 
+// Roadmap 9.10: a step waiting for a person says why; when this UI runs
+// its worker, the page shows the step's browser to drive: a click lands
+// where it was made on the page, keys go one at a time (never kept by the
+// page), and Hand back gives it back. Elsewhere it says where to take it.
+test("a step waiting for you can be driven here, and handed back", async () => {
+  const sub = await (await fetch(BASE + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ program: '(echo "wheel")' }) })).json();
+  const shotPage = await browser.newPage({ viewport: { width: 640, height: 400 } });
+  await shotPage.setContent('<body style="margin:0;background:#e9f0fb;font:20px sans-serif"><p style="padding:20px">Sign in</p><input style="margin:20px;width:300px;height:30px" placeholder="Email"></body>');
+  const jpeg = await shotPage.screenshot({ type: "jpeg", quality: 60 });
+  await shotPage.close();
+  const id = "0123456789abcdef0123456789abcdef";
+  const frame = { activity: "3", kind: "act", attempt: 1, url: "https://forms.example.org/signin", image: "data:image/jpeg;base64," + jpeg.toString("base64"),
+    wheel: { id, node: "n0", reason: "The form asks me to sign in.", url: "https://forms.example.org/signin" }, here: true, viewport: [1280, 800] };
+  for (const scheme of ["light", "dark"]) {
+    const { p, ctx, errors } = await page({ scheme });
+    await ctx.route(new RegExp(`/api/runs/${encodeURIComponent(sub.workflowId)}/`), async (r) => {
+      const res = await r.fetch(), d = await res.json();
+      d.execution = { ...(d.execution || {}), status: "Running" }; delete d.record;
+      r.fulfill({ response: res, json: d });
+    });
+    const inputs = [];
+    let handed = false;
+    await ctx.route("**/api/live/*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames: [frame] }) }));
+    await ctx.route(`**/api/wheel/${id}/frame*`, (r) => r.fulfill({ contentType: "image/jpeg", body: jpeg }));
+    await ctx.route(`**/api/wheel/${id}/input`, (r) => { inputs.push(r.request().postDataJSON()); r.fulfill({ status: 204 }); });
+    await ctx.route(`**/api/wheel/${id}/handback`, (r) => { handed = true; r.fulfill({ status: 204 }); });
+    await p.goto(BASE + "/#/run/" + [sub.workflowId, sub.runId].map(encodeURIComponent).join("/"));
+    const wheel = p.getByRole("group", { name: "heedle needs you" });
+    await wheel.waitFor();
+    // Claude's reason is Claude's words, quoted: a page can influence it
+    // (review 52).
+    assert.match(await wheel.textContent(), /heedle needs you\. Claude says: The form asks me to sign in\./);
+    assert.equal(await wheel.locator("q").textContent(), "The form asks me to sign in.");
+    const view = wheel.getByRole("application");
+    const img = view.locator("img");
+    await p.waitForFunction(() => { const i = document.querySelector(".wheel-view img"); return i && i.complete && i.naturalWidth === 640; });
+    const box = await img.boundingBox();
+    await img.click({ position: { x: box.width / 4, y: box.height / 2 } });
+    await view.focus();
+    await p.keyboard.type("ab");
+    await p.keyboard.press("Tab");
+    await p.keyboard.press("Shift+Tab");
+    await p.keyboard.press("Alt+@"); // Option with a character types it (review 52)
+    await p.keyboard.press("Control+a"); // not sent: a shortcut, not a key for the page
+    await p.waitForTimeout(300);
+    assert.equal(await p.evaluate(() => String(getSelection())), "", "a shortcut acted on this page");
+    assert.deepEqual(inputs.slice(1), [{ key: "a" }, { key: "b" }, { key: "Tab" }, { key: "Shift+Tab" }, { key: "@" }]);
+    assert.ok(Math.abs(inputs[0].x - 320) <= 2 && Math.abs(inputs[0].y - 400) <= 2, JSON.stringify(inputs[0]));
+    if (process.env.DRAWDOWN_SHOTS) await p.locator(".live").first().screenshot({ path: path.join(process.env.DRAWDOWN_SHOTS, `wheel-${scheme}.png`) });
+    await wheel.getByRole("button", { name: "Hand back" }).click();
+    await wheel.getByText("Handed back").waitFor();
+    assert.equal(handed, true);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // A UI whose worker isn't the step's says where to take it.
+  const { p, ctx, errors } = await page({});
+  await ctx.route(new RegExp(`/api/runs/${encodeURIComponent(sub.workflowId)}/`), async (r) => {
+    const res = await r.fetch(), d = await res.json();
+    d.execution = { ...(d.execution || {}), status: "Running" }; delete d.record;
+    r.fulfill({ response: res, json: d });
+  });
+  await ctx.route("**/api/live/*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames: [{ ...frame, here: false }] }) }));
+  await p.goto(BASE + "/#/run/" + [sub.workflowId, sub.runId].map(encodeURIComponent).join("/"));
+  await p.getByText("Take the wheel on the machine whose heedle runs this step").waitFor();
+  assert.equal(await p.getByRole("application").count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 // Roadmap 9.8: the card names the details act steps may use, and the
 // Connectors page keeps them under You, shown only here.
 test("the card names the details act steps may use, and You keeps them", async () => {

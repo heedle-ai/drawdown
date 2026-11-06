@@ -521,6 +521,7 @@ function ActWork({ act: a, part = "all" }) {
         <${Pill} cls=${a.blockedTotal || a.blockedUnknown ? "s-Failed" : "k-other"}>${a.blockedUnknown ? "blocked requests unknown" : `${a.blockedTotal} blocked`}<//>
         ${a.sendWithoutAsking ? html`<${Pill} cls="s-Failed">sent without asking<//>`
           : a.heldTotal > 0 && html`<${Pill} cls="k-other" plain>${a.heldTotal} send${a.heldTotal === 1 ? "" : "s"} held for you<//>`}
+        ${(a.sentByYou || []).length > 0 && html`<${Pill} cls="k-other" plain>${a.sentByYou.length} sent by you<//>`}
         <${Pill} cls="k-container" mono>image ${a.image.replace(/^sha256:/, "").slice(0, 12)}<//>
         ${a.replay && html`<${ReplayPill} replay=${a.replay} />`}
       </div>
@@ -538,6 +539,7 @@ function ActWork({ act: a, part = "all" }) {
         </li>`)}</ol>`}
       ${work && (a.script || []).length > 0 && html`<${ActScript} script=${a.script} />`}
       ${work && (a.held || []).length > 0 && html`<details><summary>Sends held until a person said so (${a.heldTotal})</summary><pre>${a.held.join("\n")}</pre></details>`}
+      ${work && (a.sentByYou || []).length > 0 && html`<details><summary>Sent by you, while you drove (${a.sentByYou.length})</summary><pre>${a.sentByYou.join("\n")}</pre></details>`}
       ${work && a.blocked.length > 0 && html`<details><summary>Blocked requests (${a.blockedTotal})</summary><pre>${a.blocked.join("\n")}</pre></details>`}
     </div>`;
 }
@@ -655,8 +657,9 @@ function LiveView({ workflow }) {
       ${waiting(f) && html`<${PendingForm} workflow=${workflow} form=${waiting(f)} onDone=${() => setDecided((d) => new Set(d).add(waiting(f).id))} />`}
       <div class="pills"><${StatusPill} status="Running" /> <${KindPill} kind=${f.kind === "act" ? "act" : "browse"}>${f.kind === "act" ? "Claude in a browser" : "live browser"}<//>
         <span class="mono">${f.url}</span>
-        <${Pill} cls="k-other" plain>attempt ${f.attempt}<//><span class="muted">view only, updates every few seconds</span></div>
-      ${f.image.startsWith("data:image/jpeg;base64,") && html`<img src=${f.image} alt=${"Live view of " + f.url} />`}
+        <${Pill} cls="k-other" plain>attempt ${f.attempt}<//><span class="muted">${DD.wheelOf(f) ? "waiting for you" : "view only, updates every few seconds"}</span></div>
+      ${DD.wheelOf(f) ? html`<${TakeTheWheel} wheel=${DD.wheelOf(f)} />`
+        : f.image.startsWith("data:image/jpeg;base64,") && html`<img src=${f.image} alt=${"Live view of " + f.url} />`}
     </div>`)}`;
 }
 
@@ -3209,4 +3212,61 @@ function ActScript({ script }) {
       <pre class="cmd-out">${DD.visible(st.input)}</pre>
     </li>`)}</ol>
   </details>`;
+}
+
+// === Take the wheel (roadmap 9.10) ==========================================
+
+// TakeTheWheel is an act step waiting for you: Claude's reason, and, when
+// this UI runs the step's worker, the browser to drive. Clicks and keys go
+// to the step's browser only while it waits, and only from this machine;
+// what you type isn't kept anywhere, and fields you type into, and
+// password fields, are masked in every frame. Hand back gives Claude the
+// page as you left it.
+function TakeTheWheel({ wheel }) {
+  const [n, setN] = useState(0);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [handed, setHanded] = useState(false);
+  useEffect(() => {
+    if (!wheel.here || handed) return;
+    const t = setInterval(() => setN((x) => x + 1), 700);
+    return () => clearInterval(t);
+  }, [wheel.id, wheel.here, handed]);
+  const send = async (input) => {
+    const r = await api(`/api/wheel/${wheel.id}/input`, input);
+    if (!r.ok) setError((r.data && r.data.error) || "The browser didn't take it.");
+    else { setError(""); setN((x) => x + 1); }
+  };
+  const click = (e) => {
+    const p = DD.wheelPoint(e.nativeEvent.offsetX, e.nativeEvent.offsetY, e.currentTarget.clientWidth, e.currentTarget.clientHeight, wheel.viewport);
+    if (p) send(p);
+  };
+  // Every key in the view is the step's browser's, sent or not: none acts
+  // on this page (a shortcut would select or scroll it).
+  const key = (e) => {
+    e.preventDefault();
+    const k = DD.wheelKey(e);
+    if (k !== null) send({ key: k });
+  };
+  const handBack = async () => {
+    setBusy(true);
+    const r = await api(`/api/wheel/${wheel.id}/handback`, {});
+    setBusy(false);
+    if (r.ok || r.status === 409) setHanded(true);
+    else setError((r.data && r.data.error) || String(r.data));
+  };
+  return html`
+    <div class="take-wheel" role="group" aria-label="heedle needs you">
+      <p><strong>heedle needs you.</strong> Claude says: <q>${wheel.reason}</q></p>
+      ${!wheel.here ? html`<p class="muted">Take the wheel on the machine whose heedle runs this step: its browser can only be driven from there.</p>`
+        : handed ? html`<p class="muted">Handed back: Claude carries on from this page.</p>`
+        : html`
+        <p class="muted">Click and type in the page below: it's this step's browser, paused for you. What you type isn't kept anywhere, and the fields you type into are masked here. What you send yourself goes through, as sent by you. Hand back when you're done.</p>
+        <div class="wheel-view" tabIndex="0" role="application" aria-label=${"The step's browser, on " + wheel.url} onKeyDown=${key}>
+          <img src=${`/api/wheel/${wheel.id}/frame?n=${n}`} alt=${"The page on " + wheel.url} onClick=${click} draggable="false" />
+        </div>
+        <div class="cmd-line"><span class="mono muted">${wheel.url}</span>
+          <span style=${{ marginLeft: "auto" }}><button class="primary" disabled=${busy} onClick=${handBack}>${busy ? "Handing back…" : "Hand back"}</button></span></div>`}
+      ${error && html`<p class="error">${error}</p>`}
+    </div>`;
 }
