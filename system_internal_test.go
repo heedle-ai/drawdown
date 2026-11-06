@@ -207,7 +207,7 @@ func TestInv_EveryStepIsLabelledHere(t *testing.T) {
 			t.Errorf("app.go: %s registers with %s, not steps", m[0], m[1])
 		}
 	}
-	if !strings.Contains(string(src), "steps := loom.Labelled(w)") {
+	if !strings.Contains(string(src), "steps := loom.Counted(loom.Labelled(w), s)") {
 		t.Error("app.go doesn't make steps with loom.Labelled")
 	}
 	if !strings.Contains(string(src), `Pins: kept(*keepImages), Kept: kept("", *browserImage, *agentImage, *browserAgentImage)`) {

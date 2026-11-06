@@ -860,8 +860,13 @@ test("costs show a dollar figure only where every step had a price", () => {
 
   const costs = { zone: "Europe/Lisbon", asOf: "2026-11-05", source: "https://platform.claude.com/docs/en/about-claude/pricing",
     months: [{ month: "2026-11", ...sp(null, 0.12, [none]), byModel: [{ model: "claude-sonnet-5-5", ...sp(0.12, 0.12) }, { model: "claude-mythos-5-1", ...sp(null, 0, [none]) }] }],
-    runs: [{ workflowId: "loom-a", runId: "r1", at: "2026-11-05T09:00:00Z", ...sp(null, 0.12, [none]) }], schedules: [{ name: "news", ...sp(0.03, 0.03) }] };
+    runs: [{ workflowId: "loom-a", runId: "r1", at: "2026-11-05T09:00:00Z", ...sp(null, 0.12, [none]) }], schedules: [{ name: "news", ...sp(0.03, 0.03) }],
+    kinds: DD.COST_KINDS.map((kind) => ({ kind, calls: 2, ...sp(0.001, 0.001) })) };
   assert.ok(DD.asCosts(costs));
+  // The calls no record holds (roadmap 10.4.1): kinds the page knows, each spent.
+  for (const bad of [{ ...costs, kinds: undefined }, { ...costs, kinds: [{ kind: "other", calls: 1, ...sp(1, 1) }] }, { ...costs, kinds: [{ kind: "retries", calls: "2", ...sp(1, 1) }] }]) {
+    assert.equal(DD.asCosts(bad), null, JSON.stringify(bad).slice(0, 120));
+  }
   for (const bad of [{ ...costs, months: [{ ...costs.months[0], usd: "0.12" }] }, { ...costs, runs: [{ ...costs.runs[0], runId: "a b" }] },
     { ...costs, schedules: [{ name: "Bad Name", ...sp(1, 1) }] }, { ...costs, asOf: undefined }, { ...costs, months: [{ ...costs.months[0], unpriced: [{ node: "n" }] }] }]) {
     assert.equal(DD.asCosts(bad), null, JSON.stringify(bad).slice(0, 120));

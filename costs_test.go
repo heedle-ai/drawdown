@@ -392,3 +392,106 @@ func TestInv_CostsPageCountsReplays(t *testing.T) {
 		t.Errorf("November: %+v", nov)
 	}
 }
+
+// ledger writes entries into the world's store's usage ledger, as loom's
+// worker does (roadmap 10.4.1).
+func (w *world) ledger(es ...loom.LedgerEntry) {
+	w.t.Helper()
+	for _, e := range es {
+		if err := loom.WriteLedger(context.Background(), w.store, e); err != nil {
+			w.t.Fatal(err)
+		}
+	}
+}
+
+// call100 is a call of 100 input and 10 output tokens.
+var call100 = []pirn.Call{{Model: "claude-sonnet-5-5", Input: 100, Output: 10}}
+
+// TestInv_CostsPageCountsEveryCall: the Costs page counts what records
+// hold plus the calls the usage ledger holds that no record does, once
+// each: this month's front-door asks, retried attempts and failed runs
+// each have a row, are in the month's total and its models, and in their
+// schedule's spend; a successful attempt a record holds is the record's
+// alone (DRAW-320, roadmap 10.4.1).
+func TestInv_CostsPageCountsEveryCall(t *testing.T) {
+	w := newWorld(t)
+	at := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	news := pirn.Answer{Pirn: 1, Model: "claude-sonnet-5-5", InputTokens: 10000, OutputTokens: 1000}
+	wf, _ := w.claudeRun(`(ask "the news")`, map[string]any{"n0": news}, at, "news")
+	out, _ := json.Marshal(news)
+	id, _ := warp.HashBlob(context.Background(), out)
+	w.ledger(
+		loom.LedgerEntry{Kind: loom.LedgerFrontDoor, At: at, Workflow: "ask-1", Run: "a", Activity: "1", Calls: call100},
+		loom.LedgerEntry{Kind: loom.LedgerRun, At: at, Workflow: wf, Run: "r", Schedule: "news"},
+		// news's run: a failed attempt, then the one its record holds.
+		loom.LedgerEntry{Kind: loom.LedgerAttempt, At: at, Workflow: wf + "/plan", Run: "p", Activity: "1", Node: "n0", Step: "ask", Attempt: 1, Failed: true, Calls: call100},
+		loom.LedgerEntry{Kind: loom.LedgerAttempt, At: at, Workflow: wf + "/plan", Run: "p", Activity: "1", Node: "n0", Step: "ask", Attempt: 2, Output: id,
+			Calls: []pirn.Call{{Model: "claude-sonnet-5-5", Input: 10000, Output: 1000}}},
+		// A run that failed: never recorded.
+		loom.LedgerEntry{Kind: loom.LedgerAttempt, At: at, Workflow: "loom-gone/plan", Run: "p", Activity: "1", Node: "n0", Step: "agent", Attempt: 1, Failed: true, Calls: call100},
+	)
+	code, m, raw := w.call("GET", "/api/costs?month=2026-11&tz=UTC", nil)
+	if code != 200 {
+		t.Fatalf("%d %s", code, raw)
+	}
+	var v struct {
+		Months []struct {
+			Runs   int
+			Tokens loom.Tokens
+		}
+		Kinds []struct {
+			Kind   string
+			Calls  int
+			Runs   int
+			Tokens loom.Tokens
+			USD    *float64
+		}
+		Schedules []struct {
+			Name   string
+			Tokens loom.Tokens
+		}
+	}
+	b, _ := json.Marshal(m)
+	json.Unmarshal(b, &v)
+	if nov := v.Months[0]; nov.Runs != 1 || nov.Tokens != (loom.Tokens{Input: 10300, Output: 1030}) {
+		t.Errorf("November: %+v", nov)
+	}
+	want := []string{"front door 1 1 {100 10}", "retries 1 1 {100 10}", "failed runs 1 1 {100 10}"}
+	if len(v.Kinds) != 3 {
+		t.Fatalf("kinds %s", raw)
+	}
+	for i, k := range v.Kinds {
+		if got := fmt.Sprint(k.Kind, " ", k.Calls, " ", k.Runs, " ", k.Tokens); got != want[i] || k.USD == nil {
+			t.Errorf("kind %d: %s, want %s", i, got, want[i])
+		}
+	}
+	if len(v.Schedules) != 1 || v.Schedules[0].Tokens != (loom.Tokens{Input: 10100, Output: 1010}) {
+		t.Errorf("schedules %+v", v.Schedules)
+	}
+}
+
+// TestInv_ScheduleSpendCountsEveryCall: a schedule's month to date and
+// last 30 days, on the Schedules page, count its runs' calls no record
+// holds too, as its budget does (DRAW-321, roadmap 10.4.1).
+func TestInv_ScheduleSpendCountsEveryCall(t *testing.T) {
+	w := newWorld(t)
+	if code, _, raw := w.call("POST", "/api/schedules", map[string]string{"name": "news", "program": `(echo "a")`, "every": "1h"}); code != 201 {
+		t.Fatalf("%d %s", code, raw)
+	}
+	at := time.Now().UTC().Add(-time.Minute)
+	w.ledger(loom.LedgerEntry{Kind: loom.LedgerRun, At: at, Workflow: "loom-failed", Run: "r", Schedule: "news"},
+		loom.LedgerEntry{Kind: loom.LedgerAttempt, At: at, Workflow: "loom-failed/plan", Run: "p", Activity: "1", Node: "n0", Step: "ask", Attempt: 1, Failed: true,
+			Calls: []pirn.Call{{Model: "claude-sonnet-5-5", Input: 10000, Output: 1000}}})
+	_, m, raw := w.call("GET", "/api/schedules", nil)
+	var v struct {
+		Spend map[string]map[string]struct {
+			Tokens loom.Tokens
+			USD    *float64
+		}
+	}
+	b, _ := json.Marshal(m)
+	json.Unmarshal(b, &v)
+	if s := v.Spend["news"]["last30"]; s.Tokens != (loom.Tokens{Input: 10000, Output: 1000}) || s.USD == nil || *s.USD < 0.03-1e-9 {
+		t.Errorf("spend %s", raw)
+	}
+}

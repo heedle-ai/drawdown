@@ -629,6 +629,11 @@ test("the Costs page shows this month by model, with the price table's date", as
     assert.match(h3, new RegExp(`^${month}: \\$\\d+\\.\\d\\d est\\.$`), h3);
     const models = await p.locator(".panel.costs").first().locator("tbody td:first-child").allTextContents();
     assert.deepEqual(models, ["claude-sonnet-5-5"]);
+    // Roadmap 10.4.1: the calls no record holds, by kind, in the total.
+    const kinds = await p.locator(".panel.costs.extras tbody td:first-child").allTextContents();
+    assert.deepEqual(kinds, ["Front door", "Retries", "Failed runs"]);
+    const requests = await p.locator(".panel.costs.extras tbody td:nth-child(2)").allTextContents();
+    assert.deepEqual(requests, ["2", "1", "1"]);
     assert.match(await p.locator("h2 + .lede").textContent(), /prices as of 2026-11-05/);
     assert.equal(await p.locator("a[aria-current=page]").first().textContent(), "Costs");
     const over = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

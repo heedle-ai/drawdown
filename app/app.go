@@ -114,7 +114,9 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		w := worker.New(c, *queue, reed.WorkerOptions(worker.Options{BackgroundActivityContext: loom.WorkerContext(*store)}))
 		// Every step's containers are labelled with its run and step
 		// (roadmap 9.2, DRAW-505).
-		steps := loom.Labelled(w)
+		// and every attempt of a Claude step is counted in the usage
+		// ledger (roadmap 10.4.1, DRAW-320).
+		steps := loom.Counted(loom.Labelled(w), s)
 		if err := reed.Register(reg, steps, browser); err != nil {
 			return err
 		}
@@ -182,7 +184,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		// worker's key, told about its commands and the store's newest
 		// skills; a proposal says whether it can run now, from this worker's
 		// skills, connectors and keys.
-		writer := loom.Writer{Asker: claude, Commands: func(ctx context.Context) (*registry.Registry, []loom.Command, error) {
+		writer := loom.Writer{Asker: claude, Ledger: s, Commands: func(ctx context.Context) (*registry.Registry, []loom.Command, error) {
 			reg := commands()
 			if _, err := lib.AddTo(ctx, reg); err != nil {
 				return nil, nil, err

@@ -2990,6 +2990,9 @@ function ProposalCost({ usage }) {
   return html`<p class="muted proposal-cost">Proposing this used ${models.map((m, i) => html`${i ? "; " : ""}${DD.count(by[m].input)} input and ${DD.count(by[m].output)} output tokens of <span class="mono">${m}</span>`)}.</p>`;
 }
 
+// KIND_LABELS name the kinds of call the usage ledger adds (roadmap 10.4.1).
+const KIND_LABELS = { "front door": "Front door", "retries": "Retries", "failed runs": "Failed runs" };
+
 const monthName = (m) => new Date(m + "-01T12:00:00Z").toLocaleString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
 
 function CostsPage() {
@@ -3002,7 +3005,7 @@ function CostsPage() {
   const [now, ...before] = v.months;
   return html`
     <h2>Costs</h2>
-    <p class="lede">What runs used of Claude, as their records say, by month in ${v.zone}. ${priceNote(v.asOf, v.source, v.yours)} A model with no price shows its tokens only. Front-door proposals aren't recorded, so they aren't here: each card says what it used.</p>
+    <p class="lede">Every call to Claude, by month in ${v.zone}: what runs' records say, and from the usage ledger what no record holds (the front door's asks, attempts that failed and were tried again, runs that failed). ${priceNote(v.asOf, v.source, v.yours)} A model with no price shows its tokens only.</p>
     ${v.pricesError && html`<p class="error">${v.pricesError}</p>`}
     <div class="panel costs">
       <h3 style=${{ marginTop: 0 }}>${monthName(now.month)}: ${DD.estimate(now)}</h3>
@@ -3014,6 +3017,16 @@ function CostsPage() {
           <td class="num">${DD.count(m.tokens.input)}</td><td class="num">${DD.count(m.tokens.output)}</td><td class="num">${m.model ? DD.estimate(m) : "–"}</td></tr>`)}</tbody>
       </table>`}
       ${now.replayed > 0 && html`<p class="muted replayed-note">${now.replayed} act step${now.replayed === 1 ? "" : "s"} replayed an earlier run without asking Claude: no tokens, so ${now.replayed === 1 ? "it isn't" : "they aren't"} counted by model.</p>`}
+    </div>
+    <h3>Calls no record holds</h3>
+    <div class="panel costs extras">
+      <table class="list costs">
+        <thead><tr><th>Calls</th><th class="num">Requests</th><th class="num">Input</th><th class="num">Output</th><th class="num">Estimate</th></tr></thead>
+        <tbody>${v.kinds.map((k) => html`<tr key=${k.kind}>
+          <td>${KIND_LABELS[k.kind]}</td><td class="num">${DD.count(k.calls)}</td>
+          <td class="num">${DD.count(k.tokens.input)}</td><td class="num">${DD.count(k.tokens.output)}</td><td class="num">${k.calls ? DD.estimate(k) : "–"}</td></tr>`)}</tbody>
+      </table>
+      <p class="muted">Front door: proposing what to do. Retries: attempts that failed and were tried again. Failed runs: calls of runs with no record. All are in the month's total above; a run's own page shows only what its record holds.</p>
     </div>
     <h3>The six months before</h3>
     <div class="panel costs">

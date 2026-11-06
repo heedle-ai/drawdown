@@ -15,8 +15,10 @@ import (
 )
 
 // Costs (roadmap 10.4): what runs used of Claude, as their records say
-// (loom.UsageOf), and estimates in dollars (loom.Cost) with the worker's
-// prices. Nothing here asks Anthropic, and a step with no price gets no
+// (loom.UsageOf), plus every call no record holds, from loom's usage
+// ledger (loom.ExtrasBetween: front-door asks, retried attempts, failed
+// runs; roadmap 10.4.1), and estimates in dollars (loom.Cost) with the
+// worker's prices. Nothing here asks Anthropic, and a step with no price gets no
 // dollar figure: a cost is null, never 0, unless every step was priced.
 
 // Budgeter sets a schedule's monthly budget (loom.SetBudget):
@@ -105,6 +107,11 @@ func (s *Server) costs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
 		return
 	}
+	extras, err := loom.ExtrasBetween(ctx, s.Store, first, end, runs, "")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
+		return
+	}
 	prices, perr := loom.ReadPrices(s.PricesFile)
 
 	type model struct {
@@ -129,6 +136,14 @@ func (s *Server) costs(w http.ResponseWriter, r *http.Request) {
 	}
 	type scheduleCost struct {
 		Name string `json:"name"`
+		spent
+	}
+	// kindCost is this month's calls of one kind no record holds: Runs
+	// is how many runs (or front-door requests) made them, Calls how
+	// many calls.
+	type kindCost struct {
+		Kind  string `json:"kind"`
+		Calls int    `json:"calls"`
 		spent
 	}
 	months := make([]month, CostMonths)
@@ -173,6 +188,39 @@ func (s *Server) costs(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// The ledger's calls: in their month's totals and models (not as
+	// runs), this month's by kind, and in their schedule's spend.
+	kinds := map[string]loom.Usage{}
+	kindRuns := map[string]map[string]bool{}
+	for _, x := range extras {
+		i := monthsBetween(x.At.In(loc), start)
+		if i < 0 || i >= CostMonths {
+			continue
+		}
+		usages[i] = usages[i].Add(x.Usage)
+		for _, st := range x.Usage.Steps {
+			byModel[i][st.Model] = byModel[i][st.Model].Add(loom.Usage{Steps: []loom.StepUsage{st}})
+		}
+		if i == 0 {
+			kinds[x.Kind] = kinds[x.Kind].Add(x.Usage)
+			if kindRuns[x.Kind] == nil {
+				kindRuns[x.Kind] = map[string]bool{}
+			}
+			kindRuns[x.Kind][x.Workflow] = true
+			if x.Schedule != "" {
+				scheduled[x.Schedule] = scheduled[x.Schedule].Add(x.Usage)
+			}
+		}
+	}
+	byKind := []kindCost{}
+	for _, k := range []string{loom.ExtraFrontDoor, loom.ExtraRetry, loom.ExtraFailedRun} {
+		u := kinds[k]
+		calls := 0
+		for _, st := range u.Steps {
+			calls += st.Requests
+		}
+		byKind = append(byKind, kindCost{Kind: k, Calls: calls, spent: spentOf(len(kindRuns[k]), u, prices)})
+	}
 	for i := range months {
 		months[i].spent = spentOf(counts[i], usages[i], prices)
 		months[i].ByModel = []model{}
@@ -204,7 +252,7 @@ func (s *Server) costs(w http.ResponseWriter, r *http.Request) {
 	if yours == nil {
 		yours = []string{}
 	}
-	resp := map[string]any{"zone": loc.String(), "months": months, "runs": thisMonth, "schedules": schedules,
+	resp := map[string]any{"zone": loc.String(), "months": months, "runs": thisMonth, "schedules": schedules, "kinds": byKind,
 		"asOf": prices.AsOf, "source": prices.Source, "yours": yours}
 	if perr != nil {
 		resp["pricesError"] = perr.Error()
@@ -258,6 +306,8 @@ func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time
 	}
 	sums := map[string]*acc{}
 	var problems []string
+	var all []loom.RunUsage
+	earliest := now
 	for ref, names := range byRef {
 		// A schedule on a ref that can't be read gets no spend, never $0.
 		runs, err := loom.RunsBetween(ctx, s.Store, ref, from[ref], now.Add(time.Minute), names...)
@@ -274,6 +324,10 @@ func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time
 		for _, n := range names {
 			sums[n] = &acc{}
 		}
+		all = append(all, runs...)
+		if from[ref].Before(earliest) {
+			earliest = from[ref]
+		}
 		for _, run := range runs {
 			if !mine[run.Schedule] {
 				continue
@@ -284,6 +338,27 @@ func (s *Server) scheduleSpend(ctx context.Context, ss []loom.Schedule, now time
 			}
 			if !run.At.Before(w.last30) {
 				a.last30, a.nLast30 = a.last30.Add(run.Usage), a.nLast30+1
+			}
+		}
+	}
+	// And each schedule's calls no record holds, from the ledger (roadmap
+	// 10.4.1), as its budget counts them.
+	if len(sums) > 0 {
+		extras, err := loom.ExtrasBetween(ctx, s.Store, earliest, now.Add(time.Minute), all, "")
+		if err != nil {
+			problems = append(problems, "the usage ledger: "+err.Error())
+		}
+		for _, x := range extras {
+			a, ok := sums[x.Schedule]
+			if !ok || x.Schedule == "" {
+				continue
+			}
+			w := windows[x.Schedule]
+			if !x.At.Before(w.month) {
+				a.month = a.month.Add(x.Usage)
+			}
+			if !x.At.Before(w.last30) {
+				a.last30 = a.last30.Add(x.Usage)
 			}
 		}
 	}

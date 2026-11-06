@@ -1217,13 +1217,18 @@ const DD = (() => {
     for (const [k, x] of Object.entries(v.spend)) if (x && isSpent(x.month) && isSpent(x.last30)) out[k] = x;
     return out;
   }
+  // COST_KINDS are the kinds of call the usage ledger adds to records
+  // (loom's ExtraFrontDoor, ExtraRetry, ExtraFailedRun), in the page's order.
+  const COST_KINDS = ["front door", "retries", "failed runs"];
   // asCosts is the Costs page's answer, if well formed; else null.
   function asCosts(v) {
     if (!v || typeof v !== "object" || !str(v.asOf) || !str(v.source) || !str(v.zone) || !opt(v.yours, strs) || !opt(v.pricesError, str)) return null;
     const months = objs(v.months, (m) => str(m.month) && /^\d{4}-\d{2}$/.test(m.month) && isSpent(m) && objs(m.byModel, (x) => str(x.model) && isSpent(x)) && opt(m.replayed, num));
     const runs = objs(v.runs, (r) => str(r.workflowId) && RUN_ID.test(r.workflowId) && str(r.runId) && RUN_ID.test(r.runId) && opt(r.schedule, str) && str(r.at) && isSpent(r));
     const scheds = objs(v.schedules, (s) => str(s.name) && /^[a-z0-9-]{1,40}$/.test(s.name) && isSpent(s));
-    return months && runs && scheds ? { ...v, yours: v.yours || [] } : null;
+    // The calls no record holds, by kind (roadmap 10.4.1).
+    const kinds = objs(v.kinds, (k) => COST_KINDS.includes(k.kind) && num(k.calls) && isSpent(k));
+    return months && runs && scheds && kinds ? { ...v, yours: v.yours || [] } : null;
   }
   // usd is dollars to the cent, or "<$0.01" for less than half a cent.
   const usd = (x) => (x > 0 && x < 0.005 ? "<$0.01" : `$${x.toFixed(2)}`);
@@ -1270,6 +1275,6 @@ const DD = (() => {
     return `https://github.com/${m[1]}/${m[2]}/tree/${b}/skills/${name}`;
   }
 
-  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, actEndingOf, replayedAll, replayWords, locatorText, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand };
+  return { asMemory, usedMemory, asSystem, runOf, stoppable, oldImages, SECTIONS, PAGES, page, skillsWaiting, keysToSet, schedulesStopped, asAnswer, asAgent, asAct, actEnding, actEndingOf, replayedAll, replayWords, locatorText, strsOf, pendingForm, PROFILE, usesOf, usesWords, asPage, asFiles, fileSummary, size, fetchCommand, skillOf, asSkill, sourceLink, visible, asWrites, MAX_UPLOAD, base64, readFolder, parse, preview, decisions, ancestors, dur, span, tokens, replaced, dayKey, byDay, monthGrid, onDay, contrast, readable, mix, tint, asCatalog, request, catalogNotes, asShape, stepsOf, layered, composition, groupKeys, flowsInto, tally, asConnectors, keysMissing, asRegistryPage, freeName, tokenName, signInURL, asSchedules, when, connectorProblem, skillConnectors, stoppedBy, asProposal, asReadiness, readyLines, goDuration, earlierTurns, localDay, restoreConversation, program, unquote, grantOf, links, lines, FOLD_AT, FOLD_SHOW, tokenClass, forgetInConversation, notNow, asStepUsages, asBudget, asRunUsage, asSpend, asCosts, usd, estimate, count, BUDGET_PAUSE, shellWord, publishCommand, shareLink, pushCommand, COST_KINDS };
 })();
 if (typeof module !== "undefined") module.exports = DD;
