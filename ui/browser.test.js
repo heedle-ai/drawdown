@@ -754,6 +754,7 @@ test("a run's live browsers show side by side", async () => {
   const frames = ["tiles", "food", "views", "weather"].map((h, i) => ({ activity: String(5 + i), kind: "browse", attempt: 1, url: `http://${h}.lisbon.example/`, image: jpeg }));
   frames.push({ ...frames[0], activity: "9", kind: "act", url: "https://forms.example.org/x",
     pending: { id: "beef", node: "n5", summary: "Sends the form.", url: "https://forms.example.org/x" } });
+  let polls = 0;
   for (const width of [1600, 375]) {
     const { p, ctx, errors } = await page({ width });
     await ctx.route(new RegExp(`/api/runs/${encodeURIComponent(sub.workflowId)}/`), async (r) => {
@@ -761,9 +762,14 @@ test("a run's live browsers show side by side", async () => {
       d.execution = { ...(d.execution || {}), status: "Running" }; delete d.record;
       r.fulfill({ response: res, json: d });
     });
-    await ctx.route("**/api/live/*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames }) }));
+    // Temporal lists them in any order; each poll here comes back shuffled.
+    await ctx.route("**/api/live/*", (r) => { polls++; r.fulfill({ contentType: "application/json", body: JSON.stringify({ frames: polls % 2 ? frames : frames.slice().reverse() }) }); });
     await p.goto(BASE + "/#/run/" + [sub.workflowId, sub.runId].map(encodeURIComponent).join("/"));
     await p.locator(".live img").nth(3).waitFor();
+    for (let i = 0; i < 2; i++) {
+      assert.deepEqual(await p.locator(".lives > .panel.live > .pills > .mono").allTextContents(), frames.map((f) => f.url), "the browsers moved");
+      await p.waitForTimeout(2200);
+    }
     const boxes = await p.locator(".lives > .panel.live").evaluateAll((els) => els.map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width)]; }));
     assert.equal(boxes.length, 5);
     if (width === 1600) {

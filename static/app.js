@@ -654,7 +654,9 @@ function LiveView({ workflow }) {
   if (!data || !data.frames || data.frames.length === 0) return null;
   // Side by side, as the steps run: a step waiting for you takes the
   // whole row, to be read and driven.
-  return html`<div class="lives">${data.frames.map((f) => html`
+  // In step order, so each browser keeps its place as the frames refresh.
+  const frames = data.frames.slice().sort((a, b) => Number(a.activity) - Number(b.activity) || String(a.activity).localeCompare(String(b.activity)));
+  return html`<div class="lives">${frames.map((f) => html`
     <div class=${"panel live" + (waiting(f) || DD.wheelOf(f) ? " wide" : "")} key=${f.activity}>
       ${waiting(f) && html`<${PendingForm} workflow=${workflow} form=${waiting(f)} onDone=${() => setDecided((d) => new Set(d).add(waiting(f).id))} />`}
       <div class="pills"><${StatusPill} status="Running" /> <${KindPill} kind=${f.kind === "act" ? "act" : "browse"}>${f.kind === "act" ? "Claude in a browser" : "live browser"}<//>
